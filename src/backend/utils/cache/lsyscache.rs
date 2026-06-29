@@ -14,14 +14,6 @@
 //!    context (executor, tests).
 
 #![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the catalog caches are PER-BACKEND task-confined state (raw HeapTuple/FmgrInfo pointers); their populate futures never migrate threads mid-await. await_holding_lock/refcell are clean (enforced)."
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "catalog-cache routines take raw Relation/HeapTuple pointers per the C API; the deref is faithful to C (callers pass live handles)"
-)]
-#![allow(
     clippy::cast_ptr_alignment,
     reason = "faithful GETSTRUCT reinterpretation of a heap tuple to a Form_* struct (MAXALIGN'd body covers the Form alignment)"
 )]
@@ -180,15 +172,7 @@ fn builtin_typlenbyvalalign(typid: Oid) -> Option<(i16, bool, u8)> {
 #[must_use]
 pub fn get_rel_name(relid: Oid) -> Option<String> {
     let rel = crate::utils::relcache::RelationIdGetRelation(relid)?;
-    // SAFETY: cached relation with a valid rd_rel.
-    let name = unsafe {
-        let form = (*rel).rd_rel;
-        if form.is_null() {
-            None
-        } else {
-            Some(name_to_string(&(*form).relname))
-        }
-    };
+    let name = rel.rd_rel.as_deref().map(|form| name_to_string(&form.relname));
     crate::utils::relcache::RelationClose(rel);
     name
 }
@@ -199,15 +183,8 @@ pub fn get_rel_namespace(relid: Oid) -> Oid {
     crate::utils::relcache::RelationIdGetRelation(relid).map_or(
         crate::postgres_ext::InvalidOid,
         |rel| {
-            // SAFETY: cached relation.
-            let ns = unsafe {
-                let form = (*rel).rd_rel;
-                if form.is_null() {
-                    crate::postgres_ext::InvalidOid
-                } else {
-                    (*form).relnamespace
-                }
-            };
+            let ns = rel.rd_rel.as_deref()
+                .map_or(crate::postgres_ext::InvalidOid, |form| form.relnamespace);
             crate::utils::relcache::RelationClose(rel);
             ns
         },

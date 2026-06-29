@@ -15,7 +15,8 @@ use crate::postgres_ext::Oid;
 use crate::storage::block::BlockNumber;
 use crate::storage::bufpage::{Page, PageXLogRecPtr};
 use crate::storage::off::OffsetNumber;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // amproc indexes for GiST indexes.
 pub const GIST_CONSISTENT_PROC: i32 = 1;
@@ -83,10 +84,13 @@ pub struct GIST_SPLITVEC {
     pub rdatum_exists: bool,       // true if rdatum already exists
 }
 
-/// An entry on a GiST node: key plus its own location (rel,page,offset).
+/// An entry on a GiST node: key plus its own location (rel,page,offset). GiST is
+/// a deferred (unimplemented) AM; `rel` stays an owned `Arc` here rather than a
+/// borrow to avoid a lifetime cascade through `GistEntryVector` and the picksplit
+/// stubs. A later GiST-implementation pass picks the borrow form.
 pub struct GISTENTRY {
     pub key: Datum,
-    pub rel: Relation,
+    pub rel: Arc<RelationData>,
     pub page: *mut u8, // Page; TODO(ptr)
     pub offset: OffsetNumber,
     pub leafkey: bool,
@@ -118,7 +122,7 @@ pub struct GistEntryVector {
 pub fn gistentryinit(
     e: &mut GISTENTRY,
     k: Datum,
-    r: Relation,
+    r: Arc<RelationData>,
     pg: *mut u8,
     o: OffsetNumber,
     l: bool,

@@ -64,10 +64,6 @@ const MAX_STARTUP_PACKET_LENGTH: usize = 10000;
 /// - `identity`: the supervisor's child-registry key (opaque; logging only).
 /// - `cancel`: the supervisor's per-child termination Notify (PG's SIGTERM
 ///   target). The command loop selects on it to raise ProcDie on shutdown.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the connect-to-database pipeline holds task-confined !Send state (raw Relation handles, the DestReceiver, TupleTableSlot value arrays) across awaits. The backend runs on its OWN dedicated current-thread runtime (one thread per backend, postmaster.rs run_backend_confined), so the future is never sent across threads."
-)]
 pub async fn backend_main(
     mut stream: TcpStream,
     peer: SocketAddr,
@@ -112,16 +108,20 @@ pub async fn backend_main(
     // Backend top-level resource owner (step 06).
     let owner = ResourceOwner::create(None, "backend");
 
-    // Nest the three task-local scopes so Session/proc-signal/resource-owner
+    // Nest the task-local scopes so Session/proc-signal/resource-owner/LOCALLOCK
     // `current()` all resolve inside PostgresMain. PostgresMain itself establishes
     // the connect-to-database scope stack (InitPostgres) and owns the backend's
     // top-level resource owner; this resource-owner scope is the bootstrap one for
-    // the startup slice.
+    // the startup slice. The LOCALLOCK table is needed because a shutdown interrupt
+    // runs `LockErrorCleanup` (-> AbortStrongLockAcquire) during `process_interrupts`.
     session::scope(
         session,
         procsignal::scope(
             slot.clone(),
-            resowner::scope(owner, run_backend(stream, shared.clone(), startup, slot, cancel)),
+            crate::storage::lock::local_lock_scope(resowner::scope(
+                owner,
+                run_backend(stream, shared.clone(), startup, slot, cancel),
+            )),
         ),
     )
     .await;
@@ -133,10 +133,6 @@ pub async fn backend_main(
 /// Run `PostgresMain` racing the supervisor's `cancel` Notify and the slot latch.
 /// When `cancel` fires (shutdown), raise ProcDie on the slot and ring the latch
 /// so the next `CHECK_FOR_INTERRUPTS` in `PostgresMain` terminates the backend.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: drives the !Send connect-to-database pipeline; the backend runs on its own dedicated current-thread runtime (postmaster run_backend_confined)."
-)]
 async fn run_backend(
     stream: TcpStream,
     shared: Arc<SharedState>,

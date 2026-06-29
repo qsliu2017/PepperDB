@@ -22,9 +22,9 @@ use crate::tcop::dest::DestReceiver;
 use crate::utils::plancache::CachedPlan;
 use crate::utils::portal::Portal;
 use crate::utils::queryenvironment::EphemeralNamedRelation;
-use crate::utils::rel::Relation;
 use crate::utils::resowner::ResourceOwner;
 use crate::utils::snapshot::Snapshot;
+use crate::utils::rel::RelationData;
 
 /// Result table returned by SPI queries. `vals`/`numvals` are the public part;
 /// the rest is internal bookkeeping (the slist link collapses under the owned
@@ -267,7 +267,7 @@ pub fn SPI_returntuple(_tuple: HeapTuple, _tupdesc: TupleDesc) -> Option<*mut He
     unimplemented!()
 }
 pub fn SPI_modifytuple(
-    _rel: Relation,
+    _rel: &RelationData,
     _tuple: HeapTuple,
     _attnum: &[i32],
     _values: &[Datum],
@@ -295,10 +295,10 @@ pub fn SPI_gettype(_tupdesc: TupleDesc, _fnumber: i32) -> Option<String> {
 pub fn SPI_gettypeid(_tupdesc: TupleDesc, _fnumber: i32) -> Option<Oid> {
     unimplemented!()
 }
-pub fn SPI_getrelname(_rel: Relation) -> Option<String> {
+pub fn SPI_getrelname(_rel: &RelationData) -> Option<String> {
     unimplemented!()
 }
-pub fn SPI_getnspname(_rel: Relation) -> Option<String> {
+pub fn SPI_getnspname(_rel: &RelationData) -> Option<String> {
     unimplemented!()
 }
 

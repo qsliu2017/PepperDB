@@ -7,7 +7,7 @@ use crate::nodes::plannodes::BitmapAnd;
 // TODO(ptr)
 pub fn ExecInitBitmapAnd(
     _node: &BitmapAnd,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut BitmapAndState {
     unimplemented!()

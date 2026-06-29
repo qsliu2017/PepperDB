@@ -12,37 +12,37 @@ use crate::nodes::primnodes::RangeVar;
 use crate::postgres_ext::Oid;
 use crate::storage::lockdefs::LockMode;
 use crate::utils::elog::ERROR;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// `table_open`: open a table (or other non-index relation) by OID, taking
 /// `lockmode`. Errors if the relation is an index (use `index_open`).
-pub async fn table_open(relation_id: Oid, lockmode: LockMode) -> Relation {
+pub async fn table_open(relation_id: Oid, lockmode: LockMode) -> Arc<RelationData> {
     let r = relation_open(relation_id, lockmode).await;
-    validate_relation_kind(r);
+    validate_relation_kind(&r);
     r
 }
 
 /// `table_openrv`: open a table by `RangeVar`, taking `lockmode`.
-pub async fn table_openrv(relation: &RangeVar, lockmode: LockMode) -> Relation {
+pub async fn table_openrv(relation: &RangeVar, lockmode: LockMode) -> Arc<RelationData> {
     let r = relation_openrv(relation, lockmode).await;
-    validate_relation_kind(r);
+    validate_relation_kind(&r);
     r
 }
 
 /// `table_close`: close a relation, releasing `lockmode` unless `NoLock`.
-pub fn table_close(relation: Relation, lockmode: LockMode) {
+pub fn table_close(relation: Arc<RelationData>, lockmode: LockMode) {
     relation_close(relation, lockmode);
 }
 
 /// `validate_relation_kind`: reject an index opened as a table (the C check in
 /// table_open / table_openrv).
-fn validate_relation_kind(r: Relation) {
-    // SAFETY: `r` is a live, open relation returned by relation_open*.
-    let relkind = unsafe { (*(*r).rd_rel).relkind };
+fn validate_relation_kind(r: &Arc<RelationData>) {
+    let relkind = r.form().relkind;
     if relkind == RELKIND_INDEX {
         crate::ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
             e.errcode(crate::utils::errcodes::ERRCODE_WRONG_OBJECT_TYPE)
-                .errmsg(format!("\"{}\" is an index", crate::utils::rel::relation_get_relation_name(unsafe { &*r })));
+                .errmsg(format!("\"{}\" is an index", crate::utils::rel::relation_get_relation_name(r)));
         });
     }
 }

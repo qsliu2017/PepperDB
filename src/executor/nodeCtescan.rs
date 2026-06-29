@@ -4,7 +4,7 @@ use crate::nodes::execnodes::{CteScanState, EState};
 use crate::nodes::plannodes::CteScan;
 
 // TODO(ptr)
-pub fn ExecInitCteScan(_node: &CteScan, _estate: &mut EState, _eflags: i32) -> *mut CteScanState {
+pub fn ExecInitCteScan(_node: &CteScan, _estate: &mut EState<'_>, _eflags: i32) -> *mut CteScanState {
     unimplemented!()
 }
 

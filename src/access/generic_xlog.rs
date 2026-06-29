@@ -9,7 +9,7 @@ use crate::lib::stringinfo::StringInfo;
 use crate::storage::block::BlockNumber;
 use crate::storage::buf::Buffer;
 use crate::storage::bufpage::Page;
-use crate::utils::rel::Relation;
+use crate::utils::rel::RelationData;
 
 pub const MAX_GENERIC_XLOG_PAGES: i32 = XLR_NORMAL_MAX_BLOCK_ID;
 
@@ -28,7 +28,7 @@ pub struct GenericXLogState {
 }
 
 /* API for construction of generic xlog records */
-pub fn generic_xlog_start(_relation: Relation) -> *mut GenericXLogState {
+pub fn generic_xlog_start(_relation: &RelationData) -> *mut GenericXLogState {
     unimplemented!()
 }
 pub fn generic_xlog_register_buffer<'a>(

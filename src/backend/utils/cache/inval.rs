@@ -71,7 +71,8 @@ use crate::storage::sinval::{
     SHAREDINVALCATALOG_ID, SHAREDINVALRELCACHE_ID, SHAREDINVALRELMAP_ID, SHAREDINVALRELSYNC_ID,
     SHAREDINVALSMGR_ID, SHAREDINVALSNAPSHOT_ID,
 };
-use crate::utils::relcache::{AssertCouldGetRelation, Relation};
+use crate::utils::rel::RelationData;
+use crate::utils::relcache::AssertCouldGetRelation;
 
 // inval.h fn-pointer typedefs (kept by the header).
 use crate::utils::inval::{
@@ -1001,7 +1002,7 @@ pub fn command_end_invalidation_messages() {
 
 /// PG `CacheInvalidateHeapTupleCommon`: common logic for end-of-command + inplace.
 fn cache_invalidate_heap_tuple_common(
-    relation: Relation,
+    relation: &RelationData,
     tuple: HeapTuple,
     newtuple: HeapTuple,
     prepare: fn(&mut InvalState) -> Target,
@@ -1024,7 +1025,7 @@ fn cache_invalidate_heap_tuple_common(
     let target = INVAL_STATE.with(|cell| prepare(&mut cell.borrow_mut()));
 
     // First let the catcache do its thing.
-    let tuple_rel_id = unsafe { (*relation).rd_id };
+    let tuple_rel_id = relation.rd_id;
     if crate::utils::syscache::RelationInvalidatesSnapshotsOnly(tuple_rel_id) {
         let database_id = if IsSharedRelation(tuple_rel_id) {
             InvalidOid
@@ -1102,12 +1103,12 @@ fn cache_invalidate_heap_tuple_common(
 }
 
 /// PG `CacheInvalidateHeapTuple`.
-pub fn cache_invalidate_heap_tuple(relation: Relation, tuple: HeapTuple, newtuple: HeapTuple) {
+pub fn cache_invalidate_heap_tuple(relation: &RelationData, tuple: HeapTuple, newtuple: HeapTuple) {
     cache_invalidate_heap_tuple_common(relation, tuple, newtuple, prepare_invalidation_state);
 }
 
 /// PG `CacheInvalidateHeapTupleInplace`.
-pub fn cache_invalidate_heap_tuple_inplace(relation: Relation, key_equivalent_tuple: HeapTuple) {
+pub fn cache_invalidate_heap_tuple_inplace(relation: &RelationData, key_equivalent_tuple: HeapTuple) {
     cache_invalidate_heap_tuple_common(
         relation,
         key_equivalent_tuple,
@@ -1131,9 +1132,9 @@ pub fn cache_invalidate_catalog(catalog_id: Oid) {
 }
 
 /// PG `CacheInvalidateRelcache`.
-pub fn cache_invalidate_relcache(relation: Relation) {
-    let relation_id = unsafe { (*relation).rd_id };
-    let database_id = if unsafe { (*(*relation).rd_rel).relisshared } {
+pub fn cache_invalidate_relcache(relation: &RelationData) {
+    let relation_id = relation.rd_id;
+    let database_id = if relation.form().relisshared {
         InvalidOid
     } else {
         my_database_id()

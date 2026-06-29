@@ -11,7 +11,7 @@ use crate::storage::buf::Buffer;
 #[allow(deprecated)]
 use crate::storage::buf::BufferAccessStrategy;
 use crate::storage::smgr::SmgrRelation;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 bitflags! {
     /// ReadStream tuning flags. C `#define READ_STREAM_*`.
@@ -56,7 +56,7 @@ pub fn block_range_read_stream_cb(
 pub fn read_stream_begin_relation(
     _flags: ReadStreamFlags,
     _strategy: Option<BufferAccessStrategy>,
-    _rel: Relation,
+    _rel: &RelationData,
     _forknum: ForkNumber,
     _callback: Box<ReadStreamBlockNumberCb<'_>>,
     _per_buffer_data_size: usize,

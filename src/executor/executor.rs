@@ -27,7 +27,6 @@ use crate::nodes::nodes::{CmdType, Node, OnConflictAction};
 use crate::nodes::parsenodes::{RTEPermissionInfo, WCOKind};
 use crate::tcop::dest::DestReceiver;
 use crate::utils::memutils::MemoryContext;
-use crate::utils::rel::Relation;
 
 use crate::access::tupdesc::TupleDesc;
 use crate::access::tupconvert::TupleConversionMap;
@@ -41,6 +40,8 @@ use crate::nodes::execnodes::{
     TupleHashEntry, TupleHashTable,
 };
 use crate::utils::tuplestore::Tuplestorestate;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // ---------------------------------------------------------------------------
 // eflags - bitwise OR of these flags passed to ExecutorStart / ExecInitNode
@@ -69,11 +70,11 @@ bitflags! {
 // ---------------------------------------------------------------------------
 // Plugin hooks (function-pointer globals)
 // ---------------------------------------------------------------------------
-pub type ExecutorStart_hook_type = fn(query_desc: &mut QueryDesc, eflags: i32);
+pub type ExecutorStart_hook_type = fn(query_desc: &mut QueryDesc<'_>, eflags: i32);
 pub type ExecutorRun_hook_type =
-    fn(query_desc: &mut QueryDesc, direction: ScanDirection, count: u64);
-pub type ExecutorFinish_hook_type = fn(query_desc: &mut QueryDesc);
-pub type ExecutorEnd_hook_type = fn(query_desc: &mut QueryDesc);
+    fn(query_desc: &mut QueryDesc<'_>, direction: ScanDirection, count: u64);
+pub type ExecutorFinish_hook_type = fn(query_desc: &mut QueryDesc<'_>);
+pub type ExecutorEnd_hook_type = fn(query_desc: &mut QueryDesc<'_>);
 pub type ExecutorCheckPerms_hook_type =
     fn(range_table: &[Node], rte_perm_infos: &[Node], ereport_on_violation: bool) -> bool;
 
@@ -254,9 +255,13 @@ pub fn ExecGetJunkAttribute(slot: &mut TupleTableSlot, attno: AttrNumber) -> Opt
 // execMain.c
 // ---------------------------------------------------------------------------
 /// PG `ExecutorStart`: dispatches to the hook or `standard_ExecutorStart`. M1
-/// always uses the standard path (no plugin hook installed).
-pub fn ExecutorStart(query_desc: &mut QueryDesc, eflags: i32) {
-    standard_ExecutorStart(query_desc, eflags);
+/// always uses the standard path (no plugin hook installed). This 2-arg form is
+/// the const/non-scan path (`SELECT 1`, the portal const SELECT): it publishes an
+/// empty range-table and no snapshot. The scan/modify wire path calls
+/// `standard_executor_start` directly with the command frame's borrowed
+/// relations + snapshot.
+pub fn ExecutorStart(query_desc: &mut QueryDesc<'_>, eflags: i32) {
+    standard_ExecutorStart(query_desc, &[], None, eflags);
 }
 pub use crate::backend::executor::execMain::standard_executor_start as standard_ExecutorStart;
 
@@ -264,13 +269,9 @@ pub use crate::backend::executor::execMain::standard_executor_start as standard_
 /// path reaches the table AM's buffer reads, rules.md s5); takes the SharedState
 /// the table AM needs. `shared` is `Option` so the childless-const path can run
 /// without one (it reaches no I/O leaf); scan/insert plans require `Some`.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the executor's per-query state is !Send and task-confined (one backend task per plan); see standard_executor_run."
-)]
 pub async fn ExecutorRun(
     shared: Option<&std::sync::Arc<crate::shared_state::SharedState>>,
-    query_desc: &mut QueryDesc,
+    query_desc: &mut QueryDesc<'_>,
     direction: ScanDirection,
     count: u64,
 ) {
@@ -279,7 +280,7 @@ pub async fn ExecutorRun(
 pub use crate::backend::executor::execMain::standard_executor_run as standard_ExecutorRun;
 
 /// PG `ExecutorFinish`: hook or `standard_ExecutorFinish`.
-pub fn ExecutorFinish(query_desc: &mut QueryDesc) {
+pub fn ExecutorFinish(query_desc: &mut QueryDesc<'_>) {
     standard_ExecutorFinish(query_desc);
 }
 pub use crate::backend::executor::execMain::standard_executor_finish as standard_ExecutorFinish;
@@ -288,12 +289,12 @@ pub use crate::backend::executor::execMain::standard_executor_finish as standard
 /// node teardown can release buffers/scans (`Option`; the const path needs none).
 pub fn ExecutorEnd(
     shared: Option<&std::sync::Arc<crate::shared_state::SharedState>>,
-    query_desc: &mut QueryDesc,
+    query_desc: &mut QueryDesc<'_>,
 ) {
     standard_ExecutorEnd(shared, query_desc);
 }
 pub use crate::backend::executor::execMain::standard_executor_end as standard_ExecutorEnd;
-pub fn ExecutorRewind(_query_desc: &mut QueryDesc) {
+pub fn ExecutorRewind(_query_desc: &mut QueryDesc<'_>) {
     unimplemented!()
 }
 pub fn ExecCheckPermissions(
@@ -316,7 +317,7 @@ pub fn CheckValidResultRel(
 }
 pub fn InitResultRelInfo(
     _result_rel_info: &mut ResultRelInfo,
-    _result_relation_desc: Relation,
+    _result_relation_desc: &RelationData,
     _result_relation_index: Index,
     _partition_root_rri: Option<&mut ResultRelInfo>,
     _instrument_options: i32,
@@ -324,14 +325,14 @@ pub fn InitResultRelInfo(
     unimplemented!()
 }
 pub fn ExecGetTriggerResultRel(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relid: Oid,
     _root_rel_info: Option<&mut ResultRelInfo>,
 ) -> *mut ResultRelInfo {
     unimplemented!()
 }
 pub fn ExecGetAncestorResultRels(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _result_rel_info: &mut ResultRelInfo,
 ) -> Vec<Box<ResultRelInfo>> {
     unimplemented!()
@@ -339,7 +340,7 @@ pub fn ExecGetAncestorResultRels(
 pub fn ExecConstraints(
     _result_rel_info: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
 ) {
     unimplemented!()
 }
@@ -347,7 +348,7 @@ pub fn ExecConstraints(
 pub fn ExecRelGenVirtualNotNull(
     _result_rel_info: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _notnull_virtual_attrs: &[Node],
 ) -> Option<AttrNumber> {
     unimplemented!()
@@ -355,7 +356,7 @@ pub fn ExecRelGenVirtualNotNull(
 pub fn ExecPartitionCheck(
     _result_rel_info: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _emit_error: bool,
 ) -> bool {
     unimplemented!()
@@ -363,7 +364,7 @@ pub fn ExecPartitionCheck(
 pub fn ExecPartitionCheckEmitError(
     _result_rel_info: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
 ) {
     unimplemented!()
 }
@@ -371,7 +372,7 @@ pub fn ExecWithCheckOptions(
     _kind: WCOKind,
     _result_rel_info: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
 ) {
     unimplemented!()
 }
@@ -384,11 +385,11 @@ pub fn ExecBuildSlotValueDescription(
 ) -> String {
     unimplemented!()
 }
-pub fn ExecUpdateLockMode(_estate: &mut EState, _relinfo: &mut ResultRelInfo) -> LockTupleMode {
+pub fn ExecUpdateLockMode(_estate: &mut EState<'_>, _relinfo: &mut ResultRelInfo) -> LockTupleMode {
     unimplemented!()
 }
 /// Returns None when not found and `missing_ok` (was NULL).
-pub fn ExecFindRowMark(_estate: &mut EState, _rti: Index, _missing_ok: bool) -> Option<Box<ExecRowMark>> {
+pub fn ExecFindRowMark(_estate: &mut EState<'_>, _rti: Index, _missing_ok: bool) -> Option<Box<ExecRowMark>> {
     unimplemented!()
 }
 pub fn ExecBuildAuxRowMark(_erm: &mut ExecRowMark, _targetlist: &[Node]) -> Box<ExecAuxRowMark> {
@@ -396,7 +397,7 @@ pub fn ExecBuildAuxRowMark(_erm: &mut ExecRowMark, _targetlist: &[Node]) -> Box<
 }
 pub fn EvalPlanQual(
     _epqstate: &mut EPQState,
-    _relation: Relation,
+    _relation: &RelationData,
     _rti: Index,
     _inputslot: &mut TupleTableSlot,
 ) -> Box<TupleTableSlot> {
@@ -404,7 +405,7 @@ pub fn EvalPlanQual(
 }
 pub fn EvalPlanQualInit(
     _epqstate: &mut EPQState,
-    _parentestate: &mut EState,
+    _parentestate: &mut EState<'_>,
     _subplan: Option<&crate::nodes::plannodes::Plan>,
     _auxrowmarks: &[Node],
     _epq_param: i32,
@@ -421,7 +422,7 @@ pub fn EvalPlanQualSetPlan(
 }
 pub fn EvalPlanQualSlot(
     _epqstate: &mut EPQState,
-    _relation: Relation,
+    _relation: &RelationData,
     _rti: Index,
 ) -> Box<TupleTableSlot> {
     unimplemented!()
@@ -584,16 +585,16 @@ pub fn ExecBuildUpdateProjection(
 ) -> Box<ProjectionInfo> {
     unimplemented!()
 }
-pub fn ExecPrepareExpr(_node: &crate::nodes::primnodes::Expr, _estate: &mut EState) -> Box<ExprState> {
+pub fn ExecPrepareExpr(_node: &crate::nodes::primnodes::Expr, _estate: &mut EState<'_>) -> Box<ExprState> {
     unimplemented!()
 }
-pub fn ExecPrepareQual(_qual: &[Node], _estate: &mut EState) -> Box<ExprState> {
+pub fn ExecPrepareQual(_qual: &[Node], _estate: &mut EState<'_>) -> Box<ExprState> {
     unimplemented!()
 }
-pub fn ExecPrepareCheck(_qual: &[Node], _estate: &mut EState) -> Box<ExprState> {
+pub fn ExecPrepareCheck(_qual: &[Node], _estate: &mut EState<'_>) -> Box<ExprState> {
     unimplemented!()
 }
-pub fn ExecPrepareExprList(_nodes: &[Node], _estate: &mut EState) -> Vec<Box<ExprState>> {
+pub fn ExecPrepareExprList(_nodes: &[Node], _estate: &mut EState<'_>) -> Vec<Box<ExprState>> {
     unimplemented!()
 }
 
@@ -742,7 +743,7 @@ pub fn ExecInitResultTupleSlotTL(
     unimplemented!()
 }
 pub fn ExecInitScanTupleSlot(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _scanstate: &mut ScanState,
     _tupledesc: TupleDesc,
     _tts_ops: &'static dyn TupleTableSlotOps,
@@ -750,14 +751,14 @@ pub fn ExecInitScanTupleSlot(
     unimplemented!()
 }
 pub fn ExecInitExtraTupleSlot(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _tupledesc: TupleDesc,
     _tts_ops: &'static dyn TupleTableSlotOps,
 ) -> Box<TupleTableSlot> {
     unimplemented!()
 }
 pub fn ExecInitNullTupleSlot(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _tup_type: TupleDesc,
     _tts_ops: &'static dyn TupleTableSlotOps,
 ) -> Box<TupleTableSlot> {
@@ -811,7 +812,7 @@ pub fn do_text_output_oneline(tstate: &mut TupOutputState, str_to_emit: &str) {
 pub use crate::backend::executor::execUtils::create_executor_state as CreateExecutorState;
 pub use crate::backend::executor::execUtils::free_executor_state as FreeExecutorState;
 pub use crate::backend::executor::execUtils::create_expr_context as CreateExprContext;
-pub fn CreateWorkExprContext(_estate: &mut EState) -> Box<ExprContext> {
+pub fn CreateWorkExprContext(_estate: &mut EState<'_>) -> Box<ExprContext> {
     unimplemented!()
 }
 pub fn CreateStandaloneExprContext() -> Box<ExprContext> {
@@ -832,7 +833,7 @@ pub use crate::backend::executor::execUtils::make_per_tuple_expr_context as Make
 
 /// `GetPerTupleExprContext` - get (creating if needed) the per-output-tuple
 /// exprcontext. Was a macro selecting the cached one or making it.
-pub fn GetPerTupleExprContext(estate: &mut EState) -> &mut ExprContext {
+pub fn GetPerTupleExprContext<'e>(estate: &'e mut EState<'_>) -> &'e mut ExprContext {
     if estate.per_tuple_exprcontext.is_none() {
         return MakePerTupleExprContext(estate);
     }
@@ -840,14 +841,14 @@ pub fn GetPerTupleExprContext(estate: &mut EState) -> &mut ExprContext {
 }
 
 /// `GetPerTupleMemoryContext` - per-tuple exprcontext's memory context.
-pub fn GetPerTupleMemoryContext(estate: &mut EState) -> MemoryContext {
+pub fn GetPerTupleMemoryContext(estate: &mut EState<'_>) -> MemoryContext {
     // TODO(memory): ecxt_per_tuple_memory type unification.
     let _ = estate;
     unimplemented!()
 }
 
 /// `ResetPerTupleExprContext` - reset the per-tuple exprcontext if it exists.
-pub fn ResetPerTupleExprContext(estate: &mut EState) {
+pub fn ResetPerTupleExprContext(estate: &mut EState<'_>) {
     if let Some(ec) = estate.per_tuple_exprcontext.as_mut() {
         ResetExprContext(ec);
     }
@@ -883,47 +884,47 @@ pub fn ExecAssignScanType(_scanstate: &mut ScanState, _tup_desc: TupleDesc) {
     unimplemented!()
 }
 pub fn ExecCreateScanSlotFromOuterPlan(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _scanstate: &mut ScanState,
     _tts_ops: &'static dyn TupleTableSlotOps,
 ) {
     unimplemented!()
 }
-pub fn ExecRelationIsTargetRelation(_estate: &mut EState, _scanrelid: Index) -> bool {
+pub fn ExecRelationIsTargetRelation(_estate: &mut EState<'_>, _scanrelid: Index) -> bool {
     unimplemented!()
 }
-pub fn ExecOpenScanRelation(_estate: &mut EState, _scanrelid: Index, _eflags: i32) -> Relation {
+pub fn ExecOpenScanRelation(_estate: &mut EState<'_>, _scanrelid: Index, _eflags: i32) -> Arc<RelationData> {
     unimplemented!()
 }
 pub fn ExecInitRangeTable(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _range_table: &[Node],
     _perm_infos: &[Node],
     _unpruned_relids: &Bitmapset,
 ) {
     unimplemented!()
 }
-pub fn ExecCloseRangeTableRelations(_estate: &mut EState) {
+pub fn ExecCloseRangeTableRelations(_estate: &mut EState<'_>) {
     unimplemented!()
 }
-pub fn ExecCloseResultRelations(_estate: &mut EState) {
+pub fn ExecCloseResultRelations(_estate: &mut EState<'_>) {
     unimplemented!()
 }
 
 /// `exec_rt_fetch(rti, estate)` - `list_nth(range_table, rti - 1)`.
-pub fn exec_rt_fetch(rti: Index, estate: &EState) -> &crate::nodes::parsenodes::RangeTblEntry {
+pub fn exec_rt_fetch<'e>(rti: Index, estate: &'e EState<'_>) -> &'e crate::nodes::parsenodes::RangeTblEntry {
     let _ = &estate.range_table[rti - 1];
     unimplemented!()
 }
 
-pub fn ExecGetRangeTableRelation(_estate: &mut EState, _rti: Index, _is_result_rel: bool) -> Relation {
+pub fn ExecGetRangeTableRelation(_estate: &mut EState<'_>, _rti: Index, _is_result_rel: bool) -> Arc<RelationData> {
     unimplemented!()
 }
-pub fn ExecInitResultRelation(_estate: &mut EState, _result_rel_info: &mut ResultRelInfo, _rti: Index) {
+pub fn ExecInitResultRelation(_estate: &mut EState<'_>, _result_rel_info: &mut ResultRelInfo, _rti: Index) {
     unimplemented!()
 }
 
-pub fn executor_errposition(_estate: &mut EState, _location: i32) -> i32 {
+pub fn executor_errposition(_estate: &mut EState<'_>, _location: i32) -> i32 {
     unimplemented!()
 }
 
@@ -959,16 +960,16 @@ pub fn GetAttributeByNum(
 pub use crate::backend::executor::execTuples::exec_target_list_length as ExecTargetListLength;
 pub use crate::backend::executor::execTuples::exec_clean_target_list_length as ExecCleanTargetListLength;
 
-pub fn ExecGetTriggerOldSlot(_estate: &mut EState, _rel_info: &mut ResultRelInfo) -> Box<TupleTableSlot> {
+pub fn ExecGetTriggerOldSlot(_estate: &mut EState<'_>, _rel_info: &mut ResultRelInfo) -> Box<TupleTableSlot> {
     unimplemented!()
 }
-pub fn ExecGetTriggerNewSlot(_estate: &mut EState, _rel_info: &mut ResultRelInfo) -> Box<TupleTableSlot> {
+pub fn ExecGetTriggerNewSlot(_estate: &mut EState<'_>, _rel_info: &mut ResultRelInfo) -> Box<TupleTableSlot> {
     unimplemented!()
 }
-pub fn ExecGetReturningSlot(_estate: &mut EState, _rel_info: &mut ResultRelInfo) -> Box<TupleTableSlot> {
+pub fn ExecGetReturningSlot(_estate: &mut EState<'_>, _rel_info: &mut ResultRelInfo) -> Box<TupleTableSlot> {
     unimplemented!()
 }
-pub fn ExecGetAllNullSlot(_estate: &mut EState, _rel_info: &mut ResultRelInfo) -> Box<TupleTableSlot> {
+pub fn ExecGetAllNullSlot(_estate: &mut EState<'_>, _rel_info: &mut ResultRelInfo) -> Box<TupleTableSlot> {
     unimplemented!()
 }
 pub fn ExecGetChildToRootMap(_result_rel_info: &mut ResultRelInfo) -> Option<Box<TupleConversionMap>> {
@@ -976,24 +977,24 @@ pub fn ExecGetChildToRootMap(_result_rel_info: &mut ResultRelInfo) -> Option<Box
 }
 pub fn ExecGetRootToChildMap(
     _result_rel_info: &mut ResultRelInfo,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
 ) -> Option<Box<TupleConversionMap>> {
     unimplemented!()
 }
 
-pub fn ExecGetResultRelCheckAsUser(_rel_info: &mut ResultRelInfo, _estate: &mut EState) -> Oid {
+pub fn ExecGetResultRelCheckAsUser(_rel_info: &mut ResultRelInfo, _estate: &mut EState<'_>) -> Oid {
     unimplemented!()
 }
-pub fn ExecGetInsertedCols(_relinfo: &mut ResultRelInfo, _estate: &mut EState) -> Box<Bitmapset> {
+pub fn ExecGetInsertedCols(_relinfo: &mut ResultRelInfo, _estate: &mut EState<'_>) -> Box<Bitmapset> {
     unimplemented!()
 }
-pub fn ExecGetUpdatedCols(_relinfo: &mut ResultRelInfo, _estate: &mut EState) -> Box<Bitmapset> {
+pub fn ExecGetUpdatedCols(_relinfo: &mut ResultRelInfo, _estate: &mut EState<'_>) -> Box<Bitmapset> {
     unimplemented!()
 }
-pub fn ExecGetExtraUpdatedCols(_relinfo: &mut ResultRelInfo, _estate: &mut EState) -> Box<Bitmapset> {
+pub fn ExecGetExtraUpdatedCols(_relinfo: &mut ResultRelInfo, _estate: &mut EState<'_>) -> Box<Bitmapset> {
     unimplemented!()
 }
-pub fn ExecGetAllUpdatedCols(_relinfo: &mut ResultRelInfo, _estate: &mut EState) -> Box<Bitmapset> {
+pub fn ExecGetAllUpdatedCols(_relinfo: &mut ResultRelInfo, _estate: &mut EState<'_>) -> Box<Bitmapset> {
     unimplemented!()
 }
 
@@ -1011,7 +1012,7 @@ pub fn ExecCloseIndices(_result_rel_info: &mut ResultRelInfo) {
 pub fn ExecInsertIndexTuples(
     _result_rel_info: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _update: bool,
     _no_dup_err: bool,
     _arbiter_indexes: &[Node],
@@ -1022,7 +1023,7 @@ pub fn ExecInsertIndexTuples(
 pub fn ExecCheckIndexConstraints(
     _result_rel_info: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _conflict_tid: crate::access::heapam::ItemPointer,
     _tupleid: crate::access::heapam::ItemPointer,
     _arbiter_indexes: &[Node],
@@ -1031,13 +1032,13 @@ pub fn ExecCheckIndexConstraints(
 }
 #[allow(clippy::too_many_arguments)]
 pub fn check_exclusion_constraint(
-    _heap: Relation,
-    _index: Relation,
+    _heap: &RelationData,
+    _index: &RelationData,
     _index_info: &crate::nodes::execnodes::IndexInfo,
     _tupleid: crate::access::heapam::ItemPointer,
     _values: &[Datum],
     _isnull: &[bool],
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _new_index: bool,
 ) {
     unimplemented!()
@@ -1047,7 +1048,7 @@ pub fn check_exclusion_constraint(
 // execReplication.c
 // ---------------------------------------------------------------------------
 pub fn RelationFindReplTupleByIndex(
-    _rel: Relation,
+    _rel: &RelationData,
     _idxoid: Oid,
     _lockmode: LockTupleMode,
     _searchslot: &mut TupleTableSlot,
@@ -1056,7 +1057,7 @@ pub fn RelationFindReplTupleByIndex(
     unimplemented!()
 }
 pub fn RelationFindReplTupleSeq(
-    _rel: Relation,
+    _rel: &RelationData,
     _lockmode: LockTupleMode,
     _searchslot: &mut TupleTableSlot,
     _outslot: &mut TupleTableSlot,
@@ -1065,14 +1066,14 @@ pub fn RelationFindReplTupleSeq(
 }
 pub fn ExecSimpleRelationInsert(
     _result_rel_info: &mut ResultRelInfo,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _slot: &mut TupleTableSlot,
 ) {
     unimplemented!()
 }
 pub fn ExecSimpleRelationUpdate(
     _result_rel_info: &mut ResultRelInfo,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _epqstate: &mut EPQState,
     _searchslot: &mut TupleTableSlot,
     _slot: &mut TupleTableSlot,
@@ -1081,13 +1082,13 @@ pub fn ExecSimpleRelationUpdate(
 }
 pub fn ExecSimpleRelationDelete(
     _result_rel_info: &mut ResultRelInfo,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _epqstate: &mut EPQState,
     _searchslot: &mut TupleTableSlot,
 ) {
     unimplemented!()
 }
-pub fn CheckCmdReplicaIdentity(_rel: Relation, _cmd: CmdType) {
+pub fn CheckCmdReplicaIdentity(_rel: &RelationData, _cmd: CmdType) {
     unimplemented!()
 }
 pub fn CheckSubscriptionRelkind(_relkind: char, _nspname: &str, _relname: &str) {

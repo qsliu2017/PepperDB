@@ -10,7 +10,6 @@ use crate::nodes::primnodes::{Expr, Index};
 use crate::nodes::nodes::Node;
 use crate::postgres_ext::Oid;
 use crate::storage::block::BlockNumber;
-use crate::utils::relcache::Relation;
 
 /// Hook for plugins to get control in get_relation_info().
 pub type GetRelationInfoHookType =
@@ -38,12 +37,12 @@ pub fn infer_arbiter_indexes(root: &mut PlannerInfo) -> Vec<Oid> {
     unimplemented!()
 }
 
-pub fn estimate_rel_size(rel: Relation) -> RelSizeEstimate {
+pub fn estimate_rel_size(rel: &crate::utils::rel::RelationData) -> RelSizeEstimate {
     unimplemented!()
 }
 
 /// Returns the data width; `attr_widths` out-array folded into the tuple.
-pub fn get_rel_data_width(rel: Relation) -> (i32, Vec<i32>) {
+pub fn get_rel_data_width(rel: &crate::utils::rel::RelationData) -> (i32, Vec<i32>) {
     unimplemented!()
 }
 

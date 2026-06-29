@@ -11,7 +11,8 @@ use bitflags::bitflags;
 
 use crate::c::varlena;
 use crate::postgres::Datum;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 bitflags! {
     /// Overall TOAST-operation flags (`flags`) and per-column flags
@@ -50,7 +51,7 @@ pub struct ToastAttrInfo {
 /// null/old arrays and the `attr` array (each length == natts) before
 /// calling toast_tuple_init.
 pub struct ToastTupleContext {
-    pub rel: Relation,         // relation that contains the tuple
+    pub rel: Arc<RelationData>,         // relation that contains the tuple
     pub values: *mut Datum,    // values from the tuple columns // TODO(ptr)
     pub isnull: *mut bool,     // null flags for the tuple columns // TODO(ptr)
     pub oldvalues: *mut Datum, // values from previous tuple (NULL on insert) // TODO(ptr)
@@ -91,7 +92,7 @@ pub fn toast_tuple_cleanup(_ttc: &mut ToastTupleContext) {
 
 /// Delete external (out-of-line) TOAST datums referenced by the given values.
 pub fn toast_delete_external(
-    _rel: Relation,
+    _rel: &RelationData,
     _values: &[Datum],
     _isnull: &[bool],
     _is_speculative: bool,

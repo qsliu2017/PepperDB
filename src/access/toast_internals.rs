@@ -4,9 +4,10 @@ use crate::access::toast_compression::ToastCompressionId;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::storage::lockdefs::LockMode;
-use crate::utils::relcache::Relation;
 use crate::utils::snapshot::Snapshot;
 use crate::varatt::{VARLENA_EXTSIZE_BITS, VARLENA_EXTSIZE_MASK, varlena};
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// Information at the start of compressed toast data (on-disk).
 #[repr(C)]
@@ -39,11 +40,11 @@ pub fn toast_compress_datum(_value: Datum, _cmethod: i8) -> Datum {
 pub fn toast_get_valid_index(_toastoid: Oid, _lock: LockMode) -> Oid {
     unimplemented!()
 }
-pub fn toast_delete_datum(_rel: Relation, _value: Datum, _is_speculative: bool) {
+pub fn toast_delete_datum(_rel: &RelationData, _value: Datum, _is_speculative: bool) {
     unimplemented!()
 }
 pub fn toast_save_datum(
-    _rel: Relation,
+    _rel: &RelationData,
     _value: Datum,
     _oldexternal: &varlena,
     _options: i32,
@@ -51,10 +52,10 @@ pub fn toast_save_datum(
     unimplemented!()
 }
 /// Returns the open toast index relations (out-params folded into the return).
-pub fn toast_open_indexes(_toastrel: Relation, _lock: LockMode) -> Vec<Relation> {
+pub fn toast_open_indexes(_toastrel: &RelationData, _lock: LockMode) -> Vec<Arc<RelationData>> {
     unimplemented!()
 }
-pub fn toast_close_indexes(_toastidxs: &[Relation], _lock: LockMode) {
+pub fn toast_close_indexes(_toastidxs: &[Arc<RelationData>], _lock: LockMode) {
     unimplemented!()
 }
 pub fn get_toast_snapshot() -> Snapshot {

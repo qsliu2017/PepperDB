@@ -21,7 +21,8 @@ use crate::nodes::primnodes::OnCommitAction;
 use crate::parser::parse_node::ParseState;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 bitflags! {
     /// CHKATYPE_* flags for CheckAttributeType/CheckAttributeNamesTypes.
@@ -72,11 +73,11 @@ pub fn heap_truncate(_relids: Vec<Oid>) {
     unimplemented!()
 }
 
-pub fn heap_truncate_one_rel(_rel: Relation) {
+pub fn heap_truncate_one_rel(_rel: &RelationData) {
     unimplemented!()
 }
 
-pub fn heap_truncate_check_FKs(_relations: Vec<Relation>, _temp_tables: bool) {
+pub fn heap_truncate_check_FKs(_relations: Vec<Arc<RelationData>>, _temp_tables: bool) {
     unimplemented!()
 }
 
@@ -85,18 +86,18 @@ pub fn heap_truncate_find_FKs(_relation_ids: Vec<Oid>) -> Vec<Oid> {
 }
 
 pub fn InsertPgAttributeTuples(
-    _pg_attribute_rel: Relation,
+    _pg_attribute_rel: &RelationData,
     _tupdesc: TupleDesc,
     _new_rel_oid: Oid,
     _tupdesc_extra: &[FormExtraData_pg_attribute],
-    _indstate: CatalogIndexState,
+    _indstate: CatalogIndexState<'_>,
 ) {
     unimplemented!()
 }
 
 pub fn InsertPgClassTuple(
-    _pg_class_desc: Relation,
-    _new_rel_desc: Relation,
+    _pg_class_desc: &RelationData,
+    _new_rel_desc: &RelationData,
     _new_rel_oid: Oid,
     _relacl: Datum,
     _reloptions: Datum,
@@ -105,7 +106,7 @@ pub fn InsertPgClassTuple(
 }
 
 pub fn AddRelationNewConstraints(
-    _rel: Relation,
+    _rel: &RelationData,
     _new_col_defaults: Vec<RawColumnDefault>,
     _new_constraints: Vec<Node>,
     _allow_merge: bool,
@@ -117,7 +118,7 @@ pub fn AddRelationNewConstraints(
 }
 
 pub fn AddRelationNotNullConstraints(
-    _rel: Relation,
+    _rel: &RelationData,
     _constraints: Vec<Node>,
     _old_notnulls: Vec<CookedConstraint>,
     _existing_constraints: Vec<CookedConstraint>,
@@ -125,11 +126,11 @@ pub fn AddRelationNotNullConstraints(
     unimplemented!()
 }
 
-pub fn RelationClearMissing(_rel: Relation) {
+pub fn RelationClearMissing(_rel: &RelationData) {
     unimplemented!()
 }
 
-pub fn StoreAttrMissingVal(_rel: Relation, _attnum: AttrNumber, _missingval: Datum) {
+pub fn StoreAttrMissingVal(_rel: &RelationData, _attnum: AttrNumber, _missingval: Datum) {
     unimplemented!()
 }
 
@@ -199,7 +200,7 @@ pub fn CheckAttributeType(
 // pg_partitioned_table catalog manipulation functions
 
 pub fn StorePartitionKey(
-    _rel: Relation,
+    _rel: &RelationData,
     _strategy: u8,
     _partnatts: i16,
     _partattrs: &[AttrNumber],
@@ -214,6 +215,6 @@ pub fn RemovePartitionKeyByRelId(_relid: Oid) {
     unimplemented!()
 }
 
-pub fn StorePartitionBound(_rel: Relation, _parent: Relation, _bound: &PartitionBoundSpec) {
+pub fn StorePartitionBound(_rel: &RelationData, _parent: &RelationData, _bound: &PartitionBoundSpec) {
     unimplemented!()
 }

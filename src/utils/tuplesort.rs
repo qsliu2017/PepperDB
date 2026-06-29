@@ -13,8 +13,9 @@ use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::storage::itemptr::ItemPointerData;
 use crate::utils::logtape::LogicalTape;
-use crate::utils::relcache::Relation;
 use crate::utils::sortsupport::SortSupport;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 pub type AttrNumber = i16; // c.h AttrNumber
 pub type ItemPointer = *mut ItemPointerData; // TODO(ptr): non-null ItemPointer
@@ -286,7 +287,7 @@ pub fn tuplesort_begin_heap(
 
 pub fn tuplesort_begin_cluster(
     _tupDesc: TupleDesc,
-    _indexRel: Relation,
+    _indexRel: &RelationData,
     _workMem: i32,
     _coordinate: Option<SortCoordinate>,
     _sortopt: TuplesortFlags,
@@ -295,8 +296,8 @@ pub fn tuplesort_begin_cluster(
 }
 
 pub fn tuplesort_begin_index_btree(
-    _heapRel: Relation,
-    _indexRel: Relation,
+    _heapRel: &RelationData,
+    _indexRel: &RelationData,
     _enforceUnique: bool,
     _uniqueNullsNotDistinct: bool,
     _workMem: i32,
@@ -307,8 +308,8 @@ pub fn tuplesort_begin_index_btree(
 }
 
 pub fn tuplesort_begin_index_hash(
-    _heapRel: Relation,
-    _indexRel: Relation,
+    _heapRel: &RelationData,
+    _indexRel: &RelationData,
     _high_mask: u32,
     _low_mask: u32,
     _max_buckets: u32,
@@ -320,8 +321,8 @@ pub fn tuplesort_begin_index_hash(
 }
 
 pub fn tuplesort_begin_index_gist(
-    _heapRel: Relation,
-    _indexRel: Relation,
+    _heapRel: &RelationData,
+    _indexRel: &RelationData,
     _workMem: i32,
     _coordinate: Option<SortCoordinate>,
     _sortopt: TuplesortFlags,
@@ -338,8 +339,8 @@ pub fn tuplesort_begin_index_brin(
 }
 
 pub fn tuplesort_begin_index_gin(
-    _heapRel: Relation,
-    _indexRel: Relation,
+    _heapRel: &RelationData,
+    _indexRel: &RelationData,
     _workMem: i32,
     _coordinate: Option<SortCoordinate>,
     _sortopt: TuplesortFlags,
@@ -369,7 +370,7 @@ pub fn tuplesort_putheaptuple(_state: &mut Tuplesortstate, _tup: HeapTuple) {
 
 pub fn tuplesort_putindextuplevalues(
     _state: &mut Tuplesortstate,
-    _rel: Relation,
+    _rel: &RelationData,
     _self_: ItemPointer,
     _values: &[Datum],
     _isnull: &[bool],

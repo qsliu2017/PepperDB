@@ -10,10 +10,11 @@ use crate::access::htup::HeapTuple;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::lock::LOCKMODE;
 use crate::executor::tuptable::TupleTableSlot;
-use crate::utils::rel::Relation;
 use crate::utils::reltrigger::{Trigger, TriggerDesc};
 use crate::utils::tuplestore::Tuplestorestate;
 use crate::postgres_ext::Oid;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // ItemPointer: non-null pointer in C; nullable forms become Option at call sites.
 type ItemPointer = *mut ItemPointerData; // TODO(ptr)
@@ -32,7 +33,7 @@ pub type TriggerEvent = u32;
 // discriminant, matching execnodes/plannodes). Reported, NOT added to nodes.rs.
 pub struct TriggerData {
     pub event: TriggerEvent,
-    pub relation: Relation,
+    pub relation: Arc<RelationData>,
     pub trigtuple: HeapTuple,
     pub newtuple: HeapTuple,
     pub trigger: *mut Trigger, // TODO(ptr)
@@ -155,7 +156,7 @@ pub fn CreateTriggerFiringOn(
 }
 
 pub fn TriggerSetParentTrigger(
-    _trig_rel: Relation,
+    _trig_rel: &RelationData,
     _child_trig_id: Oid,
     _parent_trig_id: Oid,
     _child_table_id: Oid,
@@ -178,7 +179,7 @@ pub fn renametrig(_stmt: &RenameStmt) -> ObjectAddress {
 
 #[allow(clippy::too_many_arguments)]
 pub fn EnableDisableTrigger(
-    _rel: Relation,
+    _rel: &RelationData,
     _tgname: &str,
     _tgparent: Oid,
     _fires_when: u8,
@@ -189,7 +190,7 @@ pub fn EnableDisableTrigger(
     unimplemented!()
 }
 
-pub fn RelationBuildTriggers(_relation: Relation) {
+pub fn RelationBuildTriggers(_relation: &RelationData) {
     unimplemented!()
 }
 
@@ -214,25 +215,25 @@ pub fn FreeTriggerDesc(_trigdesc: *mut TriggerDesc) {
     unimplemented!()
 }
 
-pub fn ExecBSInsertTriggers(_estate: &mut EState, _relinfo: &mut ResultRelInfo) {
+pub fn ExecBSInsertTriggers(_estate: &mut EState<'_>, _relinfo: &mut ResultRelInfo) {
     unimplemented!()
 }
 pub fn ExecASInsertTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _transition_capture: *mut TransitionCaptureState,
 ) {
     unimplemented!()
 }
 pub fn ExecBRInsertTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
 ) -> bool {
     unimplemented!()
 }
 pub fn ExecARInsertTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
     _recheck_indexes: Vec<Node>,
@@ -241,17 +242,17 @@ pub fn ExecARInsertTriggers(
     unimplemented!()
 }
 pub fn ExecIRInsertTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _slot: &mut TupleTableSlot,
 ) -> bool {
     unimplemented!()
 }
-pub fn ExecBSDeleteTriggers(_estate: &mut EState, _relinfo: &mut ResultRelInfo) {
+pub fn ExecBSDeleteTriggers(_estate: &mut EState<'_>, _relinfo: &mut ResultRelInfo) {
     unimplemented!()
 }
 pub fn ExecASDeleteTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _transition_capture: *mut TransitionCaptureState,
 ) {
@@ -262,7 +263,7 @@ pub fn ExecASDeleteTriggers(
 /// here (revisit with the .c body for tuple/Option folding). is_merge_delete in.
 #[allow(clippy::too_many_arguments)]
 pub fn ExecBRDeleteTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _epqstate: &mut EPQState,
     _relinfo: &mut ResultRelInfo,
     _tupleid: ItemPointer,
@@ -275,7 +276,7 @@ pub fn ExecBRDeleteTriggers(
     unimplemented!()
 }
 pub fn ExecARDeleteTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _tupleid: ItemPointer,
     _fdw_trigtuple: HeapTuple,
@@ -285,17 +286,17 @@ pub fn ExecARDeleteTriggers(
     unimplemented!()
 }
 pub fn ExecIRDeleteTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _trigtuple: HeapTuple,
 ) -> bool {
     unimplemented!()
 }
-pub fn ExecBSUpdateTriggers(_estate: &mut EState, _relinfo: &mut ResultRelInfo) {
+pub fn ExecBSUpdateTriggers(_estate: &mut EState<'_>, _relinfo: &mut ResultRelInfo) {
     unimplemented!()
 }
 pub fn ExecASUpdateTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _transition_capture: *mut TransitionCaptureState,
 ) {
@@ -303,7 +304,7 @@ pub fn ExecASUpdateTriggers(
 }
 #[allow(clippy::too_many_arguments)]
 pub fn ExecBRUpdateTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _epqstate: &mut EPQState,
     _relinfo: &mut ResultRelInfo,
     _tupleid: ItemPointer,
@@ -317,7 +318,7 @@ pub fn ExecBRUpdateTriggers(
 }
 #[allow(clippy::too_many_arguments)]
 pub fn ExecARUpdateTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _src_partinfo: &mut ResultRelInfo,
     _dst_partinfo: &mut ResultRelInfo,
@@ -331,17 +332,17 @@ pub fn ExecARUpdateTriggers(
     unimplemented!()
 }
 pub fn ExecIRUpdateTriggers(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _trigtuple: HeapTuple,
     _newslot: &mut TupleTableSlot,
 ) -> bool {
     unimplemented!()
 }
-pub fn ExecBSTruncateTriggers(_estate: &mut EState, _relinfo: &mut ResultRelInfo) {
+pub fn ExecBSTruncateTriggers(_estate: &mut EState<'_>, _relinfo: &mut ResultRelInfo) {
     unimplemented!()
 }
-pub fn ExecASTruncateTriggers(_estate: &mut EState, _relinfo: &mut ResultRelInfo) {
+pub fn ExecASTruncateTriggers(_estate: &mut EState<'_>, _relinfo: &mut ResultRelInfo) {
     unimplemented!()
 }
 
@@ -351,7 +352,7 @@ pub fn AfterTriggerBeginXact() {
 pub fn AfterTriggerBeginQuery() {
     unimplemented!()
 }
-pub fn AfterTriggerEndQuery(_estate: &mut EState) {
+pub fn AfterTriggerEndQuery(_estate: &mut EState<'_>) {
     unimplemented!()
 }
 pub fn AfterTriggerFireDeferred() {
@@ -376,7 +377,7 @@ pub fn AfterTriggerPendingOnRel(_relid: Oid) -> bool {
 // in utils/adt/ri_triggers.c
 pub fn RI_FKey_pk_upd_check_required(
     _trigger: *mut Trigger,
-    _pk_rel: Relation,
+    _pk_rel: &RelationData,
     _oldslot: &mut TupleTableSlot,
     _newslot: &mut TupleTableSlot,
 ) -> bool {
@@ -384,16 +385,16 @@ pub fn RI_FKey_pk_upd_check_required(
 }
 pub fn RI_FKey_fk_upd_check_required(
     _trigger: *mut Trigger,
-    _fk_rel: Relation,
+    _fk_rel: &RelationData,
     _oldslot: &mut TupleTableSlot,
     _newslot: &mut TupleTableSlot,
 ) -> bool {
     unimplemented!()
 }
-pub fn RI_Initial_Check(_trigger: *mut Trigger, _fk_rel: Relation, _pk_rel: Relation) -> bool {
+pub fn RI_Initial_Check(_trigger: *mut Trigger, _fk_rel: &RelationData, _pk_rel: &RelationData) -> bool {
     unimplemented!()
 }
-pub fn RI_PartitionRemove_Check(_trigger: *mut Trigger, _fk_rel: Relation, _pk_rel: Relation) {
+pub fn RI_PartitionRemove_Check(_trigger: *mut Trigger, _fk_rel: &RelationData, _pk_rel: &RelationData) {
     unimplemented!()
 }
 

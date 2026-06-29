@@ -13,10 +13,6 @@
 //! catalog scans (type-name resolution) and `heap_create_with_catalog` (buffer
 //! pool + WAL), so they are `async` and thread `&Arc<SharedState>`.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: holds per-backend raw Relation/TupleDesc handles task-confined for the operation; same contract as heap/relcache"
-)]
 
 use std::sync::Arc;
 
@@ -232,7 +228,6 @@ async fn typename_type_id_and_mod(shared: &Arc<SharedState>, type_name: &TypeNam
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "tests")]
-#[allow(clippy::future_not_send, reason = "test bodies; not spawned on the runtime")]
 mod tests {
     use std::sync::Arc;
 
@@ -438,9 +433,9 @@ mod tests {
             assert!(rebuilt.is_some(), "the new relation rebuilds from its on-disk catalog rows");
             if let Some(rd) = rebuilt {
                 // SAFETY: live rebuilt relation.
-                let natts = unsafe { (*rd).rd_att.as_ref().unwrap().natts };
+                let natts = rd.rd_att.as_ref().unwrap().natts;
                 assert_eq!(natts, 1, "the rebuilt descriptor has the one user column");
-                let att0 = unsafe { (*rd).rd_att.as_ref().unwrap().attr(0) };
+                let att0 = rd.rd_att.as_ref().unwrap().attr(0);
                 assert_eq!(att0.atttypid, Oid(23), "column a is int4");
             }
         }))
@@ -466,7 +461,7 @@ mod tests {
                     .await
                     .expect("t2 rebuilds");
             // SAFETY: live rebuilt relation.
-            let natts = unsafe { (*rebuilt).rd_att.as_ref().unwrap().natts };
+            let natts = rebuilt.rd_att.as_ref().unwrap().natts;
             assert_eq!(natts, 2, "two user columns");
         }))
         .await;

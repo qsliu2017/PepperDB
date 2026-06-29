@@ -8,8 +8,8 @@ use crate::c::{Size, TransactionId};
 use crate::storage::block::BlockNumber;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::lock::VirtualTransactionId;
-use crate::utils::relcache::Relation;
 use crate::utils::snapshot::Snapshot;
+use crate::utils::rel::RelationData;
 
 // GUC variables -> process-globals, deferred to Session/GUC state (Phase 2).
 pub static mut max_predicate_locks_per_xact: i32 = 0;
@@ -33,7 +33,7 @@ pub fn CheckPointPredicate() {
 }
 
 // predicate lock reporting
-pub fn PageIsPredicateLocked(_relation: Relation, _blkno: BlockNumber) -> bool {
+pub fn PageIsPredicateLocked(_relation: &RelationData, _blkno: BlockNumber) -> bool {
     unimplemented!() // TODO(lock-manager)
 }
 
@@ -51,31 +51,31 @@ pub fn SetSerializableTransactionSnapshot(
 pub fn RegisterPredicateLockingXid(_xid: TransactionId) {
     unimplemented!() // TODO(lock-manager)
 }
-pub fn PredicateLockRelation(_relation: Relation, _snapshot: Snapshot) {
+pub fn PredicateLockRelation(_relation: &RelationData, _snapshot: Snapshot) {
     unimplemented!() // TODO(lock-manager)
 }
-pub fn PredicateLockPage(_relation: Relation, _blkno: BlockNumber, _snapshot: Snapshot) {
+pub fn PredicateLockPage(_relation: &RelationData, _blkno: BlockNumber, _snapshot: Snapshot) {
     unimplemented!() // TODO(lock-manager)
 }
 pub fn PredicateLockTID(
-    _relation: Relation,
+    _relation: &RelationData,
     _tid: &ItemPointerData,
     _snapshot: Snapshot,
     _tuple_xid: TransactionId,
 ) {
     unimplemented!() // TODO(lock-manager)
 }
-pub fn PredicateLockPageSplit(_relation: Relation, _oldblkno: BlockNumber, _newblkno: BlockNumber) {
+pub fn PredicateLockPageSplit(_relation: &RelationData, _oldblkno: BlockNumber, _newblkno: BlockNumber) {
     unimplemented!() // TODO(lock-manager)
 }
 pub fn PredicateLockPageCombine(
-    _relation: Relation,
+    _relation: &RelationData,
     _oldblkno: BlockNumber,
     _newblkno: BlockNumber,
 ) {
     unimplemented!() // TODO(lock-manager)
 }
-pub fn TransferPredicateLocksToHeapRelation(_relation: Relation) {
+pub fn TransferPredicateLocksToHeapRelation(_relation: &RelationData) {
     unimplemented!() // TODO(lock-manager)
 }
 pub fn ReleasePredicateLocks(_is_commit: bool, _is_read_only_safe: bool) {
@@ -83,24 +83,24 @@ pub fn ReleasePredicateLocks(_is_commit: bool, _is_read_only_safe: bool) {
 }
 
 // conflict detection (may also trigger rollback)
-pub fn CheckForSerializableConflictOutNeeded(_relation: Relation, _snapshot: Snapshot) -> bool {
+pub fn CheckForSerializableConflictOutNeeded(_relation: &RelationData, _snapshot: Snapshot) -> bool {
     unimplemented!() // TODO(lock-manager)
 }
 pub fn CheckForSerializableConflictOut(
-    _relation: Relation,
+    _relation: &RelationData,
     _xid: TransactionId,
     _snapshot: Snapshot,
 ) {
     unimplemented!() // TODO(lock-manager)
 }
 pub fn CheckForSerializableConflictIn(
-    _relation: Relation,
+    _relation: &RelationData,
     _tid: &ItemPointerData,
     _blkno: BlockNumber,
 ) {
     unimplemented!() // TODO(lock-manager)
 }
-pub fn CheckTableForSerializableConflictIn(_relation: Relation) {
+pub fn CheckTableForSerializableConflictIn(_relation: &RelationData) {
     unimplemented!() // TODO(lock-manager)
 }
 

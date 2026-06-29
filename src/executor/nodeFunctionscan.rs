@@ -6,7 +6,7 @@ use crate::nodes::plannodes::FunctionScan;
 // TODO(ptr)
 pub fn ExecInitFunctionScan(
     _node: &FunctionScan,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut FunctionScanState {
     unimplemented!()

@@ -10,24 +10,20 @@
 //! Async coloring (rules.md s5): the catalog scans reach the buffer pool, so the
 //! resolution routines are `async` and thread `&Arc<SharedState>`.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: holds per-backend raw Relation/HeapTuple handles task-confined for the operation; same contract as relcache/genam"
-)]
 
 use std::sync::Arc;
 
 use crate::access::htup::HeapTupleData;
 use crate::access::skey::ScanKeyData;
 use crate::backend::access::common::heaptuple::{heap_freetuple, heap_getattr};
-use crate::backend::access::index::genam::{systable_beginscan, systable_endscan, systable_getnext};
-use crate::backend::access::heap::heapam::SendPtr;
+use crate::backend::access::index::genam::{
+    systable_beginscan, systable_endscan, systable_getnext, systable_scan_snapshot,
+};
 use crate::backend::utils::cache::relcache::{relation_close, relation_id_get_relation};
 use crate::catalog::pg_namespace::{PG_CATALOG_NAMESPACE, PG_PUBLIC_NAMESPACE};
 use crate::postgres::{Datum, DatumGetObjectId, ObjectIdGetDatum};
 use crate::postgres_ext::{InvalidOid, Oid};
 use crate::shared_state::SharedState;
-use crate::utils::relcache::Relation;
 
 /// The M2 default search path: pg_catalog first, then public. PG computes this
 /// from the `search_path` GUC (`fetchSearchPath`); M2 uses the default schemas
@@ -151,9 +147,8 @@ async fn scan_name_nsp(
     name: &str,
     namespace_id: Oid,
 ) -> Option<Oid> {
-    let catalog = SendPtr(relation_id_get_relation(catalog_relid)?);
-    // SAFETY: live open catalog relation with a descriptor.
-    let desc = unsafe { (*catalog.get()).rd_att.clone() }
+    let catalog = relation_id_get_relation(catalog_relid)?;
+    let desc = catalog.rd_att.clone()
         .unwrap_or_else(|| unreachable!("catalog has a descriptor"));
 
     // The M2 systable heap scan applies keys post-fetch; pass the namespace key
@@ -168,7 +163,8 @@ async fn scan_name_nsp(
         func: zero_fmgr_info(),
         argument: ObjectIdGetDatum(namespace_id),
     }];
-    let mut scan = systable_beginscan(shared, catalog.get(), InvalidOid, false, None, &key);
+    let snap = systable_scan_snapshot(shared, &catalog, None);
+    let mut scan = systable_beginscan(shared, &catalog, InvalidOid, false, &snap, &key);
 
     let mut result = None;
     while let Some(tup) = systable_getnext(shared, &mut scan).await {
@@ -186,7 +182,7 @@ async fn scan_name_nsp(
     }
 
     systable_endscan(shared, &mut scan);
-    relation_close(catalog.get());
+    relation_close(catalog);
     result
 }
 
@@ -217,7 +213,7 @@ fn zero_fmgr_info() -> crate::fmgr::FmgrInfo {
         retset: false,
         stats: 0,
         extra: 0,
-        mcxt: core::ptr::null_mut(),
-        expr: core::ptr::null_mut(),
+        mcxt: (),
+        expr: None,
     }
 }

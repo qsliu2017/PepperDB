@@ -8,8 +8,8 @@ use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::storage::bufpage::SizeOfPageHeaderData;
 use crate::storage::itemid::ItemIdData;
-use crate::utils::relcache::Relation;
 use crate::varatt::{varlena, VARHDRSZ};
+use crate::utils::rel::RelationData;
 
 /// Maximum tuple size if there are to be N tuples per page.
 pub const fn MaximumBytesPerTuple(tuplesPerPage: usize) -> usize {
@@ -42,7 +42,7 @@ pub const TOAST_MAX_CHUNK_SIZE: usize = EXTERN_TUPLE_MAX_SIZE
 
 /// Called by heap_insert() and heap_update().
 pub fn heap_toast_insert_or_update(
-    _rel: Relation,
+    _rel: &RelationData,
     _newtup: crate::access::htup::HeapTuple,
     _oldtup: crate::access::htup::HeapTuple,
     _options: i32,
@@ -52,7 +52,7 @@ pub fn heap_toast_insert_or_update(
 
 /// Called by heap_delete().
 pub fn heap_toast_delete(
-    _rel: Relation,
+    _rel: &RelationData,
     _oldtup: crate::access::htup::HeapTuple,
     _is_speculative: bool,
 ) {
@@ -87,7 +87,7 @@ pub fn toast_build_flattened_tuple(
 
 /// Fetch a slice from a toast value stored in a heap table (writes into result).
 pub fn heap_fetch_toast_slice(
-    _toastrel: Relation,
+    _toastrel: &RelationData,
     _valueid: Oid,
     _attrsize: i32,
     _sliceoffset: i32,

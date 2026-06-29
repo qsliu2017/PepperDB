@@ -7,11 +7,11 @@ use crate::nodes::nodes::Node;
 use crate::nodes::pathnodes::{AppendRelInfo, PlannerInfo, RelOptInfo, Relids};
 use crate::nodes::parsenodes::RangeTblEntry;
 use crate::nodes::primnodes::Var;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 pub fn make_append_rel_info(
-    parentrel: Relation,
-    childrel: Relation,
+    parentrel: &RelationData,
+    childrel: &RelationData,
     parent_rt_index: usize,
     child_rt_index: usize,
 ) -> Box<AppendRelInfo> {
@@ -90,7 +90,7 @@ pub fn add_row_identity_columns(
     root: &mut PlannerInfo,
     rtindex: usize,
     target_rte: &mut RangeTblEntry,
-    target_relation: Relation,
+    target_relation: &RelationData,
 ) {
     unimplemented!()
 }

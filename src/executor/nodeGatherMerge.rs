@@ -6,7 +6,7 @@ use crate::nodes::plannodes::GatherMerge;
 // TODO(ptr)
 pub fn ExecInitGatherMerge(
     _node: &GatherMerge,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut GatherMergeState {
     unimplemented!()

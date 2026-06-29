@@ -25,7 +25,8 @@ use crate::storage::off::OffsetNumber;
 use crate::utils::hsearch::HTAB;
 use crate::access::htup::HeapTuple;
 use crate::utils::memutils::MemoryContext;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// Maximum number of "halves" a page can be split into in one operation.
 pub const GIST_MAX_SPLIT_PAGES: usize = 75;
@@ -221,8 +222,8 @@ pub struct GistSplitVector {
 
 /// GISTInsertState (anonymous struct in C).
 pub struct GISTInsertState {
-    pub r: Relation,
-    pub heap_rel: Relation,
+    pub r: Arc<RelationData>,
+    pub heap_rel: Arc<RelationData>,
     /// free space to be left
     pub freespace: usize,
     pub is_build: bool,
@@ -317,15 +318,15 @@ pub struct GiSTOptions {
 }
 
 /* gist.c */
-pub fn gistbuildempty(_index: Relation) {
+pub fn gistbuildempty(_index: &RelationData) {
     unimplemented!()
 }
 pub fn gistinsert(
-    _r: Relation,
+    _r: &RelationData,
     _values: &[Datum],
     _isnull: &[bool],
     _ht_ctid: &mut ItemPointerData,
-    _heap_rel: Relation,
+    _heap_rel: &RelationData,
     _check_unique: IndexUniqueCheck,
     _index_unchanged: bool,
     _index_info: &mut IndexInfo,
@@ -335,18 +336,18 @@ pub fn gistinsert(
 pub fn create_temp_gist_context() -> MemoryContext {
     unimplemented!()
 }
-pub fn init_gist_state(_index: Relation) -> *mut GISTSTATE {
+pub fn init_gist_state(_index: &RelationData) -> *mut GISTSTATE {
     unimplemented!()
 }
 pub fn free_gist_state(_giststate: &mut GISTSTATE) {
     unimplemented!()
 }
 pub fn gistdoinsert(
-    _r: Relation,
+    _r: &RelationData,
     _itup: IndexTuple,
     _freespace: usize,
     _giststate: &mut GISTSTATE,
-    _heap_rel: Relation,
+    _heap_rel: &RelationData,
     _is_build: bool,
 ) {
     unimplemented!()
@@ -362,7 +363,7 @@ pub struct GISTPageSplitInfo {
 
 #[allow(clippy::too_many_arguments)]
 pub fn gistplacetopage(
-    _rel: Relation,
+    _rel: &RelationData,
     _freespace: usize,
     _giststate: &mut GISTSTATE,
     _buffer: Buffer,
@@ -373,14 +374,14 @@ pub fn gistplacetopage(
     _leftchildbuf: Buffer,
     _splitinfo: &mut Vec<GISTPageSplitInfo>,
     _markfollowright: bool,
-    _heap_rel: Relation,
+    _heap_rel: &RelationData,
     _is_build: bool,
 ) -> bool {
     unimplemented!()
 }
 
 pub fn gistSplit(
-    _r: Relation,
+    _r: &RelationData,
     _page: &Page,
     _itup: &mut [IndexTuple],
     _len: i32,
@@ -399,8 +400,8 @@ pub fn gist_xlog_page_delete(
     unimplemented!()
 }
 pub fn gist_xlog_page_reuse(
-    _rel: Relation,
-    _heaprel: Relation,
+    _rel: &RelationData,
+    _heaprel: &RelationData,
     _blkno: BlockNumber,
     _delete_xid: FullTransactionId,
 ) {
@@ -421,7 +422,7 @@ pub fn gist_xlog_delete(
     _todelete: &[OffsetNumber],
     _ntodelete: i32,
     _snapshot_conflict_horizon: TransactionId,
-    _heaprel: Relation,
+    _heaprel: &RelationData,
 ) -> XLogRecPtr {
     unimplemented!()
 }
@@ -446,7 +447,7 @@ pub fn gistgettuple(_scan: IndexScanDesc, _dir: crate::access::sdir::ScanDirecti
 pub fn gistgetbitmap(_scan: IndexScanDesc, _tbm: &mut crate::nodes::tidbitmap::TIDBitmap) -> i64 {
     unimplemented!()
 }
-pub fn gistcanreturn(_index: Relation, _attno: i32) -> bool {
+pub fn gistcanreturn(_index: &RelationData, _attno: i32) -> bool {
     unimplemented!()
 }
 
@@ -493,10 +494,10 @@ pub fn gistnospace(
 ) -> bool {
     unimplemented!()
 }
-pub fn gistcheckpage(_rel: Relation, _buf: Buffer) {
+pub fn gistcheckpage(_rel: &RelationData, _buf: Buffer) {
     unimplemented!()
 }
-pub fn gist_new_buffer(_r: Relation, _heaprel: Relation) -> Buffer {
+pub fn gist_new_buffer(_r: &RelationData, _heaprel: &RelationData) -> Buffer {
     unimplemented!()
 }
 pub fn gist_page_recyclable(_page: &Page) -> bool {
@@ -523,7 +524,7 @@ pub fn gistfillitupvec(_vec: &[IndexTuple], _veclen: i32) -> (*mut IndexTupleDat
 }
 
 pub fn gistunion(
-    _r: Relation,
+    _r: &RelationData,
     _itvec: &[IndexTuple],
     _len: i32,
     _giststate: &mut GISTSTATE,
@@ -531,7 +532,7 @@ pub fn gistunion(
     unimplemented!()
 }
 pub fn gistgetadjusted(
-    _r: Relation,
+    _r: &RelationData,
     _oldtup: IndexTuple,
     _addtup: IndexTuple,
     _giststate: &mut GISTSTATE,
@@ -540,7 +541,7 @@ pub fn gistgetadjusted(
 }
 pub fn gist_form_tuple(
     _giststate: &mut GISTSTATE,
-    _r: Relation,
+    _r: &RelationData,
     _attdata: &[Datum],
     _isnull: &[bool],
     _isleaf: bool,
@@ -549,7 +550,7 @@ pub fn gist_form_tuple(
 }
 pub fn gist_compress_values(
     _giststate: &mut GISTSTATE,
-    _r: Relation,
+    _r: &RelationData,
     _attdata: &[Datum],
     _isnull: &[bool],
     _isleaf: bool,
@@ -559,7 +560,7 @@ pub fn gist_compress_values(
 }
 
 pub fn gistchoose(
-    _r: Relation,
+    _r: &RelationData,
     _p: &Page,
     _it: IndexTuple,
     _giststate: &mut GISTSTATE,
@@ -579,7 +580,7 @@ pub fn gistdentryinit(
     _nkey: i32,
     _e: &mut GISTENTRY,
     _k: Datum,
-    _r: Relation,
+    _r: &RelationData,
     _pg: &Page,
     _o: OffsetNumber,
     _l: bool,
@@ -613,7 +614,7 @@ pub fn gist_key_is_eq(_giststate: &mut GISTSTATE, _attno: i32, _a: Datum, _b: Da
 #[allow(clippy::too_many_arguments)]
 pub fn gist_decompress_att(
     _giststate: &mut GISTSTATE,
-    _r: Relation,
+    _r: &RelationData,
     _tuple: IndexTuple,
     _p: &Page,
     _o: OffsetNumber,
@@ -622,7 +623,7 @@ pub fn gist_decompress_att(
 ) {
     unimplemented!()
 }
-pub fn gist_fetch_tuple(_giststate: &mut GISTSTATE, _r: Relation, _tuple: IndexTuple) -> HeapTuple {
+pub fn gist_fetch_tuple(_giststate: &mut GISTSTATE, _r: &RelationData, _tuple: IndexTuple) -> HeapTuple {
     unimplemented!()
 }
 #[allow(clippy::too_many_arguments)]
@@ -639,7 +640,7 @@ pub fn gist_make_union_key(
     unimplemented!()
 }
 
-pub fn gist_get_fake_lsn(_rel: Relation) -> XLogRecPtr {
+pub fn gist_get_fake_lsn(_rel: &RelationData) -> XLogRecPtr {
     unimplemented!()
 }
 
@@ -661,7 +662,7 @@ pub fn gistvacuumcleanup(
 
 /* gistsplit.c */
 pub fn gist_split_by_key(
-    _r: Relation,
+    _r: &RelationData,
     _page: &Page,
     _itup: &mut [IndexTuple],
     _len: i32,
@@ -674,8 +675,8 @@ pub fn gist_split_by_key(
 
 /* gistbuild.c */
 pub fn gistbuild(
-    _heap: Relation,
-    _index: Relation,
+    _heap: &RelationData,
+    _index: &RelationData,
     _index_info: &mut IndexInfo,
 ) -> *mut IndexBuildResult {
     unimplemented!()
@@ -717,7 +718,7 @@ pub fn gist_free_build_buffers(_gfbb: &mut GISTBuildBuffers) {
 pub fn gist_relocate_build_buffers_on_split(
     _gfbb: &mut GISTBuildBuffers,
     _giststate: &mut GISTSTATE,
-    _r: Relation,
+    _r: &RelationData,
     _level: i32,
     _buffer: Buffer,
     _splitinfo: &[GISTPageSplitInfo],

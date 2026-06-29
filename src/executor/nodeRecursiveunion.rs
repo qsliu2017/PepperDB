@@ -3,7 +3,7 @@
 use crate::nodes::execnodes::{EState, RecursiveUnionState};
 use crate::nodes::plannodes::RecursiveUnion;
 
-pub fn ExecInitRecursiveUnion(_node: &RecursiveUnion, _estate: &mut EState, _eflags: i32) -> *mut RecursiveUnionState {
+pub fn ExecInitRecursiveUnion(_node: &RecursiveUnion, _estate: &mut EState<'_>, _eflags: i32) -> *mut RecursiveUnionState {
     unimplemented!() // TODO(ptr)
 }
 pub fn ExecEndRecursiveUnion(_node: &mut RecursiveUnionState) {

@@ -41,8 +41,14 @@ pub struct FmgrInfo {
     pub retset: bool,             // function returns a set
     pub stats: u8,                // collect stats if track_functions > this
     pub extra: usize,             // extra space for use by handler (void *) TODO(ptr)
-    pub mcxt: MemoryContext,      // memory context to store extra in
-    pub expr: fmNodePtr,          // expression parse tree for call, or NULL
+    /// Memory context to store `extra` in. Tombstoned in this port (the C
+    /// `fn_mcxt` is only consulted by the palloc that no longer exists), so it
+    /// carries no handle -- a unit, keeping the struct genuinely `Send`.
+    pub mcxt: (),
+    /// Expression parse tree for the call, or `None`. Owned `Option<Box<Node>>`
+    /// (was a raw `*mut Node`); `None` on the support/scankey path, so the
+    /// struct is genuinely `Send` without an `unsafe impl`.
+    pub expr: Option<Box<Node>>,
 }
 
 pub const FIELDNO_FUNCTIONCALLINFODATA_ISNULL: usize = 4;
@@ -53,8 +59,12 @@ pub const FIELDNO_FUNCTIONCALLINFODATA_ARGS: usize = 6;
 #[allow(deprecated)]
 pub struct FunctionCallInfoBaseData {
     pub flinfo: Option<Box<FmgrInfo>>, // ptr to lookup info used for this call TODO(ptr)
-    pub context: fmNodePtr,            // pass info about context of call
-    pub resultinfo: fmNodePtr,         // pass or return extra info about result
+    /// Call-context node, or `None`. Owned `Option<Box<Node>>` (was a raw
+    /// `*mut Node`); `None` on every live path (only set by trigger/agg/SRF
+    /// callers that don't exist yet), so the struct stays genuinely `Send`.
+    pub context: Option<Box<Node>>, // pass info about context of call
+    /// Result-info node, or `None`. Same owned representation as `context`.
+    pub resultinfo: Option<Box<Node>>, // pass or return extra info about result
     pub fncollation: Oid,              // collation for function to use
     pub isnull: bool,                  // function must set true if result is NULL
     pub nargs: i16,                    // # arguments actually passed
@@ -74,8 +84,8 @@ pub fn InitFunctionCallInfoData(
     flinfo: Option<Box<FmgrInfo>>,
     nargs: i16,
     collation: Oid,
-    context: fmNodePtr,
-    resultinfo: fmNodePtr,
+    context: Option<Box<Node>>,
+    resultinfo: Option<Box<Node>>,
 ) {
     fcinfo.flinfo = flinfo;
     fcinfo.context = context;
@@ -96,7 +106,8 @@ pub fn FunctionCallInvoke(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
 }
 
 /// C: `#define fmgr_info_set_expr(expr, finfo)`
-pub fn fmgr_info_set_expr(expr: fmNodePtr, finfo: &mut FmgrInfo) {
+#[allow(deprecated)]
+pub fn fmgr_info_set_expr(expr: Option<Box<Node>>, finfo: &mut FmgrInfo) {
     finfo.expr = expr;
 }
 

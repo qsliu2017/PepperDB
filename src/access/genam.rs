@@ -18,11 +18,12 @@ use crate::storage::block::BlockNumber;
 use crate::storage::buf::{Buffer, BufferAccessStrategy};
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
-use crate::utils::relcache::Relation;
 use crate::utils::snapshot::Snapshot;
 
 // TupleTableSlot is forward-declared in the C header; reference the real type.
 use crate::executor::tuptable::TupleTableSlot;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// Statistics maintained by amgettuple and amgetbitmap.
 pub struct IndexScanInstrumentation {
@@ -47,9 +48,9 @@ pub struct IndexBuildResult {
 /// Input arguments passed to ambulkdelete and amvacuumcleanup.
 pub struct IndexVacuumInfo {
     /// The index being vacuumed.
-    pub index: Relation,
+    pub index: Arc<RelationData>,
     /// The heap relation the index belongs to.
-    pub heaprel: Relation,
+    pub heaprel: Arc<RelationData>,
     /// ANALYZE (without any actual vacuum).
     pub analyze_only: bool,
     /// Emit progress.h status reports.
@@ -116,24 +117,24 @@ pub fn IndexScanIsValid(scan: Option<&IndexScanDescData>) -> bool {
 
 // generalized index_ interface routines (in indexam.c)
 
-pub fn index_open(_relationId: Oid, _lockmode: i32) -> Relation {
+pub fn index_open(_relationId: Oid, _lockmode: i32) -> Arc<RelationData> {
     unimplemented!()
 }
 
-pub fn try_index_open(_relationId: Oid, _lockmode: i32) -> Option<Relation> {
+pub fn try_index_open(_relationId: Oid, _lockmode: i32) -> Option<Arc<RelationData>> {
     unimplemented!()
 }
 
-pub fn index_close(_relation: Relation, _lockmode: i32) {
+pub fn index_close(_relation: &RelationData, _lockmode: i32) {
     unimplemented!()
 }
 
 pub fn index_insert(
-    _indexRelation: Relation,
+    _indexRelation: &RelationData,
     _values: &[Datum],
     _isnull: &[bool],
     _heap_t_ctid: &mut ItemPointerData,
-    _heapRelation: Relation,
+    _heapRelation: &RelationData,
     _checkUnique: IndexUniqueCheck,
     _indexUnchanged: bool,
     _indexInfo: &mut IndexInfo,
@@ -141,13 +142,13 @@ pub fn index_insert(
     unimplemented!()
 }
 
-pub fn index_insert_cleanup(_indexRelation: Relation, _indexInfo: &mut IndexInfo) {
+pub fn index_insert_cleanup(_indexRelation: &RelationData, _indexInfo: &mut IndexInfo) {
     unimplemented!()
 }
 
 pub fn index_beginscan(
-    _heapRelation: Relation,
-    _indexRelation: Relation,
+    _heapRelation: &RelationData,
+    _indexRelation: &RelationData,
     _snapshot: Snapshot,
     _instrument: &mut IndexScanInstrumentation,
     _nkeys: i32,
@@ -157,7 +158,7 @@ pub fn index_beginscan(
 }
 
 pub fn index_beginscan_bitmap(
-    _indexRelation: Relation,
+    _indexRelation: &RelationData,
     _snapshot: Snapshot,
     _instrument: &mut IndexScanInstrumentation,
     _nkeys: i32,
@@ -188,7 +189,7 @@ pub fn index_restrpos(_scan: IndexScanDesc) {
 }
 
 pub fn index_parallelscan_estimate(
-    _indexRelation: Relation,
+    _indexRelation: &RelationData,
     _nkeys: i32,
     _norderbys: i32,
     _snapshot: Snapshot,
@@ -200,8 +201,8 @@ pub fn index_parallelscan_estimate(
 }
 
 pub fn index_parallelscan_initialize(
-    _heapRelation: Relation,
-    _indexRelation: Relation,
+    _heapRelation: &RelationData,
+    _indexRelation: &RelationData,
     _snapshot: Snapshot,
     _instrument: bool,
     _parallel_aware: bool,
@@ -217,8 +218,8 @@ pub fn index_parallelrescan(_scan: IndexScanDesc) {
 }
 
 pub fn index_beginscan_parallel(
-    _heaprel: Relation,
-    _indexrel: Relation,
+    _heaprel: &RelationData,
+    _indexrel: &RelationData,
     _instrument: &mut IndexScanInstrumentation,
     _nkeys: i32,
     _norderbys: i32,
@@ -266,12 +267,12 @@ pub fn index_vacuum_cleanup(
     unimplemented!()
 }
 
-pub fn index_can_return(_indexRelation: Relation, _attno: i32) -> bool {
+pub fn index_can_return(_indexRelation: &RelationData, _attno: i32) -> bool {
     unimplemented!()
 }
 
 pub fn index_getprocid(
-    _irel: Relation,
+    _irel: &RelationData,
     _attnum: AttrNumber,
     _procnum: u16,
 ) -> RegProcedure {
@@ -279,7 +280,7 @@ pub fn index_getprocid(
 }
 
 pub fn index_getprocinfo(
-    _irel: Relation,
+    _irel: &RelationData,
     _attnum: AttrNumber,
     _procnum: u16,
 ) -> *mut FmgrInfo {
@@ -296,7 +297,7 @@ pub fn index_store_float8_orderby_distances(
 }
 
 pub fn index_opclass_options(
-    _indrel: Relation,
+    _indrel: &RelationData,
     _attnum: AttrNumber,
     _attoptions: Datum,
     _validate: bool,
@@ -307,7 +308,7 @@ pub fn index_opclass_options(
 // index access method support routines (in genam.c)
 
 pub fn RelationGetIndexScan(
-    _indexRelation: Relation,
+    _indexRelation: &RelationData,
     _nkeys: i32,
     _norderbys: i32,
 ) -> IndexScanDesc {
@@ -319,7 +320,7 @@ pub fn IndexScanEnd(_scan: IndexScanDesc) {
 }
 
 pub fn BuildIndexValueDescription(
-    _indexRelation: Relation,
+    _indexRelation: &RelationData,
     _values: &[Datum],
     _isnull: &[bool],
 ) -> Option<String> {
@@ -327,8 +328,8 @@ pub fn BuildIndexValueDescription(
 }
 
 pub fn index_compute_xid_horizon_for_tuples(
-    _irel: Relation,
-    _hrel: Relation,
+    _irel: &RelationData,
+    _hrel: &RelationData,
     _ibuf: Buffer,
     _itemnos: &[OffsetNumber],
     _nitems: i32,
@@ -346,8 +347,8 @@ pub use crate::backend::access::index::genam::{
 };
 
 pub fn systable_beginscan_ordered(
-    _heapRelation: Relation,
-    _indexRelation: Relation,
+    _heapRelation: &RelationData,
+    _indexRelation: &RelationData,
     _snapshot: Snapshot,
     _nkeys: i32,
     _key: ScanKey,
@@ -370,7 +371,7 @@ pub fn systable_endscan_ordered(_sysscan: SysScanDesc) {
 /// Returns (oldtupcopy, opaque state) for the in-place update. The C `void **state`
 /// opaque handle is returned rather than filled via out-param.
 pub fn systable_inplace_update_begin(
-    _relation: Relation,
+    _relation: &RelationData,
     _indexId: Oid,
     _indexOK: bool,
     _snapshot: Snapshot,

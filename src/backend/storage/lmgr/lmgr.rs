@@ -50,7 +50,7 @@ use crate::storage::lock::{
 };
 use crate::storage::lockdefs::LockMode;
 use crate::utils::inval::AcceptInvalidationMessages;
-use crate::utils::rel::{LockRelId, Relation};
+use crate::utils::rel::{LockRelId, RelationData};
 
 use super::lock::{
     GetLockConflicts, LockAcquire, LockAcquireExtended, LockHasWaiters, LockHeldByMe, LockRelease,
@@ -103,16 +103,10 @@ fn my_database_id() -> Oid {
 
 /// PG `RelationInitLockInfo`: initialize a reldesc's lock info. relcache.c calls
 /// this when creating a reldesc.
-#[allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "mirrors the C fn taking a Relation pointer; safe-ref migration is later"
-)]
-pub fn RelationInitLockInfo(relation: Relation) {
-    debug_assert!(!relation.is_null());
-    // SAFETY: relcache hands us a live RelationData (rules: trust internal code).
-    let rel = unsafe { &mut *relation };
-    rel.rd_lockInfo.lockRelId.relId = rel.rd_id;
-    rel.rd_lockInfo.lockRelId.dbId = if unsafe { (*rel.rd_rel).relisshared } {
+pub fn RelationInitLockInfo(relation: &mut RelationData) {
+    let relisshared = relation.form().relisshared;
+    relation.rd_lockInfo.lockRelId.relId = relation.rd_id;
+    relation.rd_lockInfo.lockRelId.dbId = if relisshared {
         InvalidOid
     } else {
         my_database_id()
@@ -130,13 +124,11 @@ fn set_locktag_relation_oid(relid: Oid) -> LOCKTAG {
 }
 
 /// The lockRelId (dbId, relId) carried inside a Relation.
-fn rel_lock_id(relation: Relation) -> LockRelId {
-    // SAFETY: a Relation passed to these wrappers is always live (rules: trust
-    // internal code; PG asserts RelationIsValid).
-    unsafe { (*relation).rd_lockInfo.lockRelId }
+fn rel_lock_id(relation: &RelationData) -> LockRelId {
+    relation.rd_lockInfo.lockRelId
 }
 
-fn rel_locktag(relation: Relation) -> LOCKTAG {
+fn rel_locktag(relation: &RelationData) -> LOCKTAG {
     let id = rel_lock_id(relation);
     LOCKTAG::set_relation(id.dbId.0, id.relId.0)
 }
@@ -190,7 +182,7 @@ pub fn UnlockRelationOid(relid: Oid, lockmode: LOCKMODE) {
 /// Sync wrapper: derive the Send `LOCKTAG` from the `!Send` raw `Relation` here
 /// so it never enters the returned future (same shape as `XactLockTableWait`).
 pub fn LockRelation(
-    relation: Relation,
+    relation: &RelationData,
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = ()> + Send {
     let tag = rel_locktag(relation);
@@ -203,7 +195,7 @@ pub fn LockRelation(
 
 /// PG `ConditionalLockRelation`.
 pub fn ConditionalLockRelation(
-    relation: Relation,
+    relation: &RelationData,
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = bool> + Send {
     let tag = rel_locktag(relation);
@@ -218,7 +210,7 @@ pub fn ConditionalLockRelation(
 }
 
 /// PG `UnlockRelation`.
-pub fn UnlockRelation(relation: Relation, lockmode: LOCKMODE) {
+pub fn UnlockRelation(relation: &RelationData, lockmode: LOCKMODE) {
     let tag = rel_locktag(relation);
     LockRelease(&tag, lockmode, false);
 }
@@ -239,7 +231,7 @@ fn accept_inval_after_acquire(res: LockAcquireResult, locallock: Option<*mut LOC
 }
 
 /// PG `CheckRelationLockedByMe`.
-pub fn CheckRelationLockedByMe(relation: Relation, lockmode: LOCKMODE, orstronger: bool) -> bool {
+pub fn CheckRelationLockedByMe(relation: &RelationData, lockmode: LOCKMODE, orstronger: bool) -> bool {
     let tag = rel_locktag(relation);
     LockHeldByMe(&tag, lockmode, orstronger)
 }
@@ -251,7 +243,7 @@ pub fn CheckRelationOidLockedByMe(relid: Oid, lockmode: LOCKMODE, orstronger: bo
 }
 
 /// PG `LockHasWaitersRelation`: is someone else waiting for a lock we hold?
-pub fn LockHasWaitersRelation(relation: Relation, lockmode: LOCKMODE) -> bool {
+pub fn LockHasWaitersRelation(relation: &RelationData, lockmode: LOCKMODE) -> bool {
     let tag = rel_locktag(relation);
     LockHasWaiters(&tag, lockmode, false)
 }
@@ -276,7 +268,7 @@ pub fn UnlockRelationIdForSession(relid: &LockRelId, lockmode: LOCKMODE) {
 /// PG `LockRelationForExtension`: interlock addition of pages to a relation. The
 /// caller already holds a regular lock, so no AcceptInvalidationMessages here.
 pub fn LockRelationForExtension(
-    relation: Relation,
+    relation: &RelationData,
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = ()> + Send {
     let id = rel_lock_id(relation);
@@ -288,7 +280,7 @@ pub fn LockRelationForExtension(
 
 /// PG `ConditionalLockRelationForExtension`.
 pub fn ConditionalLockRelationForExtension(
-    relation: Relation,
+    relation: &RelationData,
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = bool> + Send {
     let id = rel_lock_id(relation);
@@ -297,14 +289,14 @@ pub fn ConditionalLockRelationForExtension(
 }
 
 /// PG `RelationExtensionLockWaiterCount`.
-pub fn RelationExtensionLockWaiterCount(relation: Relation) -> i32 {
+pub fn RelationExtensionLockWaiterCount(relation: &RelationData) -> i32 {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_relation_extend(id.dbId.0, id.relId.0);
     LockWaiterCount(&tag)
 }
 
 /// PG `UnlockRelationForExtension`.
-pub fn UnlockRelationForExtension(relation: Relation, lockmode: LOCKMODE) {
+pub fn UnlockRelationForExtension(relation: &RelationData, lockmode: LOCKMODE) {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_relation_extend(id.dbId.0, id.relId.0);
     LockRelease(&tag, lockmode, false);
@@ -319,7 +311,7 @@ pub async fn LockDatabaseFrozenIds(lockmode: LOCKMODE) {
 
 /// PG `LockPage`: a page-level lock (used by some index AMs).
 pub fn LockPage(
-    relation: Relation,
+    relation: &RelationData,
     blkno: BlockNumber,
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = ()> + Send {
@@ -332,7 +324,7 @@ pub fn LockPage(
 
 /// PG `ConditionalLockPage`.
 pub fn ConditionalLockPage(
-    relation: Relation,
+    relation: &RelationData,
     blkno: BlockNumber,
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = bool> + Send {
@@ -342,7 +334,7 @@ pub fn ConditionalLockPage(
 }
 
 /// PG `UnlockPage`.
-pub fn UnlockPage(relation: Relation, blkno: BlockNumber, lockmode: LOCKMODE) {
+pub fn UnlockPage(relation: &RelationData, blkno: BlockNumber, lockmode: LOCKMODE) {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_page(id.dbId.0, id.relId.0, blkno);
     LockRelease(&tag, lockmode, false);
@@ -350,7 +342,7 @@ pub fn UnlockPage(relation: Relation, blkno: BlockNumber, lockmode: LOCKMODE) {
 
 /// PG `LockTuple`: a tuple-level lock (see heap_lock_tuple before using).
 pub fn LockTuple(
-    relation: Relation,
+    relation: &RelationData,
     tid: &ItemPointerData,
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = ()> + Send {
@@ -368,7 +360,7 @@ pub fn LockTuple(
 
 /// PG `ConditionalLockTuple`.
 pub fn ConditionalLockTuple(
-    relation: Relation,
+    relation: &RelationData,
     tid: &ItemPointerData,
     lockmode: LOCKMODE,
     log_lock_failure: bool,
@@ -389,7 +381,7 @@ pub fn ConditionalLockTuple(
 }
 
 /// PG `UnlockTuple`.
-pub fn UnlockTuple(relation: Relation, tid: &ItemPointerData, lockmode: LOCKMODE) {
+pub fn UnlockTuple(relation: &RelationData, tid: &ItemPointerData, lockmode: LOCKMODE) {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_tuple(
         id.dbId.0,
@@ -429,7 +421,7 @@ pub fn XactLockTableDelete(xid: TransactionId) {
 pub fn XactLockTableWait<'a>(
     shared: &'a Arc<SharedState>,
     xid: TransactionId,
-    rel: Relation,
+    rel: Option<&RelationData>,
     ctid: &ItemPointerData,
     oper: XLTW_Oper,
 ) -> impl std::future::Future<Output = ()> + Send + 'a {
@@ -439,7 +431,7 @@ pub fn XactLockTableWait<'a>(
     // synchronous wrapper, so the `!Send` raw `Relation`/ctid never enter the
     // returned future. TODO(panic): push this onto the error-context stack once it
     // is async-aware.
-    let wait_ctx = xact_lock_wait_context(oper, rel, ctid);
+    let wait_ctx = xact_lock_wait_context(oper, rel, *ctid);
     xact_lock_table_wait_inner(shared, xid, wait_ctx)
 }
 
@@ -530,14 +522,14 @@ async fn xid_is_in_progress(shared: &Arc<SharedState>, xid: TransactionId) -> bo
 /// Returns None when no operation is specified (PG sets no callback).
 fn xact_lock_wait_context(
     oper: XLTW_Oper,
-    rel: Relation,
-    ctid: &ItemPointerData,
+    rel: Option<&RelationData>,
+    ctid: ItemPointerData,
 ) -> Option<String> {
-    if oper == XLTW_Oper::XltwNone || rel.is_null() || !ctid.is_valid() {
+    if oper == XLTW_Oper::XltwNone || !ctid.is_valid() {
         return None;
     }
-    // SAFETY: caller passes a live relation when oper != None (PG asserts the same).
-    let relname = crate::utils::rel::relation_get_relation_name(unsafe { &*rel });
+    let rel = rel?;
+    let relname = crate::utils::rel::relation_get_relation_name(rel);
     let blk = ctid.block_number();
     let off = ctid.offset_number();
     let msg = match oper {

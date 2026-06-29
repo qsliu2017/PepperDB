@@ -4,7 +4,7 @@ use crate::access::htup::HeapTuple;
 use crate::c::{MultiXactId, TransactionId};
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::relfilelocator::RelFileLocator;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// Opaque rewrite state (definition private to rewriteheap.c).
 pub struct RewriteStateData {
@@ -13,8 +13,8 @@ pub struct RewriteStateData {
 pub type RewriteState = *mut RewriteStateData; // TODO(ptr)
 
 pub fn begin_heap_rewrite(
-    _old_heap: Relation,
-    _new_heap: Relation,
+    _old_heap: &RelationData,
+    _new_heap: &RelationData,
     _oldest_xmin: TransactionId,
     _freeze_xid: TransactionId,
     _cutoff_multi: MultiXactId,

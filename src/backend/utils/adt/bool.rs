@@ -215,8 +215,8 @@ mod tests {
     fn fc(args: &[Datum]) -> FunctionCallInfoBaseData {
         FunctionCallInfoBaseData {
             flinfo: None,
-            context: core::ptr::null_mut(),
-            resultinfo: core::ptr::null_mut(),
+            context: None,
+            resultinfo: None,
             fncollation: crate::postgres_ext::InvalidOid,
             isnull: false,
             nargs: args.len() as i16,

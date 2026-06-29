@@ -4,8 +4,9 @@ use crate::c::text;
 use crate::nodes::parsenodes::VariableSetStmt;
 use crate::postgres_ext::Oid;
 use crate::utils::guc::GucSource;
-use crate::utils::rel::Relation;
 use crate::utils::snapshot::Snapshot;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 pub const DbRoleSettingRelationId: Oid = Oid(2964);
 
@@ -36,7 +37,7 @@ pub fn ApplySetting(
     _snapshot: &Snapshot,
     _databaseid: Oid,
     _roleid: Oid,
-    _relsetting: &Relation,
+    _relsetting: &Arc<RelationData>,
     _source: GucSource,
 ) {
     unimplemented!()

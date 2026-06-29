@@ -1,5 +1,5 @@
 //! Translated from PostgreSQL src/include/access/relscan.h
-//! Relation scan descriptor definitions (in-memory scan state).
+//! Arc<RelationData> scan descriptor definitions (in-memory scan state).
 
 use core::sync::atomic::AtomicU64;
 
@@ -13,8 +13,9 @@ use crate::nodes::tidbitmap::TBMIterator;
 use crate::postgres::Datum;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::relfilelocator::RelFileLocator;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 use crate::utils::snapshot::SnapshotData;
+use std::sync::Arc;
 
 /// Scan type-specific state of a TableScanDesc (C anonymous union `st`).
 pub enum TableScanType {
@@ -29,19 +30,25 @@ pub enum TableScanType {
 }
 
 /// Generic descriptor for table scans; base-class embedded in each AM's scan.
-pub struct TableScanDescData {
+///
+/// Borrow-based ownership (relation-ownership-plan step 1): the descriptor BORROWS
+/// the scanned relation (`&'rel RelationData`) and the scan snapshot
+/// (`&'snap SnapshotData`) -- the `Arc` owners live in an enclosing stack frame
+/// (the statement root / scan-init scope), never in the descriptor itself.
+pub struct TableScanDescData<'rel, 'snap> {
     // scan parameters
-    pub rs_rd: Relation,                          // heap relation descriptor
-    pub rs_snapshot: *mut SnapshotData,           // snapshot to see // TODO(ptr)
+    pub rs_rd: &'rel RelationData,        // heap relation descriptor (borrowed)
+    pub rs_snapshot: &'snap SnapshotData, // snapshot to see (borrowed)
     pub rs_nkeys: i32,                            // number of scan keys
-    pub rs_key: *mut ScanKeyData,                 // array of scan key descriptors // TODO(ptr)
+    pub rs_key: Vec<ScanKeyData>,                 // array of scan key descriptors (owned)
     /// scan type-specific members (C union `st`)
     pub st: TableScanType,
     /// bitmask of ScanOptions members (see tableam.h)
     pub rs_flags: u32,
-    pub rs_parallel: *mut ParallelTableScanDescData, // parallel scan info // TODO(ptr)
+    // parallel scan info; None when not a parallel scan (the C nullable pointer).
+    pub rs_parallel: Option<Box<ParallelTableScanDescData>>,
 }
-pub type TableScanDesc = *mut TableScanDescData; // TODO(ptr)
+pub type TableScanDesc = *mut TableScanDescData<'static, 'static>; // TODO(ptr)
 
 /// Shared state for a parallel table scan.
 pub struct ParallelTableScanDescData {
@@ -73,14 +80,14 @@ pub type ParallelBlockTableScanWorker = *mut ParallelBlockTableScanWorkerData; /
 
 /// Base class for fetches from a table via an index.
 pub struct IndexFetchTableData {
-    pub rel: Relation,
+    pub rel: Arc<RelationData>,
 }
 
 /// Index scan descriptor, shared by amgettuple- and amgetbitmap-based scans.
 pub struct IndexScanDescData {
     // scan parameters
-    pub heapRelation: Relation,         // heap relation descriptor, or NULL
-    pub indexRelation: Relation,        // index relation descriptor
+    pub heapRelation: Arc<RelationData>,         // heap relation descriptor, or NULL
+    pub indexRelation: Arc<RelationData>,        // index relation descriptor
     pub xs_snapshot: *mut SnapshotData, // snapshot to see // TODO(ptr)
     pub numberOfKeys: i32,              // number of index qualifier conditions
     pub numberOfOrderBys: i32,         // number of ordering operators
@@ -134,9 +141,9 @@ pub type ParallelIndexScanDesc = *mut ParallelIndexScanDescData; // TODO(ptr)
 
 /// Descriptor for storage-or-index scans of system tables.
 pub struct SysScanDescData {
-    pub heap_rel: Relation,              // catalog being scanned
-    pub irel: Relation,                  // NULL if doing heap scan
-    pub scan: *mut TableScanDescData,    // only valid in storage-scan case // TODO(ptr)
+    pub heap_rel: Arc<RelationData>,              // catalog being scanned
+    pub irel: Arc<RelationData>,                  // NULL if doing heap scan
+    pub scan: *mut TableScanDescData<'static, 'static>, // only valid in storage-scan case // TODO(ptr)
     pub iscan: *mut IndexScanDescData,   // only valid in index-scan case // TODO(ptr)
     pub snapshot: *mut SnapshotData,     // snapshot to unregister at scan end // TODO(ptr)
     pub slot: *mut TupleTableSlot,       // TODO(ptr)

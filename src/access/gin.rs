@@ -2,7 +2,8 @@
 
 use crate::postgres::Datum;
 use crate::storage::block::BlockNumber;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // amproc indexes for inverted indexes (support proc numbers; ordinals, not flags).
 pub const GIN_COMPARE_PROC: i32 = 1;
@@ -59,12 +60,12 @@ pub static mut GinFuzzySearchLimit: i32 = 0;
 pub static mut gin_pending_list_limit: i32 = 0;
 
 // ginutil.c
-pub fn ginGetStats(index: &Relation) -> GinStatsData {
+pub fn ginGetStats(index: &Arc<RelationData>) -> GinStatsData {
     let _ = index;
     unimplemented!()
 }
 
-pub fn ginUpdateStats(index: &Relation, stats: &GinStatsData, is_build: bool) {
+pub fn ginUpdateStats(index: &Arc<RelationData>, stats: &GinStatsData, is_build: bool) {
     let _ = (index, stats, is_build);
     unimplemented!()
 }

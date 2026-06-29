@@ -18,14 +18,6 @@
 //! fast in-memory path is sync; the catalog-scan miss path is the async warm.
 
 #![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the catalog caches are PER-BACKEND task-confined state (raw HeapTuple/FmgrInfo pointers); their populate futures never migrate threads mid-await. await_holding_lock/refcell are clean (enforced)."
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "catalog-cache routines take raw Relation/HeapTuple pointers per the C API; the deref is faithful to C (callers pass live handles)"
-)]
-#![allow(
     clippy::vec_box,
     reason = "CatCTup is boxed so its address (and the HeapTuple pointer returned into ct.tuple) stays stable when a bucket Vec reallocates"
 )]
@@ -34,9 +26,10 @@ use std::cell::RefCell;
 use crate::access::htup::{HeapTuple, HeapTupleData};
 use crate::access::skey::ScanKeyData;
 use crate::access::tupdesc::TupleDesc;
-use crate::backend::access::common::heaptuple::{heap_freetuple, heap_getattr};
-use crate::backend::access::heap::heapam::SendPtr;
-use crate::backend::access::index::genam::{systable_beginscan, systable_endscan, systable_getnext};
+use crate::backend::access::common::heaptuple::heap_getattr;
+use crate::backend::access::index::genam::{
+    systable_beginscan, systable_endscan, systable_getnext, systable_scan_snapshot,
+};
 use crate::postgres::{Datum, DatumGetInt16, DatumGetInt32, DatumGetObjectId};
 use crate::postgres_ext::Oid;
 use crate::shared_state::SharedState;
@@ -341,19 +334,16 @@ pub async fn search_cat_cache_populate(
     // `RelationIdGetRelation` directly and skip `table_open`'s AccessShareLock: the
     // nailed entry is never invalidated mid-scan, and the lock-tag path needs
     // `IsSharedRelation` (not yet translated). A non-nailed catalog is built async
-    // first. Wrap as SendPtr so the handle can live across the scan's `.await`.
+    // first.
     if !crate::backend::utils::cache::relcache::is_nailed_catalog(reloid)
         && crate::utils::relcache::RelationIdGetRelation(reloid).is_none()
     {
         crate::backend::utils::cache::relcache::relation_build_desc(shared, reloid).await;
     }
-    let relation = SendPtr(
-        crate::utils::relcache::RelationIdGetRelation(reloid)?,
-    );
+    let relation = crate::utils::relcache::RelationIdGetRelation(reloid)?;
 
     // Initialize key kinds from the relation's tupdesc.
-    // SAFETY: open relation.
-    let tupdesc = unsafe { (*relation.get()).rd_att.clone() };
+    let tupdesc = relation.rd_att.clone();
     if let Some(td) = tupdesc.as_ref() {
         with_cache(cache_id, |c| c.initialize(td));
     }
@@ -366,7 +356,8 @@ pub async fn search_cat_cache_populate(
     }
 
     let snapshot: Snapshot = None; // genam takes a catalog snapshot
-    let mut scan = systable_beginscan(shared, relation.get(), indexoid, false, snapshot, &skeys);
+    let snap = systable_scan_snapshot(shared, &relation, snapshot);
+    let mut scan = systable_beginscan(shared, &relation, indexoid, false, &snap, &skeys);
 
     let matched = Box::pin(systable_getnext(shared, &mut scan)).await;
     let found: Option<HeapTuple> = matched.and_then(|ntp| {
@@ -377,7 +368,7 @@ pub async fn search_cat_cache_populate(
         insert_entry(cache_id, entry)
     });
     systable_endscan(shared, &mut scan);
-    crate::utils::relcache::RelationClose(relation.get());
+    crate::utils::relcache::RelationClose(relation);
 
     if found.is_none() {
         // Add a negative entry (absence is cached) -- but NOT during bootstrap
@@ -419,15 +410,13 @@ fn build_negative_entry(cache_id: usize, search: &[Datum]) -> CatCTup {
     let mut keys = [Datum(0); CATCACHE_MAXKEYS];
     keys[..search.len()].copy_from_slice(search);
     let hv = with_cache(cache_id, |c| compute_hash(c, &keys[..c.cc_nkeys])).unwrap_or(0);
-    let tuple = HeapTupleData {
-        t_len: 0,
-        t_self: crate::storage::itemptr::ItemPointerData {
+    let tuple = HeapTupleData::null(
+        crate::storage::itemptr::ItemPointerData {
             blkid: crate::storage::block::BlockIdData { hi: 0, lo: 0 },
             posid: 0,
         },
-        t_tableOid: crate::postgres_ext::InvalidOid,
-        t_data: core::ptr::null_mut(),
-    };
+        crate::postgres_ext::InvalidOid,
+    );
     CatCTup { hash_value: hv, keys, refcount: 0, negative: true, tuple }
 }
 
@@ -459,8 +448,7 @@ fn entry_tupdesc(cache_id: usize) -> Option<TupleDesc> {
     // RelationIdGetRelation bumps the refcount; balance it with RelationClose after
     // cloning the (Arc) tuple descriptor so the pin is not leaked.
     let rel = crate::utils::relcache::RelationIdGetRelation(reloid)?;
-    // SAFETY: cached relation.
-    let td = unsafe { (*rel).rd_att.clone() };
+    let td = rel.rd_att.clone();
     crate::utils::relcache::RelationClose(rel);
     td
 }
@@ -490,8 +478,8 @@ fn zero_fmgr_info() -> crate::fmgr::FmgrInfo {
         retset: false,
         stats: 0,
         extra: 0,
-        mcxt: core::ptr::null_mut(),
-        expr: core::ptr::null_mut(),
+        mcxt: (),
+        expr: None,
     }
 }
 
@@ -519,20 +507,8 @@ pub fn release_cat_cache(tuple: HeapTuple) {
         .ok();
 }
 
-impl Drop for CatCTup {
-    fn drop(&mut self) {
-        if !self.tuple.t_data.is_null() {
-            let t = HeapTupleData {
-                t_len: self.tuple.t_len,
-                t_self: self.tuple.t_self,
-                t_tableOid: self.tuple.t_tableOid,
-                t_data: self.tuple.t_data,
-            };
-            self.tuple.t_data = core::ptr::null_mut();
-            heap_freetuple(t);
-        }
-    }
-}
+// `CatCTup.tuple` owns its body (`Option<Box<[u64]>>`), which drops with the
+// struct -- no manual Drop/free needed (was: reconstruct + heap_freetuple).
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "tests")]
@@ -620,12 +596,11 @@ mod tests {
     /// Seed one pg_type row (for the int4 type) into the open pg_type heap. Only the
     /// fixed columns are filled (non-null, so GETSTRUCT's struct overlay is valid);
     /// the trailing varlena columns are NULL.
-    #[allow(clippy::future_not_send, reason = "test helper")]
     async fn seed_int4_pg_type(shared: &Arc<SharedState>, name: &crate::c::NameData) {
         use crate::catalog::pg_type as t;
         let pg_type = relation_id_get_relation(TypeRelationId).expect("pg_type nailed");
         // SAFETY: nailed relation has a descriptor.
-        let desc = unsafe { (*pg_type).rd_att.clone() }.expect("pg_type desc");
+        let desc = pg_type.rd_att.clone().expect("pg_type desc");
         let natts = Natts_pg_type as usize;
 
         let mut values = vec![Datum(0); natts];
@@ -668,14 +643,7 @@ mod tests {
 
         let mut tuple = heap_form_tuple(&desc, &values, &isnull);
         let cid = GetCurrentCommandId(true);
-        heap_insert(
-            shared,
-            crate::backend::access::heap::heapam::SendPtr(pg_type),
-            crate::backend::access::heap::heapam::SendPtr(std::ptr::from_mut(&mut tuple)),
-            cid,
-            0,
-        )
-        .await;
+        heap_insert(shared, &pg_type, &mut tuple, cid, 0).await;
         relation_close(pg_type);
     }
 
@@ -689,8 +657,7 @@ mod tests {
 
             // RelationIdGetRelation on a nailed catalog returns the formrdesc desc.
             let pg_type = relation_id_get_relation(TypeRelationId).expect("nailed pg_type");
-            // SAFETY: nailed relation.
-            let natts = unsafe { (*pg_type).rd_att.as_ref().unwrap().natts };
+            let natts = pg_type.rd_att.as_ref().unwrap().natts;
             assert_eq!(natts, Natts_pg_type);
             relation_close(pg_type);
 

@@ -109,14 +109,14 @@ pub fn btint2sortsupport(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     Datum(0)
 }
 
-fn int2_decrement(_rel: crate::utils::relcache::Relation, existing: Datum) -> (Datum, bool) {
+fn int2_decrement(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = DatumGetInt16(existing);
     if v == PG_INT16_MIN {
         return (Datum(0), true);
     }
     (Int16GetDatum(v - 1), false)
 }
-fn int2_increment(_rel: crate::utils::relcache::Relation, existing: Datum) -> (Datum, bool) {
+fn int2_increment(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = DatumGetInt16(existing);
     if v == PG_INT16_MAX {
         return (Datum(0), true);
@@ -154,14 +154,14 @@ pub fn btint4sortsupport(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     Datum(0)
 }
 
-fn int4_decrement(_rel: crate::utils::relcache::Relation, existing: Datum) -> (Datum, bool) {
+fn int4_decrement(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = DatumGetInt32(existing);
     if v == PG_INT32_MIN {
         return (Datum(0), true);
     }
     (Int32GetDatum(v - 1), false)
 }
-fn int4_increment(_rel: crate::utils::relcache::Relation, existing: Datum) -> (Datum, bool) {
+fn int4_increment(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = DatumGetInt32(existing);
     if v == PG_INT32_MAX {
         return (Datum(0), true);
@@ -199,14 +199,14 @@ pub fn btint8sortsupport(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     Datum(0)
 }
 
-fn int8_decrement(_rel: crate::utils::relcache::Relation, existing: Datum) -> (Datum, bool) {
+fn int8_decrement(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = DatumGetInt64(existing);
     if v == PG_INT64_MIN {
         return (Datum(0), true);
     }
     (Int64GetDatum(v - 1), false)
 }
-fn int8_increment(_rel: crate::utils::relcache::Relation, existing: Datum) -> (Datum, bool) {
+fn int8_increment(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = DatumGetInt64(existing);
     if v == PG_INT64_MAX {
         return (Datum(0), true);
@@ -267,14 +267,14 @@ pub fn btoidsortsupport(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     Datum(0)
 }
 
-fn oid_decrement(_rel: crate::utils::relcache::Relation, existing: Datum) -> (Datum, bool) {
+fn oid_decrement(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = DatumGetObjectId(existing);
     if v.0 == 0 {
         return (Datum(0), true);
     }
     (ObjectIdGetDatum(Oid(v.0 - 1)), false)
 }
-fn oid_increment(_rel: crate::utils::relcache::Relation, existing: Datum) -> (Datum, bool) {
+fn oid_increment(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = DatumGetObjectId(existing);
     if v.0 == OID_MAX.0 {
         return (Datum(0), true);
@@ -311,14 +311,14 @@ pub fn btcharcmp(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     Int32GetDatum(i32::from(a) - i32::from(b))
 }
 
-fn char_decrement(_rel: crate::utils::relcache::Relation, existing: Datum) -> (Datum, bool) {
+fn char_decrement(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = existing.0 as u8;
     if v == 0 {
         return (Datum(0), true);
     }
     (UInt8GetDatum(v - 1), false)
 }
-fn char_increment(_rel: crate::utils::relcache::Relation, existing: Datum) -> (Datum, bool) {
+fn char_increment(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = existing.0 as u8;
     if v == u8::MAX {
         return (Datum(0), true);
@@ -380,8 +380,8 @@ mod tests {
     fn fc(args: &[Datum]) -> FunctionCallInfoBaseData {
         FunctionCallInfoBaseData {
             flinfo: None,
-            context: core::ptr::null_mut(),
-            resultinfo: core::ptr::null_mut(),
+            context: None,
+            resultinfo: None,
             fncollation: crate::postgres_ext::InvalidOid,
             isnull: false,
             nargs: args.len() as i16,
@@ -466,10 +466,10 @@ mod tests {
         btint4skipsupport(&mut f);
         assert_eq!(DatumGetInt32(sksup.low_elem), PG_INT32_MIN);
         assert_eq!(DatumGetInt32(sksup.high_elem), PG_INT32_MAX);
-        let (d, of) = (sksup.increment)(std::ptr::null_mut(), Int32GetDatum(5));
+        let (d, of) = (sksup.increment)(None, Int32GetDatum(5));
         assert!(!of);
         assert_eq!(DatumGetInt32(d), 6);
-        let (_d, of) = (sksup.increment)(std::ptr::null_mut(), Int32GetDatum(PG_INT32_MAX));
+        let (_d, of) = (sksup.increment)(None, Int32GetDatum(PG_INT32_MAX));
         assert!(of);
     }
 }

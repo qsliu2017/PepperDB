@@ -47,7 +47,7 @@ pub fn get_tuple_transaction_info(
 }
 
 pub fn report_apply_conflict(
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _relinfo: &mut ResultRelInfo,
     _elevel: i32,
     _type: ConflictType,

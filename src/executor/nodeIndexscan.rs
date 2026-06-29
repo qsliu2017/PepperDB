@@ -10,7 +10,7 @@ use crate::nodes::plannodes::IndexScan;
 // TODO(ptr)
 pub fn ExecInitIndexScan(
     _node: &IndexScan,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut IndexScanState {
     unimplemented!()

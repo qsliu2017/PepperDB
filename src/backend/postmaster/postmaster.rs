@@ -405,73 +405,19 @@ fn admit_and_spawn(
         other => unreachable!("supervisor only spawns client backends, got {other:?}"),
     }
 
-    // ONE THREAD PER BACKEND (the faithful PG one-process-per-backend model under
-    // tokio): a backend's per-task state holds raw `Relation`/tuple handles (`!Send`,
-    // task-confined) across `.await`, which a multi-thread `tokio::spawn` would
-    // reject (the future is not `Send`) and which a migrating worker thread could
-    // corrupt. So each backend runs on its OWN OS thread with a dedicated
-    // current-thread runtime: the `!Send` future is built and driven entirely inside
-    // that runtime (it never crosses a thread boundary), and the spawned-blocking
-    // bridge that joins the thread only moves `Send` values (the std socket, the
-    // `Arc<SharedState>`, the key, the cancel Notify). This also gives the backend a
-    // large, dedicated stack for the deep connect-to-database scope nesting.
-    //
-    // The accepted tokio `TcpStream` is converted to a std socket here (still in the
-    // supervisor runtime) and re-wrapped inside the backend's runtime (into_std /
-    // from_std), the supported way to move a socket between tokio runtimes.
-    let std_stream = match stream.into_std() {
-        Ok(s) => s,
-        Err(e) => {
-            crate::elog!(crate::utils::elog::LOG, format!("backend socket detach failed: {e}"));
-            registry.remove(key);
-            return;
-        }
-    };
-
-    // catch_unwind at the task boundary (design-000 error model): an
-    // elog(ERROR)-as-panic inside the backend is contained so the supervisor never
-    // crashes. spawn_blocking runs the dedicated-runtime driver off the async
-    // workers; the JoinSet yields the key for the reaper.
+    // A backend is a normal async task on the shared multi-thread runtime (the r3
+    // single-process async port model): its per-task state borrows `&RelationData`
+    // out of the statement-frame `Arc` and is genuinely `Send`, so the future rides
+    // `tokio::spawn` like every other task. The JoinSet yields the child's key for
+    // the reaper. `catch_unwind` at the task boundary (design-000 error model)
+    // contains an elog(ERROR)-as-panic so the supervisor never crashes.
     backends.spawn(async move {
-        let _ = tokio::task::spawn_blocking(move || {
-            run_backend_confined(std_stream, peer, shared, key, cancel);
-        })
-        .await;
-        key
-    });
-}
-
-/// Drive one backend to completion on a dedicated current-thread tokio runtime,
-/// wrapped in `catch_unwind`. Runs on a `spawn_blocking` thread so the backend's
-/// `!Send` per-task state never migrates. Re-wraps the std socket as a tokio
-/// `TcpStream` inside this runtime before entering `backend_main`.
-fn run_backend_confined(
-    std_stream: std::net::TcpStream,
-    peer: SocketAddr,
-    shared: Arc<SharedState>,
-    key: ChildKey,
-    cancel: Arc<Notify>,
-) {
-    use futures_util::FutureExt;
-    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-        Ok(rt) => rt,
-        Err(e) => {
-            crate::elog!(crate::utils::elog::LOG, format!("backend runtime build failed: {e}"));
-            return;
-        }
-    };
-    rt.block_on(async move {
-        let stream = match TcpStream::from_std(std_stream) {
-            Ok(s) => s,
-            Err(e) => {
-                crate::elog!(crate::utils::elog::LOG, format!("backend socket attach failed: {e}"));
-                return;
-            }
-        };
+        use futures_util::FutureExt;
         let fut = backend_main(stream, peer, shared, key, cancel);
         if let Err(payload) = std::panic::AssertUnwindSafe(fut).catch_unwind().await {
             log_caught_panic(&*payload);
         }
+        key
     });
 }
 

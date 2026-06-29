@@ -7,7 +7,6 @@
 
 use crate::catalog::pg_class::Form_pg_class;
 use crate::postgres_ext::Oid;
-use crate::utils::relcache::Relation;
 
 pub use crate::backend::catalog::catalog::{
     get_new_oid_with_index as GetNewOidWithIndex, get_new_rel_file_number as GetNewRelFileNumber,
@@ -17,12 +16,12 @@ pub use crate::backend::catalog::catalog::{
     is_system_relation as IsSystemRelation, is_toast_namespace as IsToastNamespace,
 };
 
-pub fn IsToastRelation(relation: Relation) -> bool {
+pub fn IsToastRelation(relation: &crate::utils::rel::RelationData) -> bool {
     let _ = relation;
     unimplemented!()
 }
 
-pub fn IsInplaceUpdateRelation(relation: Relation) -> bool {
+pub fn IsInplaceUpdateRelation(relation: &crate::utils::rel::RelationData) -> bool {
     let _ = relation;
     unimplemented!()
 }

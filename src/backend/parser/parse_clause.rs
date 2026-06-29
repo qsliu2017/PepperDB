@@ -15,10 +15,6 @@
 //! clauses, and the namespace-conflict / LATERAL bookkeeping are grow guards
 //! (rules.md s4).
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: transform_from_clause / set_target_table hold the per-backend ParseState (a task-confined raw Relation) across the relation-open awaits; the future runs on one backend task and never migrates the pointee mid-await. Same contract as the catalog/relcache/bootstrap modules."
-)]
 
 use std::sync::Arc;
 
@@ -81,7 +77,7 @@ async fn transform_table_entry(
     // SAFETY: live open relation with a built descriptor.
     let nsitem = add_range_table_entry_for_relation(
         pstate,
-        unsafe { &*rel },
+        &rel,
         LockMode::AccessShareLock as i32,
         None,
         rv.inh,
@@ -105,10 +101,9 @@ pub async fn set_target_table(
     required_perms: AclMode,
 ) -> i32 {
     let rel = open_table_for_parse(shared, relation).await;
-    // SAFETY: live open relation.
     let nsitem = add_range_table_entry_for_relation(
         pstate,
-        unsafe { &*rel },
+        &rel,
         LockMode::RowExclusiveLock as i32,
         None,
         inh,
@@ -120,7 +115,7 @@ pub async fn set_target_table(
     let perminfo_index = nsitem.rte.perminfoindex;
     pstate.p_rteperminfos[(perminfo_index - 1) as usize].requiredPerms = required_perms;
 
-    pstate.p_target_relation = rel;
+    pstate.p_target_relation = Some(rel);
     pstate.p_target_nsitem = Some(Box::new(nsitem));
     rtindex
 }
@@ -131,7 +126,7 @@ pub async fn set_target_table(
 /// catalog scan and ensures the relcache entry is built. The AccessShareLock the
 /// faithful path would take is approximated by the relcache build (the M2 tests
 /// run single-statement, no concurrent DDL).
-async fn open_table_for_parse(shared: &Arc<SharedState>, rv: &RangeVar) -> *mut crate::utils::rel::RelationData {
+async fn open_table_for_parse(shared: &Arc<SharedState>, rv: &RangeVar) -> Arc<crate::utils::rel::RelationData> {
     use crate::backend::catalog::namespace::range_var_get_relid;
     use crate::backend::utils::cache::relcache::{relation_build_desc, relation_id_get_relation};
 

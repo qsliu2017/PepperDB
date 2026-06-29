@@ -3,7 +3,7 @@
 use crate::nodes::execnodes::{EState, MergeAppendState};
 use crate::nodes::plannodes::MergeAppend;
 
-pub fn ExecInitMergeAppend(_node: &MergeAppend, _estate: &mut EState, _eflags: i32) -> *mut MergeAppendState {
+pub fn ExecInitMergeAppend(_node: &MergeAppend, _estate: &mut EState<'_>, _eflags: i32) -> *mut MergeAppendState {
     unimplemented!() // TODO(ptr)
 }
 pub fn ExecEndMergeAppend(_node: &mut MergeAppendState) {

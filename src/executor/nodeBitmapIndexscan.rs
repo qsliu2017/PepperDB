@@ -8,7 +8,7 @@ use crate::nodes::plannodes::BitmapIndexScan;
 // TODO(ptr)
 pub fn ExecInitBitmapIndexScan(
     _node: &BitmapIndexScan,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut BitmapIndexScanState {
     unimplemented!()

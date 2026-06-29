@@ -72,8 +72,9 @@ fn rloc(rel: u32) -> RelFileLocator {
 fn make_relation(
     locator: RelFileLocator,
     tupdesc: crate::access::tupdesc::TupleDesc,
-) -> *mut RelationData {
+) -> Arc<RelationData> {
     use crate::catalog::pg_class::FormData_pg_class;
+    use std::sync::atomic::Ordering;
 
     // SAFETY: FormData_pg_class is repr(C) POD (Oid/int/bool/NameData/varlena
     // arrays); all-zero is a valid bit pattern. We patch the fields heap reads.
@@ -82,84 +83,22 @@ fn make_relation(
     form.relpersistence = RELPERSISTENCE_PERMANENT;
     form.relnatts = tupdesc.natts as i16;
     form.relam = Oid(2); // HEAP_TABLE_AM_OID (any nonzero handler -> Heap kind)
-    let form_ptr = Box::into_raw(form);
+    let form_ptr = Some(form);
 
-    // SAFETY: a fresh RelationData with the heap-relevant fields set; pointer
-    // fields null, Vec/Option fields empty/None. Leaked for the test's lifetime.
-    let rel = RelationData {
-        rd_locator: locator,
-        rd_smgr: core::ptr::null_mut(),
-        rd_refcnt: 1,
-        rd_backend: crate::storage::procnumber::INVALID_PROC_NUMBER,
-        rd_islocaltemp: false,
-        rd_isnailed: false,
-        rd_isvalid: true,
-        rd_indexvalid: false,
-        rd_statvalid: false,
-        rd_createSubid: crate::c::InvalidSubTransactionId,
-        rd_newRelfilelocatorSubid: crate::c::InvalidSubTransactionId,
-        rd_firstRelfilelocatorSubid: crate::c::InvalidSubTransactionId,
-        rd_droppedSubid: crate::c::InvalidSubTransactionId,
-        rd_rel: form_ptr,
-        rd_att: Some(tupdesc),
-        rd_id: Oid(80000 + locator.relNumber.0 - 80000),
-        rd_lockInfo: LockInfoData {
-            lockRelId: LockRelId { relId: locator.relNumber, dbId: locator.dbOid },
-        },
-        rd_rules: core::ptr::null_mut(),
-        rd_rulescxt: core::ptr::null_mut(),
-        trigdesc: core::ptr::null_mut(),
-        rd_rsdesc: core::ptr::null_mut(),
-        rd_fkeylist: Vec::new(),
-        rd_fkeyvalid: false,
-        rd_partkey: None,
-        rd_partkeycxt: core::ptr::null_mut(),
-        rd_partdesc: None,
-        rd_pdcxt: core::ptr::null_mut(),
-        rd_partdesc_nodetached: None,
-        rd_pddcxt: core::ptr::null_mut(),
-        rd_partdesc_nodetached_xmin: crate::access::transam::INVALID_TRANSACTION_ID,
-        rd_partcheck: Vec::new(),
-        rd_partcheckvalid: false,
-        rd_partcheckcxt: core::ptr::null_mut(),
-        rd_indexlist: Vec::new(),
-        rd_pkindex: Oid(0),
-        rd_ispkdeferrable: false,
-        rd_replidindex: Oid(0),
-        rd_statlist: Vec::new(),
-        rd_attrsvalid: false,
-        rd_keyattr: None,
-        rd_pkattr: None,
-        rd_idattr: None,
-        rd_hotblockingattr: None,
-        rd_summarizedattr: None,
-        rd_pubdesc: core::ptr::null_mut(),
-        rd_options: core::ptr::null_mut(),
-        rd_amhandler: Oid(2),
-        rd_tableam: core::ptr::null(),
-        rd_index: core::ptr::null_mut(),
-        rd_indextuple: core::ptr::null_mut(),
-        rd_indexcxt: core::ptr::null_mut(),
-        rd_indam: core::ptr::null_mut(),
-        rd_opfamily: core::ptr::null_mut(),
-        rd_opcintype: core::ptr::null_mut(),
-        rd_support: core::ptr::null_mut(),
-        rd_supportinfo: core::ptr::null_mut(),
-        rd_indoption: core::ptr::null_mut(),
-        rd_indexprs: Vec::new(),
-        rd_indpred: Vec::new(),
-        rd_exclops: core::ptr::null_mut(),
-        rd_exclprocs: core::ptr::null_mut(),
-        rd_exclstrats: core::ptr::null_mut(),
-        rd_indcollation: core::ptr::null_mut(),
-        rd_opcoptions: core::ptr::null_mut(),
-        rd_amcache: core::ptr::null_mut(),
-        rd_fdwroutine: core::ptr::null_mut(),
-        rd_toastoid: Oid(0),
-        pgstat_enabled: false,
-        pgstat_info: core::ptr::null_mut(),
+    // A fresh RelationData with the heap-relevant fields set; the rest are blank
+    // (pointer fields null, Vec/Option fields empty/None). Shared via Arc.
+    let mut rel = RelationData::blank();
+    rel.rd_locator = locator;
+    rel.rd_refcnt.store(1, Ordering::Relaxed);
+    rel.rd_isvalid.store(true, Ordering::Relaxed);
+    rel.rd_rel = form_ptr;
+    rel.rd_att = Some(tupdesc);
+    rel.rd_id = locator.relNumber;
+    rel.rd_lockInfo = LockInfoData {
+        lockRelId: LockRelId { relId: locator.relNumber, dbId: locator.dbOid },
     };
-    Box::into_raw(Box::new(rel))
+    rel.rd_amhandler = Oid(2);
+    Arc::new(rel)
 }
 
 /// A 2-column (int4, int4) tuple descriptor. Uses `init_builtin_entry` (which
@@ -184,27 +123,25 @@ async fn create_main_fork(shared: &Arc<SharedState>, locator: RelFileLocator) {
 }
 
 /// Insert one (a, b) int4 tuple into `relation` via heap_insert.
-#[allow(clippy::future_not_send, reason = "test helper; not spawned on the runtime")]
-async fn insert_row(shared: &Arc<SharedState>, relation: *mut RelationData, a: i32, b: i32) {
-    let desc = unsafe { (*relation).rd_att.clone().unwrap() };
+async fn insert_row(shared: &Arc<SharedState>, relation: &Arc<RelationData>, a: i32, b: i32) {
+    let desc = relation.rd_att.clone().unwrap();
     let values = [Int32GetDatum(a), Int32GetDatum(b)];
     let isnull = [false, false];
     let mut tuple = heap_form_tuple(&desc, &values, &isnull);
     let cid = GetCurrentCommandId(true);
-    heap_insert(shared, SendPtr(relation), SendPtr(std::ptr::from_mut(&mut tuple)), cid, 0).await;
+    heap_insert(shared, relation, &mut tuple, cid, 0).await;
 }
 
 /// Scan `relation` under the current transaction snapshot, returning each tuple's
 /// (a, b) int4 values in scan order.
-#[allow(clippy::future_not_send, reason = "test helper; not spawned on the runtime")]
-async fn scan_rows(shared: &Arc<SharedState>, relation: *mut RelationData) -> Vec<(i32, i32)> {
+async fn scan_rows(shared: &Arc<SharedState>, relation: &Arc<RelationData>) -> Vec<(i32, i32)> {
     let mut snap = GetTransactionSnapshot(shared).expect("a transaction snapshot");
     // GetSnapshotData should set curcid = GetCurrentCommandId(false); the
     // foundation's build_snapshot leaves it 0 (TODO in procarray), so set it here
     // so own-xact command visibility (cmin < curcid) is exercised correctly.
     Arc::make_mut(&mut snap).curcid = GetCurrentCommandId(false);
-    let desc = unsafe { (*relation).rd_att.clone().unwrap() };
-    let mut scan = heap_beginscan(SendPtr(relation), snap, 0, ScanOptions::ALLOW_PAGEMODE);
+    let desc = relation.rd_att.clone().unwrap();
+    let mut scan = heap_beginscan(relation, &snap, 0, ScanOptions::ALLOW_PAGEMODE);
 
     let mut out = Vec::new();
     while let Some(tup) = heap_getnext(shared, &mut scan, ScanDirection::Forward).await {
@@ -229,7 +166,7 @@ async fn insert_then_seqscan_one_tuple() {
         let rel = make_relation(loc, two_int4_desc());
 
         let lsn_before = shared.xlog().get_flush_rec_ptr();
-        insert_row(&shared, rel, 42, 99).await;
+        insert_row(&shared, &rel, 42, 99).await;
 
         // WAL was emitted: the inserted LSN advanced past the pre-insert point.
         let inserted_lsn = shared.xlog().get_xlog_insert_rec_ptr();
@@ -238,7 +175,7 @@ async fn insert_then_seqscan_one_tuple() {
         // Advance the command counter so a later command's snapshot sees the
         // just-inserted (own-xact) tuple.
         CommandCounterIncrement();
-        let rows = scan_rows(&shared, rel).await;
+        let rows = scan_rows(&shared, &rel).await;
         assert_eq!(rows, vec![(42, 99)]);
     }))
     .await;
@@ -255,11 +192,11 @@ async fn insert_several_seqscan_in_order() {
 
         let expected: Vec<(i32, i32)> = (0..25).map(|i| (i, i * 10)).collect();
         for &(a, b) in &expected {
-            insert_row(&shared, rel, a, b).await;
+            insert_row(&shared, &rel, a, b).await;
         }
 
         CommandCounterIncrement();
-        let rows = scan_rows(&shared, rel).await;
+        let rows = scan_rows(&shared, &rel).await;
         assert_eq!(rows, expected);
     }))
     .await;
@@ -279,16 +216,16 @@ async fn own_command_insert_invisible_until_cci() {
         let rel = make_relation(loc, two_int4_desc());
 
         // Insert under the current command id, but do NOT advance the counter.
-        insert_row(&shared, rel, 7, 7).await;
+        insert_row(&shared, &rel, 7, 7).await;
 
         // A snapshot taken now has curcid == the inserting command's cmin, so the
         // tuple is "inserted after scan started" -> invisible.
-        let rows_same_command = scan_rows(&shared, rel).await;
+        let rows_same_command = scan_rows(&shared, &rel).await;
         assert_eq!(rows_same_command, Vec::<(i32, i32)>::new());
 
         // After the command boundary, the own-xact tuple becomes visible.
         CommandCounterIncrement();
-        let rows_next_command = scan_rows(&shared, rel).await;
+        let rows_next_command = scan_rows(&shared, &rel).await;
         assert_eq!(rows_next_command, vec![(7, 7)]);
     }))
     .await;

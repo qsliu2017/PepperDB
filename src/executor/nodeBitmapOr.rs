@@ -5,7 +5,7 @@ use crate::nodes::nodes::Node;
 use crate::nodes::plannodes::BitmapOr;
 
 // TODO(ptr)
-pub fn ExecInitBitmapOr(_node: &BitmapOr, _estate: &mut EState, _eflags: i32) -> *mut BitmapOrState {
+pub fn ExecInitBitmapOr(_node: &BitmapOr, _estate: &mut EState<'_>, _eflags: i32) -> *mut BitmapOrState {
     unimplemented!()
 }
 

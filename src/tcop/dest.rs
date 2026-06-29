@@ -36,7 +36,12 @@ pub enum CommandDest {
 /// C is a struct of fn pointers (`_DestReceiver`); here it is a trait. Each
 /// executor run calls `r_startup`, then `receive_slot` zero or more times, then
 /// `r_shutdown`. The C `rDestroy` callback becomes the implementor's `Drop`.
-pub trait DestReceiver {
+///
+/// `Send`: a `Box<dyn DestReceiver>` is carried by `QueryDesc` across the
+/// executor's awaits; the backend drives that future on a dedicated task, so the
+/// receiver must be sendable. The production receivers (DRprinttup, NoneReceiver)
+/// hold only Send state.
+pub trait DestReceiver: Send {
     /// Called for each tuple to be output. Returns true to continue, false to
     /// stop early (as if the scan had ended).
     fn receive_slot(&mut self, slot: &mut TupleTableSlot) -> bool;

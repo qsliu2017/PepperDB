@@ -110,7 +110,7 @@ pub struct AggStatePerHashData {
 }
 
 // TODO(ptr)
-pub fn ExecInitAgg(_node: &Agg, _estate: &mut EState, _eflags: i32) -> *mut AggState {
+pub fn ExecInitAgg(_node: &Agg, _estate: &mut EState<'_>, _eflags: i32) -> *mut AggState {
     unimplemented!()
 }
 

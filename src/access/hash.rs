@@ -23,7 +23,8 @@ use crate::storage::bufmgr::{BUFFER_LOCK_EXCLUSIVE, BUFFER_LOCK_SHARE};
 use crate::storage::bufpage::Page;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// Mapping from hash bucket number to physical block number of bucket's
 /// starting page.
@@ -238,11 +239,11 @@ pub struct HashOptions {
 }
 
 // HashGetFillFactor / HashGetTargetPageUsage / HashMaxItemSize depend on
-// Relation rd_options and page layout; bodies stubbed.
-pub fn hash_get_fill_factor(_relation: Relation) -> i32 {
+// Arc<RelationData> rd_options and page layout; bodies stubbed.
+pub fn hash_get_fill_factor(_relation: &RelationData) -> i32 {
     unimplemented!()
 }
-pub fn hash_get_target_page_usage(_relation: Relation) -> i32 {
+pub fn hash_get_target_page_usage(_relation: &RelationData) -> i32 {
     unimplemented!()
 }
 pub fn hash_max_item_size(_page: &Page) -> usize {
@@ -320,21 +321,21 @@ pub const HASHNProcs: u16 = 3;
 /* public routines */
 
 pub fn hashbuild(
-    _heap: Relation,
-    _index: Relation,
+    _heap: &RelationData,
+    _index: &RelationData,
     _index_info: &mut IndexInfo,
 ) -> *mut IndexBuildResult {
     unimplemented!()
 }
-pub fn hashbuildempty(_index: Relation) {
+pub fn hashbuildempty(_index: &RelationData) {
     unimplemented!()
 }
 pub fn hashinsert(
-    _rel: Relation,
+    _rel: &RelationData,
     _values: &[Datum],
     _isnull: &[bool],
     _ht_ctid: &mut ItemPointerData,
-    _heap_rel: Relation,
+    _heap_rel: &RelationData,
     _check_unique: IndexUniqueCheck,
     _index_unchanged: bool,
     _index_info: &mut IndexInfo,
@@ -347,7 +348,7 @@ pub fn hashgettuple(_scan: IndexScanDesc, _dir: ScanDirection) -> bool {
 pub fn hashgetbitmap(_scan: IndexScanDesc, _tbm: &mut TIDBitmap) -> i64 {
     unimplemented!()
 }
-pub fn hashbeginscan(_rel: Relation, _nkeys: i32, _norderbys: i32) -> IndexScanDesc {
+pub fn hashbeginscan(_rel: &RelationData, _nkeys: i32, _norderbys: i32) -> IndexScanDesc {
     unimplemented!()
 }
 pub fn hashrescan(
@@ -401,11 +402,11 @@ pub fn hashtranslatecmptype(_cmptype: CompareType, _opfamily: Oid) -> StrategyNu
 /* private routines */
 
 /* hashinsert.c */
-pub fn _hash_doinsert(_rel: Relation, _itup: IndexTuple, _heap_rel: Relation, _sorted: bool) {
+pub fn _hash_doinsert(_rel: &RelationData, _itup: IndexTuple, _heap_rel: &RelationData, _sorted: bool) {
     unimplemented!()
 }
 pub fn _hash_pgaddtup(
-    _rel: Relation,
+    _rel: &RelationData,
     _buf: Buffer,
     _itemsize: usize,
     _itup: IndexTuple,
@@ -414,7 +415,7 @@ pub fn _hash_pgaddtup(
     unimplemented!()
 }
 pub fn _hash_pgaddmultitup(
-    _rel: Relation,
+    _rel: &RelationData,
     _buf: Buffer,
     _itups: &[IndexTuple],
     _itup_offsets: &[OffsetNumber],
@@ -424,11 +425,11 @@ pub fn _hash_pgaddmultitup(
 }
 
 /* hashovfl.c */
-pub fn _hash_addovflpage(_rel: Relation, _metabuf: Buffer, _buf: Buffer, _retain_pin: bool) -> Buffer {
+pub fn _hash_addovflpage(_rel: &RelationData, _metabuf: Buffer, _buf: Buffer, _retain_pin: bool) -> Buffer {
     unimplemented!()
 }
 pub fn _hash_freeovflpage(
-    _rel: Relation,
+    _rel: &RelationData,
     _bucketbuf: Buffer,
     _ovflbuf: Buffer,
     _wbuf: Buffer,
@@ -444,7 +445,7 @@ pub fn _hash_initbitmapbuffer(_buf: Buffer, _bmsize: u16, _initpage: bool) {
     unimplemented!()
 }
 pub fn _hash_squeezebucket(
-    _rel: Relation,
+    _rel: &RelationData,
     _bucket: Bucket,
     _bucket_blkno: BlockNumber,
     _bucket_buf: Buffer,
@@ -457,42 +458,42 @@ pub fn _hash_ovflblkno_to_bitno(_metap: HashMetaPage, _ovflblkno: BlockNumber) -
 }
 
 /* hashpage.c */
-pub fn _hash_getbuf(_rel: Relation, _blkno: BlockNumber, _access: i32, _flags: i32) -> Buffer {
+pub fn _hash_getbuf(_rel: &RelationData, _blkno: BlockNumber, _access: i32, _flags: i32) -> Buffer {
     unimplemented!()
 }
 pub fn _hash_getbuf_with_condlock_cleanup(
-    _rel: Relation,
+    _rel: &RelationData,
     _blkno: BlockNumber,
     _flags: i32,
 ) -> Buffer {
     unimplemented!()
 }
 pub fn _hash_getcachedmetap(
-    _rel: Relation,
+    _rel: &RelationData,
     _metabuf: &mut Buffer,
     _force_refresh: bool,
 ) -> HashMetaPage {
     unimplemented!()
 }
 pub fn _hash_getbucketbuf_from_hashkey(
-    _rel: Relation,
+    _rel: &RelationData,
     _hashkey: u32,
     _access: i32,
     _cachedmetap: &mut HashMetaPage,
 ) -> Buffer {
     unimplemented!()
 }
-pub fn _hash_getinitbuf(_rel: Relation, _blkno: BlockNumber) -> Buffer {
+pub fn _hash_getinitbuf(_rel: &RelationData, _blkno: BlockNumber) -> Buffer {
     unimplemented!()
 }
 pub fn _hash_initbuf(_buf: Buffer, _max_bucket: u32, _num_bucket: u32, _flag: u32, _initpage: bool) {
     unimplemented!()
 }
-pub fn _hash_getnewbuf(_rel: Relation, _blkno: BlockNumber, _fork_num: ForkNumber) -> Buffer {
+pub fn _hash_getnewbuf(_rel: &RelationData, _blkno: BlockNumber, _fork_num: ForkNumber) -> Buffer {
     unimplemented!()
 }
 pub fn _hash_getbuf_with_strategy(
-    _rel: Relation,
+    _rel: &RelationData,
     _blkno: BlockNumber,
     _access: i32,
     _flags: i32,
@@ -500,16 +501,16 @@ pub fn _hash_getbuf_with_strategy(
 ) -> Buffer {
     unimplemented!()
 }
-pub fn _hash_relbuf(_rel: Relation, _buf: Buffer) {
+pub fn _hash_relbuf(_rel: &RelationData, _buf: Buffer) {
     unimplemented!()
 }
-pub fn _hash_dropbuf(_rel: Relation, _buf: Buffer) {
+pub fn _hash_dropbuf(_rel: &RelationData, _buf: Buffer) {
     unimplemented!()
 }
-pub fn _hash_dropscanbuf(_rel: Relation, _so: HashScanOpaque) {
+pub fn _hash_dropscanbuf(_rel: &RelationData, _so: HashScanOpaque) {
     unimplemented!()
 }
-pub fn _hash_init(_rel: Relation, _num_tuples: f64, _fork_num: ForkNumber) -> u32 {
+pub fn _hash_init(_rel: &RelationData, _num_tuples: f64, _fork_num: ForkNumber) -> u32 {
     unimplemented!()
 }
 pub fn _hash_init_metabuffer(
@@ -524,11 +525,11 @@ pub fn _hash_init_metabuffer(
 pub fn _hash_pageinit(_page: &mut Page, _size: usize) {
     unimplemented!()
 }
-pub fn _hash_expandtable(_rel: Relation, _metabuf: Buffer) {
+pub fn _hash_expandtable(_rel: &RelationData, _metabuf: Buffer) {
     unimplemented!()
 }
 pub fn _hash_finish_split(
-    _rel: Relation,
+    _rel: &RelationData,
     _metabuf: Buffer,
     _obuf: Buffer,
     _obucket: Bucket,
@@ -553,7 +554,7 @@ pub struct HSpool {
     _private: [u8; 0],
 }
 
-pub fn _h_spoolinit(_heap: Relation, _index: Relation, _num_buckets: u32) -> *mut HSpool {
+pub fn _h_spoolinit(_heap: &RelationData, _index: &RelationData, _num_buckets: u32) -> *mut HSpool {
     unimplemented!()
 }
 pub fn _h_spooldestroy(_hspool: &mut HSpool) {
@@ -562,7 +563,7 @@ pub fn _h_spooldestroy(_hspool: &mut HSpool) {
 pub fn _h_spool(_hspool: &mut HSpool, _self: &mut ItemPointerData, _values: &[Datum], _isnull: &[bool]) {
     unimplemented!()
 }
-pub fn _h_indexbuild(_hspool: &mut HSpool, _heap_rel: Relation) {
+pub fn _h_indexbuild(_hspool: &mut HSpool, _heap_rel: &RelationData) {
     unimplemented!()
 }
 
@@ -570,10 +571,10 @@ pub fn _h_indexbuild(_hspool: &mut HSpool, _heap_rel: Relation) {
 pub fn _hash_checkqual(_scan: IndexScanDesc, _itup: IndexTuple) -> bool {
     unimplemented!()
 }
-pub fn _hash_datum2hashkey(_rel: Relation, _key: Datum) -> u32 {
+pub fn _hash_datum2hashkey(_rel: &RelationData, _key: Datum) -> u32 {
     unimplemented!()
 }
-pub fn _hash_datum2hashkey_type(_rel: Relation, _key: Datum, _keytype: Oid) -> u32 {
+pub fn _hash_datum2hashkey_type(_rel: &RelationData, _key: Datum, _keytype: Oid) -> u32 {
     unimplemented!()
 }
 pub fn _hash_hashkey2bucket(_hashkey: u32, _maxbucket: u32, _highmask: u32, _lowmask: u32) -> Bucket {
@@ -585,14 +586,14 @@ pub fn _hash_spareindex(_num_bucket: u32) -> u32 {
 pub fn _hash_get_totalbuckets(_splitpoint_phase: u32) -> u32 {
     unimplemented!()
 }
-pub fn _hash_checkpage(_rel: Relation, _buf: Buffer, _flags: i32) {
+pub fn _hash_checkpage(_rel: &RelationData, _buf: Buffer, _flags: i32) {
     unimplemented!()
 }
 pub fn _hash_get_indextuple_hashkey(_itup: IndexTuple) -> u32 {
     unimplemented!()
 }
 pub fn _hash_convert_tuple(
-    _index: Relation,
+    _index: &RelationData,
     _user_values: &[Datum],
     _user_isnull: &[bool],
     _index_values: &mut [Datum],
@@ -606,14 +607,14 @@ pub fn _hash_binsearch(_page: &Page, _hash_value: u32) -> OffsetNumber {
 pub fn _hash_binsearch_last(_page: &Page, _hash_value: u32) -> OffsetNumber {
     unimplemented!()
 }
-pub fn _hash_get_oldblock_from_newbucket(_rel: Relation, _new_bucket: Bucket) -> BlockNumber {
+pub fn _hash_get_oldblock_from_newbucket(_rel: &RelationData, _new_bucket: Bucket) -> BlockNumber {
     unimplemented!()
 }
-pub fn _hash_get_newblock_from_oldbucket(_rel: Relation, _old_bucket: Bucket) -> BlockNumber {
+pub fn _hash_get_newblock_from_oldbucket(_rel: &RelationData, _old_bucket: Bucket) -> BlockNumber {
     unimplemented!()
 }
 pub fn _hash_get_newbucket_from_oldbucket(
-    _rel: Relation,
+    _rel: &RelationData,
     _old_bucket: Bucket,
     _lowmask: u32,
     _maxbucket: u32,
@@ -627,7 +628,7 @@ pub fn _hash_kill_items(_scan: IndexScanDesc) {
 /* hash.c */
 #[allow(clippy::too_many_arguments)]
 pub fn hashbucketcleanup(
-    _rel: Relation,
+    _rel: &RelationData,
     _cur_bucket: Bucket,
     _bucket_buf: Buffer,
     _bucket_blkno: BlockNumber,

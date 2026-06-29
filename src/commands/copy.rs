@@ -10,7 +10,7 @@ use crate::parser::parse_node::ParseState;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::tcop::dest::DestReceiver;
-use crate::utils::rel::Relation;
+use crate::utils::rel::RelationData;
 
 /// Whether a header line should be present, and whether it must match names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +113,7 @@ pub fn ProcessCopyOptions(
 #[allow(clippy::too_many_arguments)]
 pub fn BeginCopyFrom(
     _pstate: &mut ParseState,
-    _rel: Relation,
+    _rel: &RelationData,
     _where_clause: Option<&Node>,
     _filename: Option<&str>,
     _is_program: bool,
@@ -163,7 +163,7 @@ pub fn CreateCopyDestReceiver() -> Box<dyn DestReceiver> {
 #[allow(clippy::too_many_arguments)]
 pub fn BeginCopyTo(
     _pstate: &mut ParseState,
-    _rel: Relation,
+    _rel: &RelationData,
     _raw_query: *mut RawStmt,
     _query_rel_id: Oid,
     _filename: Option<&str>,
@@ -185,7 +185,7 @@ pub fn DoCopyTo(_cstate: CopyToState) -> u64 {
 
 pub fn CopyGetAttnums(
     _tup_desc: TupleDesc,
-    _rel: Relation,
+    _rel: &RelationData,
     _attnamelist: Vec<Node>,
 ) -> Vec<Node> {
     unimplemented!()

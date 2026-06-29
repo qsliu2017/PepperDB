@@ -444,8 +444,8 @@ impl MinimalTupleData {
 pub fn GETSTRUCT(tuple: &HeapTupleData) -> *mut u8 {
     // SAFETY: t_data points at a valid body whose t_hoff bytes are the header.
     unsafe {
-        let hoff = (*tuple.t_data).t_hoff as usize;
-        tuple.t_data.cast::<u8>().add(hoff)
+        let hoff = (*tuple.t_data()).t_hoff as usize;
+        tuple.t_data().cast::<u8>().add(hoff)
     }
 }
 

@@ -7,7 +7,7 @@ use crate::nodes::plannodes::ForeignScan;
 // TODO(ptr)
 pub fn ExecInitForeignScan(
     _node: &ForeignScan,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut ForeignScanState {
     unimplemented!()

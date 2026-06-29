@@ -10,14 +10,6 @@
 //! `TypeCreate` is `async` and threads `&Arc<SharedState>`.
 
 #![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: holds per-backend raw Relation/HeapTuple handles task-confined for the operation; same contract as relcache/genam"
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "catalog routines take raw Relation/HeapTuple pointers per the C API; faithful to C"
-)]
-#![allow(
     clippy::too_many_arguments,
     clippy::fn_params_excessive_bools,
     reason = "TypeCreate mirrors the C signature 1:1 (port-inherent)"
@@ -97,8 +89,7 @@ pub async fn type_create(
 
     let pg_type = relation_id_get_relation(TypeRelationId)
         .unwrap_or_else(|| unreachable!("pg_type is nailed/open"));
-    // SAFETY: nailed relation has a descriptor.
-    let desc = unsafe { (*pg_type).rd_att.clone() }
+    let desc = pg_type.rd_att.clone()
         .unwrap_or_else(|| unreachable!("pg_type has a descriptor"));
     let natts = desc.natts as usize;
 
@@ -145,7 +136,7 @@ pub async fn type_create(
     isnull[(t::Anum_pg_type_typacl - 1) as usize] = true;
 
     let mut tuple = heap_form_tuple(&desc, &values, &isnull);
-    catalog_tuple_insert(shared, pg_type, &mut tuple).await;
+    catalog_tuple_insert(shared, &pg_type, &mut tuple).await;
     heap_freetuple(tuple);
     relation_close(pg_type);
 

@@ -26,7 +26,8 @@ use crate::nodes::tidbitmap::TIDBitmap;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::storage::itemptr::ItemPointerData;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// Properties for the amproperty API. Core-known properties; an AM can also
 /// define its own by matching the string property name.
@@ -155,21 +156,21 @@ pub trait IndexAm {
     // --- Build & maintenance (required) ---
 
     /// ambuild: build a new index.
-    fn build(&self, heap: &Relation, index: &Relation, info: &IndexInfo) -> IndexBuildResult;
+    fn build(&self, heap: &Arc<RelationData>, index: &Arc<RelationData>, info: &IndexInfo) -> IndexBuildResult;
 
     /// ambuildempty: build an empty index.
-    fn build_empty(&self, index: &Relation);
+    fn build_empty(&self, index: &Arc<RelationData>);
 
     /// aminsert: insert this tuple. Returns false if a unique-check conflict was
     /// recorded but not raised, true otherwise (matches C's bool).
     #[allow(clippy::too_many_arguments)]
     fn insert(
         &self,
-        index: &Relation,
+        index: &Arc<RelationData>,
         values: &[Datum],
         isnull: &[bool],
         heap_tid: &ItemPointerData,
-        heap: &Relation,
+        heap: &Arc<RelationData>,
         check: IndexUniqueCheck,
         index_unchanged: bool,
         info: &IndexInfo,
@@ -208,15 +209,15 @@ pub trait IndexAm {
     fn validate(&self, opclassoid: Oid) -> bool;
 
     /// ambeginscan: prepare for an index scan (the scan factory).
-    fn begin_scan<'a>(&'a self, index: &'a Relation, nkeys: i32, norderbys: i32) -> Self::Scan<'a>;
+    fn begin_scan<'a>(&'a self, index: &'a Arc<RelationData>, nkeys: i32, norderbys: i32) -> Self::Scan<'a>;
 
     // --- Optional non-scan callbacks (NULL-checked in C) -> default methods ---
 
     /// aminsertcleanup: cleanup after insert. No-op by default.
-    fn insert_cleanup(&self, _index: &Relation, _info: &IndexInfo) {}
+    fn insert_cleanup(&self, _index: &Arc<RelationData>, _info: &IndexInfo) {}
 
     /// amgettreeheight: height of a tree-structured index (used by cost_estimate).
-    fn get_tree_height(&self, _rel: &Relation) -> i32 {
+    fn get_tree_height(&self, _rel: &Arc<RelationData>) -> i32 {
         0
     }
 
@@ -285,7 +286,7 @@ pub trait MarkRestore: PlainScan {
 
 /// amcanreturn -- supports index-only scans.
 pub trait CanReturn: IndexAm {
-    fn can_return(&self, index: &Relation, attno: i32) -> bool;
+    fn can_return(&self, index: &Arc<RelationData>, attno: i32) -> bool;
 }
 
 /// The amestimateparallelscan group (all-or-none).

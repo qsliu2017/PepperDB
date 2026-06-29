@@ -7,7 +7,7 @@ use crate::nodes::plannodes::BitmapHeapScan;
 // TODO(ptr)
 pub fn ExecInitBitmapHeapScan(
     _node: &BitmapHeapScan,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut BitmapHeapScanState {
     unimplemented!()

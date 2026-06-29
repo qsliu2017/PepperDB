@@ -11,8 +11,11 @@
 //! closures. Many fields reference types from modules not yet translated; those
 //! are opaque aliases below.
 
+use std::sync::Arc;
+
 use crate::access::attnum::AttrNumber;
 use crate::nodes::bitmapset::Bitmapset;
+use crate::utils::rel::RelationData;
 use crate::nodes::nodes::{
     AggSplit, AggStrategy, CmdType, JoinType, LimitOption, Node,
 };
@@ -36,7 +39,6 @@ macro_rules! opaque_forward {
 
 mod fwd {
     opaque_forward! {
-        Relation, RelationPtr,
         FmgrInfo, FunctionCallInfo, MemoryContext, Tuplestorestate,
         ParamListInfo, ParamExecData,
         QueryEnvironment, PartitionDirectory, HeapTuple, MinimalTuple,
@@ -182,8 +184,10 @@ pub struct IndexInfo {
 // ---------------------------------------------------------------------------
 
 /// Callback to run at ExprContext shutdown. The C `void *arg` becomes the
-/// closure's captured state.
-pub type ExprContextCallbackFunction = Box<dyn FnMut()>;
+/// closure's captured state. `+ Send + Sync`: the backend drives the executor
+/// future on a dedicated task and shared `&IndexInfo`/`&ExprContext` refs cross
+/// awaits, so the callback must be Send+Sync (keeps those types Send via Sync).
+pub type ExprContextCallbackFunction = Box<dyn FnMut() + Send + Sync>;
 
 /// One entry on the ExprContext shutdown callback list.
 pub struct ExprContextCb {
@@ -216,8 +220,10 @@ pub struct ExprContext {
     /// tuples that OLD/NEW Var nodes in RETURNING may refer to.
     pub ecxt_oldtuple: Option<Box<TupleTableSlot>>,
     pub ecxt_newtuple: Option<Box<TupleTableSlot>>,
-    /// link to containing EState (None if standalone).
-    pub ecxt_estate: Option<Box<EState>>,
+    /// link to containing EState (None if standalone). A back-pointer never
+    /// populated on the M2 live path; pinned `'static` so `ExprContext` stays
+    /// lifetime-free (the borrowed range-table lives on the EState, not here).
+    pub ecxt_estate: Option<Box<EState<'static>>>,
     /// callbacks to run when the ExprContext is shut down or rescanned.
     pub ecxt_callbacks: Vec<ExprContextCb>,
 }
@@ -332,9 +338,9 @@ pub const NUM_MERGE_MATCH_KINDS: usize = 3;
 pub struct ResultRelInfo {
     /// range table index, or 0 if not in range table.
     pub range_table_index: usize,
-    pub relation_desc: Relation,
+    pub relation_desc: Option<Arc<RelationData>>,
     pub num_indices: i32,
-    pub index_relation_descs: RelationPtr,
+    pub index_relation_descs: Vec<Arc<RelationData>>,
     pub index_relation_info: Vec<Box<IndexInfo>>,
     pub row_id_att_no: AttrNumber,
     pub extra_updated_cols: Option<Bitmapset>,
@@ -403,16 +409,39 @@ pub struct AsyncRequest {
 // EState
 // ---------------------------------------------------------------------------
 
+/// The executor's open range-table relations, indexed by 0-based range-table
+/// position (RT index `rti` reads slot `rti - 1`). A slot is `None` for a
+/// non-RELATION RTE (e.g. the `RTE_RESULT` of `SELECT 1`). PG's `EState` holds the
+/// open relations as `es_relations` (a `Arc<RelationData>*` array indexed by RTI); this is
+/// the faithful borrow form: the `Arc<RelationData>` owners live in the
+/// command/statement frame (the `'rel` root) and the executor BORROWS them.
+pub type RangeTableRels<'rel> = &'rel [Option<&'rel crate::utils::rel::RelationData>];
+
 /// Working state for an Executor invocation.
+///
+/// `'rel` is the lifetime of the open range-table relations the executor borrows
+/// (`es_range_table_rels`): the `Arc<RelationData>` owners are bindings in the
+/// command/statement frame that strictly enclose ExecutorStart..ExecutorEnd
+/// (relation-ownership-plan §1.2). The borrow rides every scan `.await` because its
+/// owner is a suspended ancestor stack frame, never a `task_local`.
 #[allow(deprecated)]
-pub struct EState {
+pub struct EState<'rel> {
     pub direction: ScanDirection,
     pub snapshot: Snapshot,
     pub crosscheck_snapshot: Snapshot,
     /// List of RangeTblEntry.
     pub range_table: Vec<Node>,
     pub range_table_size: usize,
-    pub relations: Vec<Relation>,
+    /// The open relations for the range table (PG `es_relations`), borrowed from
+    /// the command frame's `Arc<RelationData>` owners. `ExecGetRangeTableRelation`
+    /// indexes this by RT index.
+    pub es_range_table_rels: RangeTableRels<'rel>,
+    /// The query snapshot a scan reads under, borrowed from the command frame's
+    /// `Arc<SnapshotData>` owner (PG's `es_snapshot`, reachable to the scan nodes).
+    /// `snapshot` below keeps the owned `Arc` copy for the non-scan paths; the scan
+    /// node borrows THIS so its stored descriptor does not self-reference.
+    pub es_snapshot_ref: Option<&'rel crate::utils::snapshot::SnapshotData>,
+    pub relations: Vec<Arc<RelationData>>,
     pub rowmarks: Vec<Box<ExecRowMark>>,
     /// List of RTEPermissionInfo.
     pub rteperminfos: Vec<Node>,
@@ -465,7 +494,7 @@ pub struct EState {
 }
 
 #[allow(deprecated)]
-impl Default for EState {
+impl Default for EState<'_> {
     /// PG `CreateExecutorState` zero-inits the struct then sets es_direction =
     /// ForwardScanDirection; the real ScanDirection enum has no Default, so the
     /// derive is hand-written to mirror that one initialized field.
@@ -476,6 +505,8 @@ impl Default for EState {
             crosscheck_snapshot: Snapshot::default(),
             range_table: Vec::default(),
             range_table_size: usize::default(),
+            es_range_table_rels: &[],
+            es_snapshot_ref: None,
             relations: Vec::default(),
             rowmarks: Vec::default(),
             rteperminfos: Vec::default(),
@@ -527,7 +558,7 @@ impl Default for EState {
 /// Runtime representation of FOR [KEY] UPDATE/SHARE clauses.
 #[allow(deprecated)]
 pub struct ExecRowMark {
-    pub relation: Relation,
+    pub relation: Arc<RelationData>,
     pub relid: Oid,
     pub rti: usize,
     pub prti: usize,
@@ -695,8 +726,10 @@ pub type ExecProcNodeMtd = fn(pstate: &mut PlanState) -> Option<Box<TupleTableSl
 pub struct PlanState {
     /// associated Plan node.
     pub plan: Option<Node>,
-    /// the one EState for the whole top-level plan.
-    pub state: Option<Box<EState>>,
+    /// the one EState for the whole top-level plan. A back-pointer never populated
+    /// on the M2 live path (the run-state wrappers carry the executable tree);
+    /// pinned `'static` so `PlanState` stays lifetime-free.
+    pub state: Option<Box<EState<'static>>>,
     pub exec_proc_node: Option<ExecProcNodeMtd>,
     pub exec_proc_node_real: Option<ExecProcNodeMtd>,
     pub instrument: Option<Box<Instrumentation>>,
@@ -737,7 +770,8 @@ pub struct PlanState {
 #[allow(deprecated)]
 #[derive(Default)]
 pub struct EPQState {
-    pub parentestate: Option<Box<EState>>,
+    /// back-pointer; never populated on the M2 live path, pinned `'static`.
+    pub parentestate: Option<Box<EState<'static>>>,
     pub epq_param: i32,
     /// integer list of RT indexes, or empty.
     pub result_relations: Vec<i32>,
@@ -748,7 +782,7 @@ pub struct EPQState {
     /// ExecAuxRowMarks (non-locking only).
     pub arow_marks: Vec<Box<ExecAuxRowMark>>,
     pub origslot: Option<Box<TupleTableSlot>>,
-    pub recheckestate: Option<Box<EState>>,
+    pub recheckestate: Option<Box<EState<'static>>>,
     pub relsubs_rowmark: Vec<Box<ExecAuxRowMark>>,
     pub relsubs_done: Vec<bool>,
     pub relsubs_blocked: Vec<bool>,
@@ -916,7 +950,7 @@ pub struct BitmapOrState {
 #[derive(Default)]
 pub struct ScanState {
     pub ps: PlanState,
-    pub ss_current_relation: Relation,
+    pub ss_current_relation: Option<Arc<RelationData>>,
     pub ss_current_scan_desc: Option<Box<TableScanDescData>>,
     pub ss_scan_tuple_slot: Option<Box<TupleTableSlot>>,
 }
@@ -984,7 +1018,7 @@ pub struct IndexScanState {
     pub iss_num_runtime_keys: i32,
     pub iss_runtime_keys_ready: bool,
     pub iss_runtime_context: Option<Box<ExprContext>>,
-    pub iss_relation_desc: Relation,
+    pub iss_relation_desc: Option<Arc<RelationData>>,
     pub iss_scan_desc: Option<Box<IndexScanDescData>>,
     pub iss_instrument: IndexScanInstrumentation,
     pub iss_shared_info: Option<Box<SharedIndexScanInstrumentation>>,
@@ -1013,7 +1047,7 @@ pub struct IndexOnlyScanState {
     pub ioss_num_runtime_keys: i32,
     pub ioss_runtime_keys_ready: bool,
     pub ioss_runtime_context: Option<Box<ExprContext>>,
-    pub ioss_relation_desc: Relation,
+    pub ioss_relation_desc: Option<Arc<RelationData>>,
     pub ioss_scan_desc: Option<Box<IndexScanDescData>>,
     pub ioss_instrument: IndexScanInstrumentation,
     pub ioss_shared_info: Option<Box<SharedIndexScanInstrumentation>>,
@@ -1038,7 +1072,7 @@ pub struct BitmapIndexScanState {
     pub biss_num_array_keys: i32,
     pub biss_runtime_keys_ready: bool,
     pub biss_runtime_context: Option<Box<ExprContext>>,
-    pub biss_relation_desc: Relation,
+    pub biss_relation_desc: Option<Arc<RelationData>>,
     pub biss_scan_desc: Option<Box<IndexScanDescData>>,
     pub biss_instrument: IndexScanInstrumentation,
     pub biss_shared_info: Option<Box<SharedIndexScanInstrumentation>>,
@@ -1779,3 +1813,5 @@ pub struct LimitState {
     pub eqfunction: Option<Box<ExprState>>,
     pub last_slot: Option<Box<TupleTableSlot>>,
 }
+
+

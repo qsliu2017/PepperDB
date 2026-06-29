@@ -22,7 +22,7 @@
 //! Threading: the foundation buffer/FSM/WAL APIs take `&Arc<SharedState>`
 //! explicitly, so the M2 heap entry points carry it as a leading parameter
 //! (matching the established foundation convention) in addition to the C
-//! `Relation`.
+//! `Arc<RelationData>`.
 
 use std::sync::Arc;
 
@@ -54,7 +54,6 @@ use crate::storage::buf::Buffer;
 use crate::storage::bufmgr::InvalidBuffer;
 use crate::storage::off::{OffsetNumber, FIRST_OFFSET_NUMBER};
 use crate::utils::rel::RelationData;
-use crate::utils::relcache::Relation;
 use crate::utils::snapshot::{Snapshot, SnapshotData, SnapshotType};
 
 pub use crate::access::heapam::{
@@ -63,73 +62,24 @@ pub use crate::access::heapam::{
 };
 use crate::c::{CommandId, TransactionId};
 
-/// A `*mut T` that is `Send`, so it may be held across an `.await` in a future
-/// that runs on the multi-thread tokio runtime.
-///
-/// The heap entry points thread the relcache `Relation` and the in-memory
-/// `HeapTuple` (both raw pointers, hence `!Send`) across buffer/FSM/WAL `.await`
-/// leaves. In the single-process port these pointees are NOT shared between
-/// tasks for the duration of one operation: the relation is held open by the
-/// caller and the tuple lives in this task's local heap. A task may resume on a
-/// different OS thread after an `.await`, but no other task accesses the pointee
-/// concurrently, so moving the pointer with the task is sound.
-///
-/// SAFETY (`unsafe impl Send`): the pointee is task-confined for the operation's
-/// duration; see above. This mirrors the foundation's `unsafe impl Send` for the
-/// shared raw-pointer arenas (e.g. `ProcCell`).
-pub struct SendPtr<T>(pub *mut T);
-
-impl<T> Clone for SendPtr<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl<T> Copy for SendPtr<T> {}
-
-// SAFETY: see the type doc -- the pointee is task-confined per operation.
-unsafe impl<T> Send for SendPtr<T> {}
-
-impl<T> SendPtr<T> {
-    /// The wrapped raw pointer.
-    #[inline]
-    pub fn get(self) -> *mut T {
-        self.0
-    }
-}
-
-/// A `Send` relcache `Relation` handle (for crossing `.await`).
-pub type SendRelation = SendPtr<RelationData>;
-/// A `Send` in-memory `HeapTuple` handle (for crossing `.await`).
-pub type SendTuple = SendPtr<HeapTupleData>;
-
-// SAFETY: the heap scan descriptor holds raw pointers (the relcache Relation, the
-// leaked snapshot Arc, the current pinned buffer's tuple) but is task-confined: a
-// scan is driven by one task, and its pointees (relation held open by the caller,
-// the snapshot owned by the scan, the page kept resident by the scan's pin) are
-// not concurrently accessed by other tasks. Marking the descriptor `Send` lets
-// `heap_getnext` (which holds `&mut HeapScanDescData` across buffer-read `.await`s)
-// run on the multi-thread runtime. Same justification as `SendPtr`.
-#[allow(
-    clippy::non_send_fields_in_send_ty,
-    reason = "the raw-pointer fields are task-confined for the scan's duration; see the SAFETY note"
-)]
-unsafe impl Send for HeapScanDescData {}
+// The descriptor is now auto-`Send`: it borrows the relation/snapshot
+// (`&'rel RelationData` / `&'snap SnapshotData`, both Send now that RelationData
+// is auto-Send+Sync) and `ctup` owns its body (an `Option<Box<[u64]>>`
+// -- Send). No `unsafe impl Send` is needed; `SendPtr`/`SendTuple` are retired
+// (relation-ownership-plan step 9, the last non-shmem `unsafe impl Send`).
 
 /// `heap_prepare_insert`: fill in the tuple header's transaction fields, returning
-/// the tuple to actually store. M2: no toast (the tuple fits inline), so the
-/// caller's tuple is returned unchanged after its header is stamped.
-///
-/// SAFETY: `tup.t_data` is a live, writable heap-tuple header (built by
-/// `heap_form_tuple`).
-fn heap_prepare_insert(
+/// the (mutably borrowed) tuple to actually store. M2: no toast (the tuple fits
+/// inline), so the caller's tuple is returned unchanged after its header is stamped.
+fn heap_prepare_insert<'t>(
     relation: &RelationData,
-    tup: HeapTuple,
+    tup: &'t mut HeapTupleData,
     xid: TransactionId,
     cid: CommandId,
     options: i32,
-) -> HeapTuple {
-    // SAFETY: live in-memory tuple header (see above).
-    let data: &mut HeapTupleHeaderData = unsafe { &mut *(*tup).t_data };
+) -> &'t mut HeapTupleData {
+    // SAFETY: live in-memory tuple header (owned body, built by heap_form_tuple).
+    let data: &mut HeapTupleHeaderData = unsafe { &mut *tup.t_data_mut() };
 
     data.t_infomask &= !HEAP_XACT_MASK;
     data.t_infomask2 &= !HEAP2_XACT_MASK;
@@ -141,15 +91,12 @@ fn heap_prepare_insert(
 
     data.set_cmin(cid);
     data.set_xmax(TransactionId(0)); // for cleanliness
-    // SAFETY: live in-memory tuple.
-    unsafe {
-        (*tup).t_tableOid = relation.relid();
-    }
+    tup.t_tableOid = relation.relid();
 
     // M2: only plain tables / matviews reach here; no out-of-line toasting (the
     // tuple is known to fit). The toast path (heap_toast_insert_or_update) is a
     // grow guard.
-    let relkind = unsafe { (*relation.rd_rel).relkind };
+    let relkind = relation.form().relkind;
     crate::assert!(
         relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW,
         "M2 heap_insert supports only RELKIND_RELATION/MATVIEW"
@@ -166,23 +113,19 @@ fn heap_prepare_insert(
 /// The caller must be inside a WAL insertion scope (`with_insertion`).
 pub async fn heap_insert(
     shared: &Arc<SharedState>,
-    relation: SendRelation,
-    tup: SendTuple,
+    relation: &RelationData,
+    tup: &mut HeapTupleData,
     cid: CommandId,
     options: i32,
 ) {
     let xid = GetCurrentTransactionId(shared).await;
 
-    // Read the Send scalars off the relation under a short borrow (a
-    // `&RelationData` is `!Send` -- it holds a `*mut SmgrRelation` -- so it must
-    // not cross an `.await`). `heap_prepare_insert` stamps the tuple header here.
-    let (needs_wal, t_len) = {
-        // SAFETY: `relation` is a live, open relation held open by the caller.
-        let rel: &RelationData = unsafe { &*relation.get() };
-        let heaptup = heap_prepare_insert(rel, tup.get(), xid, cid, options);
-        // SAFETY: live in-memory tuple.
-        (rel.needs_wal(), unsafe { (*heaptup).t_len } as usize)
-    };
+    // Stamp the tuple header. The tuple (owned body) and `&RelationData`
+    // (RelationData: Sync) are both Send, so they may cross the `.await`s below.
+    heap_prepare_insert(relation, tup, xid, cid, options);
+    let needs_wal = relation.needs_wal();
+    let t_len = tup.t_len as usize;
+
     // Find a buffer with room for this tuple (pins it; not locked).
     let buffer = relation_get_buffer_for_tuple(shared, relation, t_len, options).await;
     let block = shared.buffers().buffer_get_block_number(buffer);
@@ -190,22 +133,19 @@ pub async fn heap_insert(
     // Place the tuple + (if WAL'd) stage the record, all under the exclusive
     // content lock with NO `.await` in between (the C critical section). The WAL
     // data is staged synchronously (begin/register_*); the awaiting `xlog_insert`
-    // runs AFTER the content lock and the `!Send` `heaptup` are dropped below.
+    // runs AFTER the content lock is dropped below.
     let (info, offnum, xlhdr, tuple_body): (u8, OffsetNumber, Option<xl_heap_header>, Vec<u8>) = {
-        // heaptup == tup (no toast copy in M2); scoped here so the `!Send` raw
-        // pointer is dropped before the WAL `.await`.
-        let mut heaptup: HeapTuple = tup.get();
+        // heaptup == tup (no toast copy in M2).
         let pool = shared.buffers();
         let _g = pool.content_exclusive(buffer);
         let buf_id = buf_id_of(buffer);
         // SAFETY: exclusive content lock held -> sole writer to this slot.
         let page = unsafe { pool.block_mut(buf_id) };
 
-        relation_put_heap_tuple(page, block, &mut heaptup);
+        relation_put_heap_tuple(page, block, tup);
         pool.mark_buffer_dirty(buffer);
 
-        // SAFETY: live in-memory tuple; offset patched by relation_put_heap_tuple.
-        let offnum = unsafe { (*heaptup).t_self.offset_number() };
+        let offnum = tup.t_self.offset_number();
 
         if needs_wal {
             // If this is the single, first tuple on the page, we can re-init the
@@ -218,14 +158,14 @@ pub async fn heap_insert(
             // SAFETY: live tuple header; copy out the reduced WAL header + the
             // bytes after the heap-tuple header (bitmap + data).
             let (xlhdr, body) = unsafe {
-                let d = &*(*heaptup).t_data;
+                let d = &*tup.t_data();
                 let xlhdr = xl_heap_header {
                     t_infomask2: d.t_infomask2,
                     t_infomask: d.t_infomask,
                     t_hoff: d.t_hoff,
                 };
-                let total = (*heaptup).t_len as usize;
-                let src = ((*heaptup).t_data.cast::<u8>()).add(SizeofHeapTupleHeader);
+                let total = tup.t_len as usize;
+                let src = (tup.t_data().cast::<u8>()).add(SizeofHeapTupleHeader);
                 let body = core::slice::from_raw_parts(src, total - SizeofHeapTupleHeader).to_vec();
                 (xlhdr, body)
             };
@@ -254,8 +194,7 @@ pub async fn heap_insert(
 
     // M2: cache invalidation, pgstat, and copying t_self back into the caller's
     // image (when heaptup is a private toast copy) are grow guards -- here heaptup
-    // IS tup, so t_self is already updated in place. heaptup (a `!Send` raw ptr) is
-    // intentionally not referenced past the WAL `.await` so the future stays Send.
+    // IS tup, so t_self is already updated in place.
 }
 
 /// Emit the `XLOG_HEAP_INSERT` record. Split out so the content lock is dropped
@@ -264,7 +203,7 @@ pub async fn heap_insert(
 #[allow(clippy::too_many_arguments, reason = "mirrors the C XLOG block's locals")]
 async fn emit_insert_wal(
     shared: &Arc<SharedState>,
-    relation: SendRelation,
+    relation: &RelationData,
     buffer: Buffer,
     block: BlockNumber,
     info: u8,
@@ -273,8 +212,7 @@ async fn emit_insert_wal(
     tuple_body: &[u8],
     _options: i32,
 ) -> crate::access::xlogdefs::XLogRecPtr {
-    // SAFETY: live relation.
-    let locator = unsafe { (*relation.get()).rd_locator };
+    let locator = relation.rd_locator;
 
     let xlrec = xl_heap_insert { offnum, flags: 0 };
 
@@ -324,16 +262,16 @@ fn as_bytes<T>(v: &T, size: usize) -> &[u8] {
 /// boxed `HeapScanDescData` (the C palloc'd descriptor). M2 supports seqscan with
 /// an MVCC snapshot and page-at-a-time mode; other scan types are grow guards.
 ///
-/// The `Arc<SnapshotData>` is leaked into the descriptor's `rs_snapshot` raw
-/// pointer for the scan's lifetime and reclaimed in `heap_endscan` (mirroring C's
-/// snapshot ownership).
-pub fn heap_beginscan(
-    relation: SendRelation,
-    snapshot: Arc<SnapshotData>,
+/// Borrow-based ownership (relation-ownership-plan step 1): the descriptor borrows
+/// the relation (`&'rel RelationData`) and snapshot (`&'snap SnapshotData`). The
+/// `Arc` owners live in the caller's stack frame and must outlive the descriptor
+/// (and every `heap_getnext`/`heap_endscan` driven on it).
+pub fn heap_beginscan<'rel, 'snap>(
+    relation: &'rel RelationData,
+    snapshot: &'snap SnapshotData,
     nkeys: i32,
     flags: ScanOptions,
-) -> Box<HeapScanDescData> {
-    let relation = relation.get();
+) -> Box<HeapScanDescData<'rel, 'snap>> {
     crate::assert!(nkeys == 0, "M2 heap scan supports no scan keys");
 
     let mut flags = flags;
@@ -342,31 +280,23 @@ pub fn heap_beginscan(
         flags &= !ScanOptions::ALLOW_PAGEMODE;
     }
 
-    // SAFETY: live relation.
-    let table_oid = unsafe { (*relation).rd_id };
-
-    let snap_ptr = Arc::into_raw(snapshot).cast_mut();
+    let table_oid = relation.rd_id;
 
     let mut t_self = crate::storage::itemptr::ItemPointerData {
         blkid: crate::storage::block::BlockIdData { hi: 0, lo: 0 },
         posid: 0,
     };
     t_self.set_invalid();
-    let ctup = HeapTupleData {
-        t_len: 0,
-        t_self,
-        t_tableOid: table_oid,
-        t_data: core::ptr::null_mut(),
-    };
+    let ctup = HeapTupleData::null(t_self, table_oid);
 
     let base = TableScanDescData {
         rs_rd: relation,
-        rs_snapshot: snap_ptr,
+        rs_snapshot: snapshot,
         rs_nkeys: nkeys,
-        rs_key: core::ptr::null_mut(),
+        rs_key: Vec::new(),
         st: TableScanType::None,
         rs_flags: flags.bits(),
-        rs_parallel: core::ptr::null_mut(),
+        rs_parallel: None,
     };
 
     let scan = HeapScanDescData {
@@ -380,10 +310,10 @@ pub fn heap_beginscan(
         cbuf: InvalidBuffer,
         strategy: None,
         ctup,
-        read_stream: core::ptr::null_mut(),
+        read_stream: None,
         dir: ScanDirection::Forward,
         prefetch_block: INVALID_BLOCK_NUMBER,
-        parallelworkerdata: core::ptr::null_mut(),
+        parallelworkerdata: None,
         cindex: 0,
         ntuples: 0,
         vistuples: [0; crate::access::htup_details::MaxHeapTuplesPerPage as usize],
@@ -391,26 +321,18 @@ pub fn heap_beginscan(
     Box::new(scan)
 }
 
-/// `heap_endscan`: release scan resources -- unpin the current buffer and reclaim
-/// the leaked snapshot Arc. The boxed descriptor is dropped by the caller (it
-/// owns the `Box`).
-pub fn heap_endscan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData) {
+/// `heap_endscan`: release scan resources -- unpin the current buffer. The
+/// borrowed snapshot/relation `Arc`s are owned by the caller's frame (no reclaim
+/// here). The boxed descriptor is dropped by the caller (it owns the `Box`).
+pub fn heap_endscan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData<'_, '_>) {
     if scan.cbuf != InvalidBuffer {
         shared.buffers().release_buffer(scan.cbuf);
         scan.cbuf = InvalidBuffer;
     }
-    if !scan.base.rs_snapshot.is_null() {
-        // SAFETY: rs_snapshot was produced by Arc::into_raw in heap_beginscan;
-        // reclaim the refcount exactly once.
-        unsafe {
-            drop(Arc::from_raw(scan.base.rs_snapshot.cast_const()));
-        }
-        scan.base.rs_snapshot = core::ptr::null_mut();
-    }
 }
 
 /// `heap_rescan`: restart a scan from the beginning (M2: forward seqscan only).
-pub fn heap_rescan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData) {
+pub fn heap_rescan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData<'_, '_>) {
     if scan.cbuf != InvalidBuffer {
         shared.buffers().release_buffer(scan.cbuf);
         scan.cbuf = InvalidBuffer;
@@ -420,11 +342,11 @@ pub fn heap_rescan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData) {
 
 /// `initscan` (M2 subset): reset the scan cursor. The block count is read lazily
 /// on the first `heap_getnext` (it needs an `.await`, which `initscan` avoids).
-fn initscan(scan: &mut HeapScanDescData) {
+fn initscan(scan: &mut HeapScanDescData<'_, '_>) {
     scan.startblock = 0;
     scan.numblocks = INVALID_BLOCK_NUMBER;
     scan.inited = false;
-    scan.ctup.t_data = core::ptr::null_mut();
+    scan.ctup.body = None;
     scan.ctup.t_self.set_invalid();
     scan.cbuf = InvalidBuffer;
     scan.cblock = INVALID_BLOCK_NUMBER;
@@ -436,11 +358,12 @@ fn initscan(scan: &mut HeapScanDescData) {
 
 /// `heap_getnext`: advance the scan and return the next visible tuple, or `None`
 /// at end of scan. M2: forward, page-at-a-time, MVCC only. The returned
-/// `HeapTuple` points into `scan.ctup` (whose `t_data` aliases the pinned page);
-/// it is valid until the next `heap_getnext`/`heap_endscan`.
+/// `HeapTuple` references `scan.ctup`, whose body is an owned copy of the page
+/// item (no longer aliases the pinned page); valid until the next
+/// `heap_getnext`/`heap_endscan`.
 pub async fn heap_getnext(
     shared: &Arc<SharedState>,
-    scan: &mut HeapScanDescData,
+    scan: &mut HeapScanDescData<'_, '_>,
     direction: ScanDirection,
 ) -> Option<HeapTuple> {
     crate::assert!(
@@ -450,7 +373,7 @@ pub async fn heap_getnext(
 
     heapgettup_pagemode(shared, scan, direction).await;
 
-    if scan.ctup.t_data.is_null() {
+    if scan.ctup.t_data_is_null() {
         return None;
     }
     Some(std::ptr::from_mut(&mut scan.ctup))
@@ -461,12 +384,14 @@ pub async fn heap_getnext(
 /// per-page visibility collection) and then yields the page's visible tuples in
 /// order. The current buffer stays pinned across calls (the page-at-a-time
 /// contract); a fresh page is read via `read_buffer_common`.
-async fn heapgettup_pagemode(
+async fn heapgettup_pagemode<'rel>(
     shared: &Arc<SharedState>,
-    scan: &mut HeapScanDescData,
+    scan: &mut HeapScanDescData<'rel, '_>,
     dir: ScanDirection,
 ) {
-    let relation = SendPtr(scan.base.rs_rd);
+    // Copy the relation borrow out (a `&'rel RelationData` is `Copy`) so the scan's
+    // `&mut` fields stay mutable in the loop while we read the relation.
+    let relation: &'rel RelationData = scan.base.rs_rd;
 
     // Continue from the previously returned page/tuple if the scan is inited.
     let mut lineindex = if scan.inited {
@@ -483,15 +408,16 @@ async fn heapgettup_pagemode(
             let page = pool.buffer_get_page(scan.cbuf);
             let item_id = page.get_item_id(lineoff);
             let item = page.get_item(&item_id);
-            // SAFETY: a normal item's bytes begin with a HeapTupleHeaderData; the
-            // page stays pinned, so the pointer is valid until the next call.
-            #[allow(
-                clippy::cast_ptr_alignment,
-                reason = "sound overlay: the page is 8-aligned and PageAddItem MAXALIGNs item offsets, so HeapTupleHeaderData's align (4) divides the address"
-            )]
-            let t_data = item.as_ptr().cast::<HeapTupleHeaderData>().cast_mut();
-            scan.ctup.t_data = t_data;
-            scan.ctup.t_len = item.len() as u32;
+            // PG returns a tuple pointing into the pinned page; here `ctup` OWNS its
+            // body, so copy the page item's bytes into a fresh owned body (a
+            // per-tuple copy on the hot path -- the cost of a genuinely-Send
+            // descriptor). The returned tuple stays valid for the scan's life,
+            // independent of the pin. SAFETY: a normal item's bytes begin with a
+            // HeapTupleHeaderData and `item` is `item.len()` readable page bytes.
+            let len = item.len();
+            let body = unsafe { crate::access::htup::tuple_body_from_raw(item.as_ptr(), len) };
+            scan.ctup.body = Some(body);
+            scan.ctup.t_len = len as u32;
             scan.ctup.t_self.set(scan.cblock, lineoff);
             scan.cindex = lineindex;
             return;
@@ -507,9 +433,7 @@ async fn heapgettup_pagemode(
         if scan.inited {
             scan.cblock = scan.cblock.wrapping_add(1);
         } else {
-            // SAFETY: live relation.
-            let rel: &mut RelationData = unsafe { &mut *relation.get() };
-            let smgr_ptr = rel.smgr();
+            let smgr_ptr = relation.smgr();
             // SAFETY: relcache-owned smgr handle, valid while the rel is open.
             let smgr = unsafe { &mut *smgr_ptr };
             scan.nblocks = smgr.nblocks(shared, ForkNumber::MAIN_FORKNUM).await;
@@ -519,7 +443,7 @@ async fn heapgettup_pagemode(
 
         if scan.cblock >= scan.nblocks {
             // End of scan.
-            scan.ctup.t_data = core::ptr::null_mut();
+            scan.ctup.body = None;
             scan.inited = false;
             scan.cblock = INVALID_BLOCK_NUMBER;
             return;
@@ -536,18 +460,13 @@ async fn heapgettup_pagemode(
 /// Read a main-fork block of `relation` into a pinned buffer.
 async fn read_relation_block(
     shared: &Arc<SharedState>,
-    relation: SendRelation,
+    relation: &RelationData,
     block: BlockNumber,
 ) -> Buffer {
-    // Pull the Send scalar + the (Send) smgr handle out under a short borrow so no
-    // `&mut RelationData` (it is `!Send`) is held across the `.await`.
-    let (relpersistence, smgr_ptr) = {
-        // SAFETY: live relation.
-        let rel: &mut RelationData = unsafe { &mut *relation.get() };
-        (unsafe { (*rel.rd_rel).relpersistence }, SendPtr(rel.smgr()))
-    };
-    // SAFETY: relcache-owned smgr handle valid while rel is open; Send.
-    let smgr = unsafe { &mut *smgr_ptr.get() };
+    let relpersistence = relation.form().relpersistence;
+    let smgr_ptr = relation.smgr();
+    // SAFETY: relcache-owned smgr handle valid while rel is open.
+    let smgr = unsafe { &mut *smgr_ptr };
     crate::backend::storage::buffer::bufmgr::read_buffer_common(
         shared,
         smgr,
@@ -583,9 +502,9 @@ fn zero_item_pointer() -> crate::storage::itemptr::ItemPointerData {
 /// during the test, which is sound because the page's line pointers and tuple
 /// bytes cannot change under a snapshot that can't see concurrent writers (PG's
 /// page-at-a-time guarantee).
-async fn heap_prepare_pagescan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData) {
-    // SAFETY: rs_snapshot is the leaked Arc from beginscan, valid for the scan.
-    let snapshot: &SnapshotData = unsafe { &*scan.base.rs_snapshot };
+async fn heap_prepare_pagescan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData<'_, '_>) {
+    // The snapshot is borrowed from the caller's frame (valid for the scan).
+    let snapshot: &SnapshotData = scan.base.rs_snapshot;
 
     // Snapshot the page's line count + collect candidate (block, offset) under a
     // brief SHARE lock; then drop it before the awaiting visibility tests.
@@ -655,20 +574,16 @@ pub fn heap_fetch() {
 /// systable index path; it reads one heap block, tests visibility with the
 /// content lock dropped (only the pin held, like the page-at-a-time scan), and
 /// copies the bytes out so the caller need not hold a pin.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the raw Relation handle is task-confined for this fetch; the future never migrates the pointee between tasks (same contract as the heap scan)"
-)]
 pub async fn heap_fetch_tid(
     shared: &Arc<SharedState>,
-    relation: Relation,
+    relation: &RelationData,
     tid: &crate::storage::itemptr::ItemPointerData,
-    snapshot: Snapshot,
+    snapshot: &SnapshotData,
 ) -> Option<Box<HeapTupleData>> {
     let block = tid.block_number();
     let offnum = tid.offset_number();
 
-    let buffer = read_relation_block(shared, SendPtr(relation), block).await;
+    let buffer = read_relation_block(shared, relation, block).await;
 
     // Copy the candidate header out under a brief share lock, drop it, test
     // visibility (awaits), then copy the full tuple bytes under another brief lock.
@@ -695,18 +610,14 @@ pub async fn heap_fetch_tid(
         return None;
     };
 
-    let snap: &SnapshotData = snapshot
-        .as_deref()
-        .unwrap_or_else(|| unreachable!("heap_fetch_tid requires a snapshot"));
-    let visible = heap_tuple_satisfies_mvcc(shared, &hdr, snap).await;
+    let visible = heap_tuple_satisfies_mvcc(shared, &hdr, snapshot).await;
     if !visible {
         shared.buffers().release_buffer(buffer);
         return None;
     }
 
-    // Copy the full tuple out under a brief share lock, via heap_copytuple so the
-    // owned body is managed (heap_freetuple frees it). Build a transient
-    // HeapTupleData over the page item, then copy.
+    // Copy the full tuple out under a brief share lock into an owned body so the
+    // caller need not hold a pin.
     let result = {
         let pool = shared.buffers();
         let _g = pool.content_share(buffer);
@@ -714,21 +625,17 @@ pub async fn heap_fetch_tid(
         let item_id = page.get_item_id(offnum);
         let item = page.get_item(&item_id);
         // SAFETY: a normal heap item's bytes begin with a HeapTupleHeaderData; the
-        // page stays pinned and content-locked for this borrow.
-        #[allow(
-            clippy::cast_ptr_alignment,
-            reason = "sound overlay: the page is 8-aligned and PageAddItem MAXALIGNs item offsets"
-        )]
-        let t_data = item.as_ptr().cast::<HeapTupleHeaderData>().cast_mut();
-        let mut transient = HeapTupleData {
+        // page stays pinned and content-locked for this borrow; `item` is
+        // `item.len()` readable page bytes.
+        let body = unsafe { crate::access::htup::tuple_body_from_raw(item.as_ptr(), item.len()) };
+        let mut tuple = HeapTupleData {
             t_len: item.len() as u32,
             t_self: zero_item_pointer(),
-            t_tableOid: unsafe { (*relation).rd_id },
-            t_data,
+            t_tableOid: relation.rd_id,
+            body: Some(body),
         };
-        transient.t_self.set(block, offnum);
-        // SAFETY: transient is a valid tuple over the pinned, locked page.
-        Box::new(unsafe { crate::backend::access::common::heaptuple::heap_copytuple(&transient) })
+        tuple.t_self.set(block, offnum);
+        Box::new(tuple)
     };
 
     shared.buffers().release_buffer(buffer);

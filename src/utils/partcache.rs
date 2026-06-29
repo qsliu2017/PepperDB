@@ -8,7 +8,7 @@ use crate::postgres_ext::Oid;
 
 // PG's `Expr *` (abstract expression supertype) maps to the Node enum.
 use crate::nodes::nodes::Node as Expr;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// Information about the partition key of a relation. This is the real body of
 /// the `crate::partitioning::partdefs::PartitionKeyData` forward-decl.
@@ -41,10 +41,10 @@ pub struct PartitionKeyData {
     pub parttypcoll: Vec<Oid>,
 }
 
-pub fn RelationGetPartitionKey(_rel: Relation) -> Option<&'static PartitionKeyData> {
+pub fn RelationGetPartitionKey(_rel: &RelationData) -> Option<&'static PartitionKeyData> {
     unimplemented!()
 }
-pub fn RelationGetPartitionQual(_rel: Relation) -> Vec<Node> {
+pub fn RelationGetPartitionQual(_rel: &RelationData) -> Vec<Node> {
     unimplemented!()
 }
 pub fn get_partition_qual_relid(_relid: Oid) -> Option<Expr> {

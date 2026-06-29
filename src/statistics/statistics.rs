@@ -7,7 +7,7 @@ use crate::nodes::nodes::{JoinType, Node, Selectivity};
 use crate::nodes::pathnodes::{PlannerInfo, RelOptInfo, SpecialJoinInfo, StatisticExtInfo};
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
-use crate::utils::rel::Relation;
+use crate::utils::rel::RelationData;
 
 pub type AttrNumber = i16; // c.h AttrNumber
 
@@ -91,7 +91,7 @@ pub fn statext_mcv_load(_mvoid: Oid, _inh: bool) -> Option<MCVList> {
 }
 
 pub fn BuildRelationExtStatistics(
-    _onerel: Relation,
+    _onerel: &RelationData,
     _inh: bool,
     _totalrows: f64,
     _numrows: i32,
@@ -103,7 +103,7 @@ pub fn BuildRelationExtStatistics(
 }
 
 pub fn ComputeExtStatisticsRows(
-    _onerel: Relation,
+    _onerel: &RelationData,
     _natts: i32,
     _vacattrstats: &mut [*mut VacAttrStats], // TODO(ptr): VacAttrStats **
 ) -> i32 {

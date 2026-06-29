@@ -14,10 +14,6 @@
 //! `&Arc<SharedState>`. M2 drops the `ProcessUtility_hook` (plugin entry) and the
 //! `params`/`query_env`/event-trigger plumbing until those subsystems land.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: ProcessUtility holds the per-backend &mut DestReceiver task-confined across the catalog-create await; the receiver is single-backend state (same contract as the portal path), never sent across tasks"
-)]
 
 use std::sync::Arc;
 

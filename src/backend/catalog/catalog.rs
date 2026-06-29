@@ -11,28 +11,21 @@
 //! threads `&Arc<SharedState>`. The pure predicates (`IsCatalogRelationOid`, ...)
 //! are sync.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: catalog routines hold per-backend raw Relation handles task-confined for the operation; same contract as relcache/genam"
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "catalog routines take raw Relation/HeapTuple pointers per the C API; faithful to C"
-)]
 
 use std::sync::Arc;
 
 use crate::access::attnum::AttrNumber;
 use crate::access::skey::ScanKeyData;
 use crate::access::transam::FIRST_UNPINNED_OBJECT_ID;
-use crate::backend::access::index::genam::{systable_beginscan, systable_endscan, systable_getnext};
-use crate::catalog::pg_class::Form_pg_class;
+use crate::backend::access::index::genam::{
+    systable_beginscan, systable_endscan, systable_getnext, systable_scan_snapshot,
+};
+use crate::catalog::pg_class::FormData_pg_class;
 use crate::common::relpath::{RelFileNumber, DEFAULTTABLESPACE_OID, GLOBALTABLESPACE_OID};
 use crate::postgres::ObjectIdGetDatum;
 use crate::postgres_ext::{InvalidOid, Oid};
 use crate::shared_state::SharedState;
 use crate::utils::rel::RelationData;
-use crate::utils::relcache::Relation;
 
 /// The shared OID counter (PG `GetNewObjectId` / varsup.c). Returns the next free
 /// OID, skipping reserved low values + wrapping the 32-bit space.
@@ -51,7 +44,7 @@ pub fn get_new_object_id(shared: &Arc<SharedState>) -> Oid {
 /// the collision check is exact either way.
 pub async fn get_new_oid_with_index(
     shared: &Arc<SharedState>,
-    relation: Relation,
+    relation: &RelationData,
     index_id: Oid,
     oidcolumn: AttrNumber,
 ) -> Oid {
@@ -73,7 +66,8 @@ pub async fn get_new_oid_with_index(
         // PG uses SnapshotAny here so an in-progress insert of the same OID still
         // counts as a collision; the M2 systable scan takes a catalog snapshot,
         // which is sufficient for the single-writer initdb / DDL path.
-        let mut scan = systable_beginscan(shared, relation, index_id, true, None, &key);
+        let snap = systable_scan_snapshot(shared, relation, None);
+        let mut scan = systable_beginscan(shared, relation, index_id, true, &snap, &key);
         let collides = systable_getnext(shared, &mut scan).await.is_some();
         systable_endscan(shared, &mut scan);
         if !collides {
@@ -94,7 +88,7 @@ pub async fn get_new_oid_with_index(
 pub async fn get_new_rel_file_number(
     shared: &Arc<SharedState>,
     _reltablespace: Oid,
-    pg_class: Option<Relation>,
+    pg_class: Option<Arc<RelationData>>,
     relpersistence: i8,
 ) -> RelFileNumber {
     use crate::catalog::pg_class::{Anum_pg_class_oid, RELPERSISTENCE_PERMANENT, RELPERSISTENCE_UNLOGGED};
@@ -107,7 +101,7 @@ pub async fn get_new_rel_file_number(
         Some(rel) => {
             get_new_oid_with_index(
                 shared,
-                rel,
+                &rel,
                 crate::catalog::pg_class::ClassOidIndexId,
                 Anum_pg_class_oid as AttrNumber,
             )
@@ -127,26 +121,22 @@ pub fn is_catalog_relation_oid(relid: Oid) -> bool {
 
 /// `IsCatalogRelation`: [`is_catalog_relation_oid`] of the relation's OID.
 #[must_use]
-pub fn is_catalog_relation(relation: Relation) -> bool {
-    // SAFETY: live open relation handle.
-    let relid = unsafe { (*relation).rd_id };
-    is_catalog_relation_oid(relid)
+pub fn is_catalog_relation(relation: &RelationData) -> bool {
+    is_catalog_relation_oid(relation.rd_id)
 }
 
 /// `IsSystemClass`: a relation is "system" if its OID is a pinned catalog OID, or
 /// it is a toast relation. The toast-namespace test is staged (M2 has no toast).
 #[must_use]
-pub fn is_system_class(relid: Oid, _reltuple: Form_pg_class) -> bool {
+pub fn is_system_class(relid: Oid, _reltuple: &FormData_pg_class) -> bool {
     // STAGED (rules.md s4): || IsToastClass(reltuple) -- M2 creates no toast rels.
     is_catalog_relation_oid(relid)
 }
 
 /// `IsSystemRelation`: [`is_system_class`] of the relation's OID + `rd_rel`.
 #[must_use]
-pub fn is_system_relation(relation: Relation) -> bool {
-    // SAFETY: live open relation handle.
-    let rel: &RelationData = unsafe { &*relation };
-    is_system_class(rel.rd_id, rel.rd_rel)
+pub fn is_system_relation(relation: &RelationData) -> bool {
+    is_system_class(relation.rd_id, relation.form())
 }
 
 /// `IsSharedRelation`: whether a relation OID is one of the hard-coded shared
@@ -219,7 +209,7 @@ fn zero_fmgr_info() -> crate::fmgr::FmgrInfo {
         retset: false,
         stats: 0,
         extra: 0,
-        mcxt: core::ptr::null_mut(),
-        expr: core::ptr::null_mut(),
+        mcxt: (),
+        expr: None,
     }
 }

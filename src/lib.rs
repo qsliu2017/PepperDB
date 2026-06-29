@@ -1,4 +1,9 @@
 #![doc = "PepperDB: a single-process, async Rust port of PostgreSQL."]
+// The connect-to-database backend future is deeply nested (executor -> access
+// methods -> smgr -> md); auto-trait (Send/Sync) solving over it exceeds the
+// default depth of 128. Raise the limit so `tokio::spawn(backend_main(..))`
+// resolves the (genuine) Send bound instead of overflowing.
+#![recursion_limit = "256"]
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals)]
 #![allow(dead_code, unused_imports, unused_variables)]
 #![allow(unsafe_op_in_unsafe_fn)]

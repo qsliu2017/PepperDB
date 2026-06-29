@@ -16,8 +16,9 @@
 #![allow(deprecated)] // GlobalVisState is a Phase-2 forward-decl in utils::snapshot
 
 use crate::access::transam::FullTransactionId;
-use crate::utils::relcache::Relation;
 use crate::utils::snapshot::{GlobalVisState, SnapshotData, SnapshotType};
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // Snapshot-manager entry points (PascalCase preserved; new `shared`-taking and
 // async shapes). Callers thread `shared` and `.await` the async ones.
@@ -98,12 +99,12 @@ pub fn IsMVCCSnapshot(snapshot: &SnapshotData) -> bool {
 /// `BTPageIsRecyclable` caller (nbtree static-inline) has no `SharedState`
 /// handle yet (nbtree must thread it through the AM call path). The real
 /// implementation is `backend::utils::time::snapmgr::GlobalVisCheckRemovableXid`.
-pub fn GlobalVisCheckRemovableXid(_rel: Relation, _xid: crate::c::TransactionId) -> bool {
+pub fn GlobalVisCheckRemovableXid(_rel: &RelationData, _xid: crate::c::TransactionId) -> bool {
     unimplemented!() // TODO(nbtree): thread SharedState through the AM call path
 }
 
 /// procarray.c/snapmgr.c `GlobalVisCheckRemovableFullXid`. Staging stub (see
 /// `GlobalVisCheckRemovableXid`).
-pub fn GlobalVisCheckRemovableFullXid(_rel: Relation, _fxid: FullTransactionId) -> bool {
+pub fn GlobalVisCheckRemovableFullXid(_rel: &RelationData, _fxid: FullTransactionId) -> bool {
     unimplemented!() // TODO(nbtree): thread SharedState through the AM call path
 }

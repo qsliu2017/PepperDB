@@ -7,7 +7,8 @@ use crate::nodes::nodes::Node;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::utils::palloc::MemoryContext;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // pg_list tombstoned; these `List *` values are node/relation lists.
 type List = Vec<Node>;
@@ -71,7 +72,7 @@ pub struct Publication {
 }
 
 pub struct PublicationRelInfo {
-    pub relation: Relation,
+    pub relation: Arc<RelationData>,
     pub where_clause: Node, // whereClause
     pub columns: List,
 }
@@ -137,7 +138,7 @@ pub fn GetTopMostAncestorInPublication(_puboid: Oid, _ancestors: &List) -> (Oid,
     unimplemented!()
 }
 
-pub fn is_publishable_relation(_rel: &Relation) -> bool {
+pub fn is_publishable_relation(_rel: &Arc<RelationData>) -> bool {
     unimplemented!()
 }
 
@@ -154,7 +155,7 @@ pub fn publication_add_relation(_pubid: Oid, _pri: &PublicationRelInfo, _if_not_
     unimplemented!()
 }
 
-pub fn pub_collist_validate(_targetrel: &Relation, _columns: &List) -> Bitmapset {
+pub fn pub_collist_validate(_targetrel: &Arc<RelationData>, _columns: &List) -> Bitmapset {
     unimplemented!()
 }
 
@@ -166,6 +167,6 @@ pub fn pub_collist_to_bitmapset(_columns: &Bitmapset, _pubcols: Datum, _mcxt: &M
     unimplemented!()
 }
 
-pub fn pub_form_cols_map(_relation: &Relation, _include_gencols_type: PublishGencolsType) -> Bitmapset {
+pub fn pub_form_cols_map(_relation: &Arc<RelationData>, _include_gencols_type: PublishGencolsType) -> Bitmapset {
     unimplemented!()
 }

@@ -18,10 +18,11 @@ use crate::postgres_ext::Oid;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::relfilelocator::RelFileLocator;
 use crate::storage::sinval::SharedInvalidationMessage;
-use crate::utils::relcache::Relation;
 use crate::utils::snapshot::SnapshotData;
 
 use bitflags::bitflags;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// paths for logical decoding data (relative to installation's $PGDATA)
 pub const PG_LOGICAL_DIR: &str = "pg_logical";
@@ -200,11 +201,11 @@ pub struct ReorderBufferTupleCidEnt {
 /* --- Callback signatures (the ReorderBuffer holds these as a vtable). --- */
 
 pub type ReorderBufferApplyChangeCB =
-    fn(rb: &mut ReorderBuffer, txn: &mut ReorderBufferTXN, relation: Relation, change: &mut ReorderBufferChange);
+    fn(rb: &mut ReorderBuffer, txn: &mut ReorderBufferTXN, relation: &RelationData, change: &mut ReorderBufferChange);
 pub type ReorderBufferApplyTruncateCB = fn(
     rb: &mut ReorderBuffer,
     txn: &mut ReorderBufferTXN,
-    relations: &mut [Relation],
+    relations: &mut [Arc<RelationData>],
     change: &mut ReorderBufferChange,
 );
 pub type ReorderBufferBeginCB = fn(rb: &mut ReorderBuffer, txn: &mut ReorderBufferTXN);
@@ -239,7 +240,7 @@ pub type ReorderBufferStreamPrepareCB =
 pub type ReorderBufferStreamCommitCB =
     fn(rb: &mut ReorderBuffer, txn: &mut ReorderBufferTXN, commit_lsn: XLogRecPtr);
 pub type ReorderBufferStreamChangeCB =
-    fn(rb: &mut ReorderBuffer, txn: &mut ReorderBufferTXN, relation: Relation, change: &mut ReorderBufferChange);
+    fn(rb: &mut ReorderBuffer, txn: &mut ReorderBufferTXN, relation: &RelationData, change: &mut ReorderBufferChange);
 pub type ReorderBufferStreamMessageCB = fn(
     rb: &mut ReorderBuffer,
     txn: &mut ReorderBufferTXN,
@@ -251,7 +252,7 @@ pub type ReorderBufferStreamMessageCB = fn(
 pub type ReorderBufferStreamTruncateCB = fn(
     rb: &mut ReorderBuffer,
     txn: &mut ReorderBufferTXN,
-    relations: &mut [Relation],
+    relations: &mut [Arc<RelationData>],
     change: &mut ReorderBufferChange,
 );
 pub type ReorderBufferUpdateProgressTxnCB =

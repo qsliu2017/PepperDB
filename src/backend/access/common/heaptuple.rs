@@ -27,7 +27,7 @@
 
 use core::alloc::Layout;
 
-use crate::access::htup::{HeapTupleData, HeapTupleIsValid};
+use crate::access::htup::{alloc_tuple_body, tuple_body_from_raw, HeapTupleData, HeapTupleIsValid};
 use crate::access::htup_details::{
     HeapTupleHeaderData, MinimalTupleData, BITMAPLEN, HEAP_HASEXTERNAL, HEAP_HASNULL,
     HEAP_HASVARWIDTH, HEAP_NATTS_MASK, MINIMAL_TUPLE_OFFSET, SizeofHeapTupleHeader,
@@ -98,48 +98,9 @@ fn set_datum_length(header: &mut HeapTupleHeaderData, len: u32) {
     header.choice.t_datum.len_ = (len << 2) as i32;
 }
 
-// ----------------------------------------------------------------------------
-//                          single-block tuple allocation
-// ----------------------------------------------------------------------------
-
-/// Allocate a zeroed tuple body of `len` bytes and return a pointer to its
-/// start (which is overlaid by `HeapTupleHeaderData`). Mirrors C's
-/// `palloc0(HEAPTUPLESIZE + len)` followed by `t_data = block + HEAPTUPLESIZE`,
-/// except the management struct lives separately (returned by value), so only
-/// the body block is allocated here. Reclaimed by [`free_tuple_body`].
-fn alloc_tuple_body(len: usize) -> *mut HeapTupleHeaderData {
-    // Allocate with MAXALIGN so the header (and thus the MAXALIGN'd data area)
-    // is suitably aligned for byval stores, exactly like palloc's MAXALIGN'd
-    // chunks. A zero-length body would be a degenerate tuple; clamp to 1.
-    let size = len.max(1);
-    let layout = Layout::from_size_align(size, crate::pg_config::MAXIMUM_ALIGNOF)
-        .unwrap_or_else(|_| Layout::new::<u8>());
-    // SAFETY: layout has non-zero size. alloc_zeroed returns zeroed memory or
-    // null on failure; we treat null as OOM.
-    let p = unsafe { std::alloc::alloc_zeroed(layout) };
-    if p.is_null() {
-        elog!(ERROR, "out of memory forming tuple".to_string());
-    }
-    #[allow(
-        clippy::cast_ptr_alignment,
-        reason = "sound overlay: block is alloc_zeroed at MAXIMUM_ALIGNOF (8); HeapTupleHeaderData's align (4) divides 8"
-    )]
-    p.cast::<HeapTupleHeaderData>()
-}
-
-/// Reclaim a tuple body allocated by [`alloc_tuple_body`]. `len` must be the
-/// `t_len` the body was allocated with.
-///
-/// SAFETY: `data` must have come from `alloc_tuple_body(len)` and not been freed.
-unsafe fn free_tuple_body(data: *mut HeapTupleHeaderData, len: usize) {
-    if data.is_null() {
-        return;
-    }
-    let size = len.max(1);
-    let layout = Layout::from_size_align(size, crate::pg_config::MAXIMUM_ALIGNOF)
-        .unwrap_or_else(|_| Layout::new::<u8>());
-    std::alloc::dealloc(data.cast::<u8>(), layout);
-}
+// `alloc_tuple_body` / `tuple_body_from_raw` (the owned 8-aligned `Box<[u64]>`
+// body allocators) are imported from `access::htup`; the body is freed when the
+// owning `HeapTupleData` drops -- no manual `free_tuple_body`.
 
 // ----------------------------------------------------------------------------
 //                            misc support routines
@@ -391,7 +352,7 @@ pub unsafe fn heap_attisnull(
     tuple_desc: Option<&TupleDescData>,
 ) -> bool {
     crate::assert!(tuple_desc.is_none_or(|d| attnum <= d.natts));
-    let td = &*tup.t_data;
+    let td = &*tup.t_data();
 
     if attnum > i32::from(td.get_natts()) {
         // present (not null) only if the descriptor records a missing value.
@@ -438,7 +399,7 @@ pub unsafe fn heap_attisnull(
 /// SAFETY: `tup.t_data` must point at a valid tuple body; `attnum` valid and
 /// non-null.
 pub unsafe fn nocachegetattr(tup: &HeapTupleData, attnum: i32, tuple_desc: &TupleDescData) -> Datum {
-    let td = &*tup.t_data;
+    let td = &*tup.t_data();
     let natts_in_tuple = td.get_natts() as usize;
     let has_nulls = (td.t_infomask & HEAP_HASNULL) != 0;
     let has_varwidth = (td.t_infomask & HEAP_HASVARWIDTH) != 0;
@@ -462,7 +423,7 @@ pub unsafe fn nocachegetattr(tup: &HeapTupleData, attnum: i32, tuple_desc: &Tupl
         }
     }
 
-    let tp = (tup.t_data.cast::<u8>()).add(td.t_hoff as usize);
+    let tp = (tup.t_data().cast::<u8>()).add(td.t_hoff as usize);
 
     if !slow && has_varwidth {
         for j in 0..=attnum {
@@ -524,7 +485,7 @@ pub unsafe fn heap_getsysattr(
     attnum: i32,
     _tuple_desc: &TupleDescData,
 ) -> (Datum, bool) {
-    let td = &*tup.t_data;
+    let td = &*tup.t_data();
     let result = if attnum == i32::from(SELF_ITEM_POINTER_ATTRIBUTE_NUMBER) {
         PointerGetDatum(core::ptr::from_ref(&tup.t_self).cast::<u8>())
     } else if attnum == i32::from(MIN_TRANSACTION_ID_ATTRIBUTE_NUMBER) {
@@ -552,28 +513,20 @@ pub unsafe fn heap_getsysattr(
 ///
 /// SAFETY: `tuple.t_data`, when non-null, must point at a `tuple.t_len` body.
 pub unsafe fn heap_copytuple(tuple: &HeapTupleData) -> HeapTupleData {
-    if !HeapTupleIsValid(Some(tuple)) || tuple.t_data.is_null() {
-        return HeapTupleData {
-            t_len: 0,
-            t_self: invalid_item_pointer(),
-            t_tableOid: InvalidOid,
-            t_data: core::ptr::null_mut(),
-        };
+    if !HeapTupleIsValid(Some(tuple)) || tuple.t_data_is_null() {
+        return HeapTupleData::null(invalid_item_pointer(), InvalidOid);
     }
 
     let len = tuple.t_len as usize;
-    let new_data = alloc_tuple_body(len);
-    core::ptr::copy_nonoverlapping(
-        tuple.t_data.cast::<u8>(),
-        new_data.cast::<u8>(),
-        len,
-    );
+    // SAFETY: input body holds `len` bytes (caller contract); from_raw copies them
+    // into a fresh 8-aligned owned body.
+    let body = tuple_body_from_raw(tuple.t_data().cast::<u8>(), len);
 
     HeapTupleData {
         t_len: tuple.t_len,
         t_self: tuple.t_self,
         t_tableOid: tuple.t_tableOid,
-        t_data: new_data,
+        body: Some(body),
     }
 }
 
@@ -582,16 +535,16 @@ pub unsafe fn heap_copytuple(tuple: &HeapTupleData) -> HeapTupleData {
 ///
 /// SAFETY: see [`heap_copytuple`].
 pub unsafe fn heap_copytuple_with_tuple(src: &HeapTupleData, dest: &mut HeapTupleData) {
-    if !HeapTupleIsValid(Some(src)) || src.t_data.is_null() {
-        dest.t_data = core::ptr::null_mut();
+    if !HeapTupleIsValid(Some(src)) || src.t_data_is_null() {
+        dest.body = None;
         return;
     }
     let len = src.t_len as usize;
     dest.t_len = src.t_len;
     dest.t_self = src.t_self;
     dest.t_tableOid = src.t_tableOid;
-    dest.t_data = alloc_tuple_body(len);
-    core::ptr::copy_nonoverlapping(src.t_data.cast::<u8>(), dest.t_data.cast::<u8>(), len);
+    // SAFETY: src body holds `len` bytes; copy into a fresh owned body.
+    dest.body = Some(tuple_body_from_raw(src.t_data().cast::<u8>(), len));
 }
 
 /// `heap_form_tuple`: construct a tuple from `values`/`isnull` arrays of length
@@ -626,18 +579,18 @@ pub fn heap_form_tuple(
     let data_len = heap_compute_data_size(tuple_descriptor, values, isnull);
     len += data_len;
 
-    // Allocate and zero the body block.
-    let td = alloc_tuple_body(len);
-
+    // Allocate and zero the owned body block, held by `tuple`.
     let mut tuple = HeapTupleData {
         t_len: len as u32,
         t_self: invalid_item_pointer(),
         t_tableOid: InvalidOid,
-        t_data: td,
+        body: Some(alloc_tuple_body(len)),
     };
+    let td = tuple.t_data_mut();
 
-    // SAFETY: `td` is a freshly-allocated, zeroed body of `len` bytes. Every
-    // write below stays within it; the header overlay is sound (`#[repr(C)]`).
+    // SAFETY: `td` is the freshly-allocated, zeroed owned body of `len` bytes
+    // (kept alive by `tuple.body`). Every write below stays within it; the
+    // header overlay is sound (`#[repr(C)]`).
     unsafe {
         let header = &mut *td;
         set_datum_length(header, len as u32);
@@ -709,7 +662,7 @@ pub unsafe fn heap_modify_tuple(
     let mut new_tuple = heap_form_tuple(tuple_desc, &values, &isnull);
 
     // copy the identification info of the old tuple
-    (*new_tuple.t_data).ctid = (*tuple.t_data).ctid;
+    (*new_tuple.t_data_mut()).ctid = (*tuple.t_data()).ctid;
     new_tuple.t_self = tuple.t_self;
     new_tuple.t_tableOid = tuple.t_tableOid;
     new_tuple
@@ -740,7 +693,7 @@ pub unsafe fn heap_modify_tuple_by_cols(
 
     let mut new_tuple = heap_form_tuple(tuple_desc, &values, &isnull);
 
-    (*new_tuple.t_data).ctid = (*tuple.t_data).ctid;
+    (*new_tuple.t_data_mut()).ctid = (*tuple.t_data()).ctid;
     new_tuple.t_self = tuple.t_self;
     new_tuple.t_tableOid = tuple.t_tableOid;
     new_tuple
@@ -759,7 +712,7 @@ pub unsafe fn heap_deform_tuple(
     tuple: &HeapTupleData,
     tuple_desc: &TupleDescData,
 ) -> (Vec<Datum>, Vec<bool>) {
-    let tup = &*tuple.t_data;
+    let tup = &*tuple.t_data();
     let has_nulls = (tup.t_infomask & HEAP_HASNULL) != 0;
     let tdesc_natts = tuple_desc.natts as usize;
 
@@ -771,7 +724,7 @@ pub unsafe fn heap_deform_tuple(
     let mut isnull = vec![false; tdesc_natts];
 
     let bp = tup.t_bits(tup.get_natts() as usize);
-    let tp = tuple.t_data.cast::<u8>().add(tup.t_hoff as usize);
+    let tp = tuple.t_data().cast::<u8>().add(tup.t_hoff as usize);
 
     let mut off = 0usize;
     let mut attnum = 0usize;
@@ -813,15 +766,15 @@ pub unsafe fn heap_deform_tuple(
     (values, isnull)
 }
 
-/// `heap_freetuple`: free a tuple's body block (the C single-palloc block). The
-/// management struct is owned by value and drops with the binding.
+/// `heap_freetuple`: free a tuple's body (the C single-palloc block). The owned
+/// `TupleStorage` (and its `Box<[u64]>` body) drops here when `htup` is consumed
+/// by value -- no manual free.
 #[allow(
     clippy::needless_pass_by_value,
-    reason = "by-value is the contract: this consumes the tuple (C pfree(htup)) and frees its body"
+    reason = "by-value is the contract: this consumes the tuple (C pfree(htup)) and drops its owned body"
 )]
 pub fn heap_freetuple(htup: HeapTupleData) {
-    // SAFETY: `t_data`, when non-null, came from `alloc_tuple_body(t_len)`.
-    unsafe { free_tuple_body(htup.t_data, htup.t_len as usize) };
+    drop(htup);
 }
 
 /// `fastgetattr`: fetch a non-system user attribute as `(value, isnull)`,
@@ -837,7 +790,7 @@ pub unsafe fn fastgetattr(
 ) -> (Datum, bool) {
     crate::assert!(attnum > 0);
 
-    let td = &*tup.t_data;
+    let td = &*tup.t_data();
     let has_nulls = (td.t_infomask & HEAP_HASNULL) != 0;
 
     if !has_nulls {
@@ -862,7 +815,7 @@ pub unsafe fn heap_getattr(
     tuple_desc: &TupleDescData,
 ) -> (Datum, bool) {
     if attnum > 0 {
-        if attnum > i32::from((*tup.t_data).get_natts()) {
+        if attnum > i32::from((*tup.t_data()).get_natts()) {
             return getmissingattr(tuple_desc, attnum);
         }
         fastgetattr(tup, attnum, tuple_desc)
@@ -885,14 +838,22 @@ pub unsafe fn heap_copy_tuple_as_datum(
     tuple: &HeapTupleData,
     tuple_desc: &TupleDescData,
 ) -> Datum {
-    if (*tuple.t_data).has_external() {
+    if (*tuple.t_data()).has_external() {
         // toast_flatten_tuple_to_datum(tuple->t_data, tuple->t_len, tupleDesc)
         unimplemented!("toast_flatten_tuple_to_datum deferred (TOAST subsystem)")
     }
 
     let len = tuple.t_len as usize;
-    let td = alloc_tuple_body(len);
-    core::ptr::copy_nonoverlapping(tuple.t_data.cast::<u8>(), td.cast::<u8>(), len);
+    // A composite Datum is a standalone varlena returned by raw pointer (C
+    // palloc'd, not a managed HeapTupleData body); allocate it raw like the
+    // minimal-tuple blocks rather than an owned TupleBody.
+    let block = alloc_minimal_block(len);
+    core::ptr::copy_nonoverlapping(tuple.t_data().cast::<u8>(), block, len);
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "sound overlay: alloc_minimal_block returns 8-aligned memory; HeapTupleHeaderData's align (4) divides 8"
+    )]
+    let td = block.cast::<HeapTupleHeaderData>();
 
     let header = &mut *td;
     set_datum_length(header, tuple.t_len);
@@ -1025,7 +986,13 @@ pub unsafe fn heap_copy_minimal_tuple(mtup: *mut MinimalTupleData, extra: Size) 
 pub unsafe fn heap_tuple_from_minimal_tuple(mtup: *mut MinimalTupleData) -> HeapTupleData {
     let mlen = (*mtup).t_len as usize;
     let len = mlen + MINIMAL_TUPLE_OFFSET;
-    let td = alloc_tuple_body(len);
+    let mut tuple = HeapTupleData {
+        t_len: len as u32,
+        t_self: invalid_item_pointer(),
+        t_tableOid: InvalidOid,
+        body: Some(alloc_tuple_body(len)),
+    };
+    let td = tuple.t_data_mut();
 
     // Copy the minimal tuple into the body starting at MINIMAL_TUPLE_OFFSET, then
     // zero the leading system-column region (up to t_infomask2).
@@ -1037,12 +1004,7 @@ pub unsafe fn heap_tuple_from_minimal_tuple(mtup: *mut MinimalTupleData) -> Heap
     let lead = core::mem::offset_of!(HeapTupleHeaderData, t_infomask2);
     core::ptr::write_bytes(td.cast::<u8>(), 0, lead);
 
-    HeapTupleData {
-        t_len: len as u32,
-        t_self: invalid_item_pointer(),
-        t_tableOid: InvalidOid,
-        t_data: td,
-    }
+    tuple
 }
 
 /// `minimal_tuple_from_heap_tuple`: build a minimal tuple by copying from a heap
@@ -1057,7 +1019,7 @@ pub unsafe fn minimal_tuple_from_heap_tuple(htup: &HeapTupleData, extra: Size) -
     let block = alloc_minimal_block(len + extra);
     let result = minimal_at(block, extra);
     core::ptr::copy_nonoverlapping(
-        htup.t_data.cast::<u8>().add(MINIMAL_TUPLE_OFFSET),
+        htup.t_data().cast::<u8>().add(MINIMAL_TUPLE_OFFSET),
         result.cast::<u8>(),
         len,
     );
@@ -1154,12 +1116,12 @@ mod tests {
         // No nulls -> t_hoff is MAXALIGN(SizeofHeapTupleHeader=23) = 24.
         // SAFETY: tuple body is valid for t_len bytes.
         unsafe {
-            let td = &*tuple.t_data;
+            let td = &*tuple.t_data();
             assert_eq!(td.t_hoff, 24);
             assert_eq!(td.get_natts(), 2);
             assert_eq!(td.t_infomask & HEAP_HASNULL, 0);
             // data area: int4=1 then int4=2, each 4-byte aligned with no gap.
-            let data = core::slice::from_raw_parts(tuple.t_data.cast::<u8>().add(24), 8);
+            let data = core::slice::from_raw_parts(tuple.t_data().cast::<u8>().add(24), 8);
             assert_eq!(&data[0..4], &1i32.to_le_bytes());
             assert_eq!(&data[4..8], &2i32.to_le_bytes());
             // total length = 24 + 8 = 32.
@@ -1185,7 +1147,7 @@ mod tests {
 
         // SAFETY: valid tuple body.
         unsafe {
-            let td = &*tuple.t_data;
+            let td = &*tuple.t_data();
             assert_ne!(td.t_infomask & HEAP_HASNULL, 0);
             // bitmap present: t_hoff = MAXALIGN(23 + BITMAPLEN(3)=1) = MAXALIGN(24) = 24.
             assert_eq!(td.t_hoff, 24);
@@ -1215,7 +1177,7 @@ mod tests {
 
         // SAFETY: valid tuple body.
         unsafe {
-            let td = &*tuple.t_data;
+            let td = &*tuple.t_data();
             assert_ne!(td.t_infomask & HEAP_HASVARWIDTH, 0);
             assert_eq!(td.t_infomask & HEAP_HASNULL, 0);
         }
@@ -1285,8 +1247,8 @@ mod tests {
         // SAFETY: valid tuple body.
         let copy = unsafe { heap_copytuple(&tuple) };
         assert_eq!(copy.t_len, tuple.t_len);
-        assert!(!copy.t_data.is_null());
-        assert_ne!(copy.t_data, tuple.t_data);
+        assert!(!copy.t_data_is_null());
+        assert_ne!(copy.t_data(), tuple.t_data());
 
         let (out, _) = unsafe { heap_deform_tuple(&copy, &desc) };
         assert_eq!(out[0], Datum(123));

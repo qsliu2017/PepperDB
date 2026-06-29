@@ -10,7 +10,8 @@ use crate::c::TransactionId;
 use crate::datatype::timestamp::TimestampTz;
 use crate::replication::logical::LogicalDecodingContext;
 use crate::replication::reorderbuffer::{ReorderBufferChange, ReorderBufferTXN};
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputPluginOutputType {
@@ -36,14 +37,14 @@ pub trait OutputPluginCallbacks {
         &self,
         ctx: &mut LogicalDecodingContext,
         txn: &mut ReorderBufferTXN,
-        relation: Relation,
+        relation: &RelationData,
         change: &mut ReorderBufferChange,
     );
     fn truncate_cb(
         &self,
         ctx: &mut LogicalDecodingContext,
         txn: &mut ReorderBufferTXN,
-        relations: &mut [Relation],
+        relations: &mut [Arc<RelationData>],
         change: &mut ReorderBufferChange,
     );
     fn commit_cb(&self, ctx: &mut LogicalDecodingContext, txn: &mut ReorderBufferTXN, commit_lsn: XLogRecPtr);
@@ -89,7 +90,7 @@ pub trait OutputPluginCallbacks {
         &self,
         _ctx: &mut LogicalDecodingContext,
         _txn: &mut ReorderBufferTXN,
-        _relation: Relation,
+        _relation: &RelationData,
         _change: &mut ReorderBufferChange,
     ) {
     }
@@ -107,7 +108,7 @@ pub trait OutputPluginCallbacks {
         &self,
         _ctx: &mut LogicalDecodingContext,
         _txn: &mut ReorderBufferTXN,
-        _relations: &mut [Relation],
+        _relations: &mut [Arc<RelationData>],
         _change: &mut ReorderBufferChange,
     ) {
     }

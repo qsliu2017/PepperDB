@@ -11,7 +11,6 @@ use crate::catalog::objectaddress::ObjectAddress;
 use crate::nodes::nodes::Node;
 use crate::postgres_ext::Oid;
 use crate::utils::acl::AclItem;
-use crate::utils::rel::Relation;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(71,TypeRelation_Rowtype_Id) BKI_SCHEMA_MACRO
 pub const TypeRelationId: Oid = Oid(1247);
@@ -113,11 +112,14 @@ pub const TYPSTORAGE_MAIN: i8 = b'm' as i8;
 
 // Polymorphic-type tests. The ANY*OID type OIDs are generated into
 // crate::catalog::genbki by build.rs (from pg_type.dat typnames).
+use std::sync::Arc;
+
 use crate::catalog::genbki::{
     ANYARRAYOID, ANYCOMPATIBLEARRAYOID, ANYCOMPATIBLEMULTIRANGEOID, ANYCOMPATIBLENONARRAYOID,
     ANYCOMPATIBLEOID, ANYCOMPATIBLERANGEOID, ANYELEMENTOID, ANYENUMOID, ANYMULTIRANGEOID,
     ANYNONARRAYOID, ANYRANGEOID, MONEYOID, PG_LSNOID,
 };
+use crate::utils::rel::RelationData;
 
 pub fn IsPolymorphicTypeFamily1(typid: Oid) -> bool {
     matches!(
@@ -163,7 +165,7 @@ pub use crate::backend::catalog::pg_type::type_create as TypeCreate;
 
 pub fn GenerateTypeDependencies(
     _type_tuple: HeapTuple,
-    _type_catalog: &Relation,
+    _type_catalog: &Arc<RelationData>,
     _default_expr: &Node,
     _typacl: &[u8], // void* acl -> opaque bytes; TODO(ptr)
     _relation_kind: i8,
@@ -190,4 +192,3 @@ pub fn moveArrayTypeName(_type_oid: Oid, _type_name: &str, _type_namespace: Oid)
 pub fn makeMultirangeTypeName(_range_type_name: &str, _type_namespace: Oid) -> String {
     unimplemented!()
 }
-

@@ -12,7 +12,8 @@ use crate::nodes::primnodes::{
 };
 use crate::parser::parse_node::{ParseNamespaceColumn, ParseNamespaceItem, ParseState};
 use crate::postgres_ext::Oid;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// `sublevels_up` out-param folded in -> returns `(item, sublevels_up)`.
 pub fn refnameNamespaceItem(
@@ -99,7 +100,7 @@ pub fn parserOpenTable(
     _pstate: &mut ParseState,
     _relation: &RangeVar,
     _lockmode: i32,
-) -> Relation {
+) -> Arc<RelationData> {
     unimplemented!()
 }
 
@@ -115,7 +116,7 @@ pub fn addRangeTableEntry(
 
 pub fn addRangeTableEntryForRelation(
     _pstate: &mut ParseState,
-    _rel: Relation,
+    _rel: &RelationData,
     _lockmode: i32,
     _alias: Option<&Alias>,
     _inh: bool,
@@ -285,19 +286,19 @@ pub fn expandNSItemAttrs(
     unimplemented!()
 }
 
-pub fn attnameAttNum(_rd: Relation, _attname: &str, _sys_col_ok: bool) -> i32 {
+pub fn attnameAttNum(_rd: &RelationData, _attname: &str, _sys_col_ok: bool) -> i32 {
     unimplemented!()
 }
 
-pub fn attnumAttName(_rd: Relation, _attid: i32) -> Option<&'static NameData> {
+pub fn attnumAttName(_rd: &RelationData, _attid: i32) -> Option<&'static NameData> {
     unimplemented!()
 }
 
-pub fn attnumTypeId(_rd: Relation, _attid: i32) -> Oid {
+pub fn attnumTypeId(_rd: &RelationData, _attid: i32) -> Oid {
     unimplemented!()
 }
 
-pub fn attnumCollationId(_rd: Relation, _attid: i32) -> Oid {
+pub fn attnumCollationId(_rd: &RelationData, _attid: i32) -> Oid {
     unimplemented!()
 }
 

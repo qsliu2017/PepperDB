@@ -600,8 +600,8 @@ mod tests {
     fn fc(args: &[Datum]) -> FunctionCallInfoBaseData {
         FunctionCallInfoBaseData {
             flinfo: None,
-            context: core::ptr::null_mut(),
-            resultinfo: core::ptr::null_mut(),
+            context: None,
+            resultinfo: None,
             fncollation: C_COLLATION_OID,
             isnull: false,
             nargs: args.len() as i16,

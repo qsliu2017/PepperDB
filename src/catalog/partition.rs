@@ -8,7 +8,7 @@
 use crate::nodes::bitmapset::Bitmapset;
 use crate::nodes::nodes::Node;
 use crate::postgres_ext::Oid;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// Seed for the extended hash function.
 pub const HASH_PARTITION_SEED: u64 = 0x7A5B22367996DCFD;
@@ -22,21 +22,21 @@ pub fn get_partition_ancestors(relid: Oid) -> Vec<Oid> {
     unimplemented!()
 }
 
-pub fn index_get_partition(partition: Relation, index_id: Oid) -> Option<Oid> {
+pub fn index_get_partition(partition: &RelationData, index_id: Oid) -> Option<Oid> {
     unimplemented!()
 }
 
 pub fn map_partition_varattnos(
     expr: Vec<Node>,
     fromrel_varno: i32,
-    to_rel: Relation,
-    from_rel: Relation,
+    to_rel: &RelationData,
+    from_rel: &RelationData,
 ) -> Vec<Node> {
     unimplemented!()
 }
 
 /// C: bool return + `bool *used_in_expr` out-param -> (found, used_in_expr).
-pub fn has_partition_attrs(rel: Relation, attnums: &Bitmapset) -> (bool, bool) {
+pub fn has_partition_attrs(rel: &RelationData, attnums: &Bitmapset) -> (bool, bool) {
     unimplemented!()
 }
 

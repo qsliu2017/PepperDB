@@ -44,8 +44,9 @@ pub type ItemPointer = *mut ItemPointerData; // TODO(ptr)
 use crate::commands::vacuum::VacuumCutoffs;
 use crate::storage::off::OffsetNumber;
 use crate::storage::read_stream::ReadStream;
-use crate::utils::relcache::Relation;
 use crate::utils::snapshot::Snapshot;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // "options" flag bits for heap_insert. HEAP_INSERT_{SKIP_FSM,FROZEN,NO_LOGICAL}
 // alias TABLE_INSERT_* (tableam); SPECULATIVE is heap-only. Same i32 word as
@@ -87,8 +88,14 @@ pub struct BulkInsertStateData {
 }
 
 /// Descriptor for heap table scans (in-memory). Embeds the AM-independent base.
-pub struct HeapScanDescData {
-    pub base: TableScanDescData, // AM independent part of the descriptor
+///
+/// Borrow-based ownership (relation-ownership-plan step 1): the descriptor borrows
+/// the scanned relation and snapshot through `base` (`&'rel`/`&'snap`); the `Arc`
+/// owners live in an enclosing scope. `ctup` OWNS its body (`Option<Box<[u64]>>`,
+/// copied from the page item), so the struct is genuinely auto-`Send` -- no
+/// `unsafe impl Send` (relation-ownership-plan step 9).
+pub struct HeapScanDescData<'rel, 'snap> {
+    pub base: TableScanDescData<'rel, 'snap>, // AM independent part of the descriptor
 
     // state set up at initscan time
     pub nblocks: BlockNumber,   // total number of blocks in rel
@@ -107,28 +114,26 @@ pub struct HeapScanDescData {
 
     pub ctup: HeapTupleData, // current tuple in scan, if any
 
-    // For scans that stream reads
-    pub read_stream: *mut ReadStream, // TODO(ptr)
+    // For scans that stream reads; None when no read-stream is attached.
+    pub read_stream: Option<Box<ReadStream>>,
 
     // Saved scan direction + prefetch block for read-stream seq/TID-range scans.
     pub dir: ScanDirection,
     pub prefetch_block: BlockNumber,
 
-    // For parallel scans: page allocation data. NULL when not a parallel scan.
-    pub parallelworkerdata: *mut ParallelBlockTableScanWorkerData, // TODO(ptr)
+    // For parallel scans: page allocation data. None when not a parallel scan.
+    pub parallelworkerdata: Option<Box<ParallelBlockTableScanWorkerData>>,
 
     // page-at-a-time mode + bitmap scans
     pub cindex: u32,  // current tuple's index in vistuples
     pub ntuples: u32, // number of visible tuples on page
     pub vistuples: [OffsetNumber; MaxHeapTuplesPerPage as usize], // their offsets
 }
-pub type HeapScanDesc = *mut HeapScanDescData; // TODO(ptr)
 
 /// Bitmap heap scan descriptor: just the heap scan base (holds no extra data).
-pub struct BitmapHeapScanDescData {
-    pub rs_heap_base: HeapScanDescData,
+pub struct BitmapHeapScanDescData<'rel, 'snap> {
+    pub rs_heap_base: HeapScanDescData<'rel, 'snap>,
 }
-pub type BitmapHeapScanDesc = *mut BitmapHeapScanDescData; // TODO(ptr)
 
 /// Descriptor for fetches from heap via an index (in-memory).
 pub struct IndexFetchHeapData {
@@ -217,14 +222,14 @@ pub enum PruneReason {
 }
 
 /// HeapScanIsValid - True iff the heap scan is valid (non-null).
-pub fn HeapScanIsValid(scan: Option<&HeapScanDescData>) -> bool {
+pub fn HeapScanIsValid(scan: Option<&HeapScanDescData<'_, '_>>) -> bool {
     scan.is_some()
 }
 
 // ---- function prototypes for heap access method (stubs) ----
 
 pub fn heap_beginscan(
-    _relation: Relation,
+    _relation: &RelationData,
     _snapshot: Snapshot,
     _nkeys: i32,
     _key: ScanKey,
@@ -282,7 +287,7 @@ pub fn heap_getnextslot_tidrange(
 }
 
 pub fn heap_fetch(
-    _relation: Relation,
+    _relation: &RelationData,
     _snapshot: Snapshot,
     _tuple: HeapTuple,
     _userbuf: &mut Buffer,
@@ -294,7 +299,7 @@ pub fn heap_fetch(
 /// Returns (found, all_dead). C out-param `*all_dead` folded into the tuple.
 pub fn heap_hot_search_buffer(
     _tid: ItemPointer,
-    _relation: Relation,
+    _relation: &RelationData,
     _buffer: Buffer,
     _snapshot: Snapshot,
     _heap_tuple: HeapTuple,
@@ -320,7 +325,7 @@ pub fn ReleaseBulkInsertStatePin(_bistate: BulkInsertState) {
 }
 
 pub fn heap_insert(
-    _relation: Relation,
+    _relation: &RelationData,
     _tup: HeapTuple,
     _cid: CommandId,
     _options: i32,
@@ -330,7 +335,7 @@ pub fn heap_insert(
 }
 
 pub fn heap_multi_insert(
-    _relation: Relation,
+    _relation: &RelationData,
     _slots: &mut [*mut TupleTableSlot],
     _ntuples: i32,
     _cid: CommandId,
@@ -341,7 +346,7 @@ pub fn heap_multi_insert(
 }
 
 pub fn heap_delete(
-    _relation: Relation,
+    _relation: &RelationData,
     _tid: ItemPointer,
     _cid: CommandId,
     _crosscheck: Snapshot,
@@ -352,18 +357,18 @@ pub fn heap_delete(
     unimplemented!()
 }
 
-pub fn heap_finish_speculative(_relation: Relation, _tid: ItemPointer) {
+pub fn heap_finish_speculative(_relation: &RelationData, _tid: ItemPointer) {
     unimplemented!()
 }
 
-pub fn heap_abort_speculative(_relation: Relation, _tid: ItemPointer) {
+pub fn heap_abort_speculative(_relation: &RelationData, _tid: ItemPointer) {
     unimplemented!()
 }
 
 /// Returns (result, lockmode, update_indexes). C `*lockmode`/`*update_indexes`
 /// out-params folded into the return tuple.
 pub fn heap_update(
-    _relation: Relation,
+    _relation: &RelationData,
     _otid: ItemPointer,
     _newtup: HeapTuple,
     _cid: CommandId,
@@ -376,7 +381,7 @@ pub fn heap_update(
 
 /// Returns (result, buffer). C `*buffer` out-param folded into the return tuple.
 pub fn heap_lock_tuple(
-    _relation: Relation,
+    _relation: &RelationData,
     _tuple: HeapTuple,
     _cid: CommandId,
     _mode: LockTupleMode,
@@ -389,7 +394,7 @@ pub fn heap_lock_tuple(
 
 /// `void (*release_callback)(void *), void *arg` -> a captured closure (6.3).
 pub fn heap_inplace_lock(
-    _relation: Relation,
+    _relation: &RelationData,
     _oldtup_ptr: HeapTuple,
     _buffer: Buffer,
     _release_callback: impl FnMut(),
@@ -398,7 +403,7 @@ pub fn heap_inplace_lock(
 }
 
 pub fn heap_inplace_update_and_unlock(
-    _relation: Relation,
+    _relation: &RelationData,
     _oldtup: HeapTuple,
     _tuple: HeapTuple,
     _buffer: Buffer,
@@ -406,7 +411,7 @@ pub fn heap_inplace_update_and_unlock(
     unimplemented!()
 }
 
-pub fn heap_inplace_unlock(_relation: Relation, _oldtup: HeapTuple, _buffer: Buffer) {
+pub fn heap_inplace_unlock(_relation: &RelationData, _oldtup: HeapTuple, _buffer: Buffer) {
     unimplemented!()
 }
 
@@ -455,37 +460,37 @@ pub fn heap_tuple_needs_eventual_freeze(_tuple: &mut HeapTupleHeaderData) -> boo
     unimplemented!()
 }
 
-pub fn simple_heap_insert(_relation: Relation, _tup: HeapTuple) {
+pub fn simple_heap_insert(_relation: &RelationData, _tup: HeapTuple) {
     unimplemented!()
 }
 
-pub fn simple_heap_delete(_relation: Relation, _tid: ItemPointer) {
+pub fn simple_heap_delete(_relation: &RelationData, _tid: ItemPointer) {
     unimplemented!()
 }
 
 /// Returns update_indexes. C `*update_indexes` out-param folded into the return.
 pub fn simple_heap_update(
-    _relation: Relation,
+    _relation: &RelationData,
     _otid: ItemPointer,
     _tup: HeapTuple,
 ) -> TU_UpdateIndexes {
     unimplemented!()
 }
 
-pub fn heap_index_delete_tuples(_rel: Relation, _delstate: &mut TM_IndexDeleteOp) -> TransactionId {
+pub fn heap_index_delete_tuples(_rel: &RelationData, _delstate: &mut TM_IndexDeleteOp) -> TransactionId {
     unimplemented!()
 }
 
 // in heap/pruneheap.c
 
-pub fn heap_page_prune_opt(_relation: Relation, _buffer: Buffer) {
+pub fn heap_page_prune_opt(_relation: &RelationData, _buffer: Buffer) {
     unimplemented!()
 }
 
 /// Returns (new_relfrozen_xid, new_relmin_mxid). The two trailing C `*new_*`
 /// out-params folded into the return; `presult` filled in place.
 pub fn heap_page_prune_and_freeze(
-    _relation: Relation,
+    _relation: &RelationData,
     _buffer: Buffer,
     _vistest: &mut GlobalVisState,
     _options: i32,
@@ -513,7 +518,7 @@ pub fn heap_get_root_tuples(_page: &Page, _root_offsets: &mut [OffsetNumber]) {
 }
 
 pub fn log_heap_prune_and_freeze(
-    _relation: Relation,
+    _relation: &RelationData,
     _buffer: Buffer,
     _conflict_xid: TransactionId,
     _cleanup_lock: bool,
@@ -530,7 +535,7 @@ pub fn log_heap_prune_and_freeze(
 
 #[allow(deprecated)]
 pub fn heap_vacuum_rel(
-    _rel: Relation,
+    _rel: &RelationData,
     _params: &mut VacuumParams,
     _bstrategy: BufferAccessStrategy,
 ) {
@@ -596,7 +601,7 @@ pub fn ResolveCminCmaxDuringDecoding(
 
 pub fn HeapCheckForSerializableConflictOut(
     _visible: bool,
-    _relation: Relation,
+    _relation: &RelationData,
     _tuple: HeapTuple,
     _buffer: Buffer,
     _snapshot: Snapshot,

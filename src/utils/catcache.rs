@@ -7,7 +7,7 @@ use crate::access::tupdesc::TupleDesc;
 use crate::lib::ilist::{dlist_head, dlist_node, slist_node};
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 pub const CATCACHE_MAXKEYS: usize = 4;
 
@@ -219,7 +219,7 @@ pub fn CatCacheInvalidate(_cache: &mut CatCache, _hash_value: u32) {
 /// `function(cacheid, hashvalue, dboid, context)` callback; `void *context`
 /// becomes a captured closure.
 pub fn PrepareToInvalidateCacheTuple(
-    _relation: Relation,
+    _relation: &RelationData,
     _tuple: HeapTuple,
     _newtuple: HeapTuple,
     _function: &mut dyn FnMut(i32, u32, Oid),

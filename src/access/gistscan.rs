@@ -2,9 +2,9 @@
 
 use crate::access::genam::IndexScanDesc;
 use crate::access::skey::ScanKey;
-use crate::utils::rel::Relation;
+use crate::utils::rel::RelationData;
 
-pub fn gistbeginscan(_r: Relation, _nkeys: i32, _norderbys: i32) -> IndexScanDesc {
+pub fn gistbeginscan(_r: &RelationData, _nkeys: i32, _norderbys: i32) -> IndexScanDesc {
     unimplemented!()
 }
 pub fn gistrescan(

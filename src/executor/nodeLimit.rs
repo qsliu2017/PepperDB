@@ -4,7 +4,7 @@ use crate::nodes::execnodes::{EState, LimitState};
 use crate::nodes::plannodes::Limit;
 
 // TODO(ptr)
-pub fn ExecInitLimit(_node: &Limit, _estate: &mut EState, _eflags: i32) -> *mut LimitState {
+pub fn ExecInitLimit(_node: &Limit, _estate: &mut EState<'_>, _eflags: i32) -> *mut LimitState {
     unimplemented!()
 }
 

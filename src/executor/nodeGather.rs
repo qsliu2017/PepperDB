@@ -4,7 +4,7 @@ use crate::nodes::execnodes::{EState, GatherState};
 use crate::nodes::plannodes::Gather;
 
 // TODO(ptr)
-pub fn ExecInitGather(_node: &Gather, _estate: &mut EState, _eflags: i32) -> *mut GatherState {
+pub fn ExecInitGather(_node: &Gather, _estate: &mut EState<'_>, _eflags: i32) -> *mut GatherState {
     unimplemented!()
 }
 

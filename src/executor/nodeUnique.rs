@@ -3,7 +3,7 @@
 use crate::nodes::execnodes::{EState, UniqueState};
 use crate::nodes::plannodes::Unique;
 
-pub fn ExecInitUnique(_node: &Unique, _estate: &mut EState, _eflags: i32) -> *mut UniqueState {
+pub fn ExecInitUnique(_node: &Unique, _estate: &mut EState<'_>, _eflags: i32) -> *mut UniqueState {
     unimplemented!() // TODO(ptr)
 }
 pub fn ExecEndUnique(_node: &mut UniqueState) {

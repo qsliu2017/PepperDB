@@ -1,5 +1,8 @@
 //! Translated from PostgreSQL src/include/executor/execdesc.h
 
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
+
 use crate::executor::instrument::InstrumentOption;
 use crate::nodes::execnodes::{
     EState, Instrumentation, ParamListInfo, PlannedStmt, QueryEnvironment, Snapshot, TupleDesc,
@@ -13,8 +16,12 @@ pub use crate::backend::executor::execProcnode::PlanStateNode;
 
 /// A QueryDesc encapsulates everything the executor needs to execute the query.
 /// In-memory executor state (not a Node).
+///
+/// `'rel` is the lifetime of the open range-table relations the contained `EState`
+/// borrows (relation-ownership-plan §1.2): the `Arc<RelationData>` owners live in
+/// the command frame and outlive the QueryDesc's executor run.
 #[allow(deprecated)]
-pub struct QueryDesc {
+pub struct QueryDesc<'rel> {
     /* These fields are provided by CreateQueryDesc */
     pub operation: CmdType,
     pub plannedstmt: Option<Box<PlannedStmt>>,
@@ -28,8 +35,8 @@ pub struct QueryDesc {
 
     /* These fields are set by ExecutorStart */
     pub tupDesc: Option<TupleDesc>,
-    pub estate: Option<Box<EState>>,
-    pub planstate: Option<Box<PlanStateNode>>,
+    pub estate: Option<Box<EState<'rel>>>,
+    pub planstate: Option<Box<PlanStateNode<'rel>>>,
 
     /* This field is set by ExecutePlan */
     pub already_executed: bool,
@@ -48,10 +55,10 @@ pub fn CreateQueryDesc(
     _params: Option<Box<ParamListInfo>>,
     _queryEnv: Option<Box<QueryEnvironment>>,
     _instrument_options: InstrumentOption,
-) -> QueryDesc {
+) -> QueryDesc<'static> {
     unimplemented!()
 }
 
-pub fn FreeQueryDesc(_qdesc: QueryDesc) {
+pub fn FreeQueryDesc(_qdesc: QueryDesc<'_>) {
     unimplemented!()
 }

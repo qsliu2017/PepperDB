@@ -10,9 +10,10 @@ use crate::nodes::execnodes::{
 use crate::nodes::plannodes::PartitionPruneStep;
 use crate::partitioning::partprune::PartitionPruneContext;
 use crate::utils::memutils::MemoryContext;
-use crate::utils::rel::Relation;
 
 use crate::executor::tuptable::TupleTableSlot;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // See execPartition.c for the definitions; these are opaque private types.
 
@@ -28,8 +29,8 @@ pub type PartitionDispatch = Option<Box<PartitionDispatchData>>;
 pub struct PartitionTupleRouting;
 
 pub fn ExecSetupPartitionTupleRouting(
-    _estate: &mut EState,
-    _rel: Relation,
+    _estate: &mut EState<'_>,
+    _rel: &RelationData,
 ) -> Box<PartitionTupleRouting> {
     unimplemented!()
 }
@@ -39,7 +40,7 @@ pub fn ExecFindPartition(
     _root_result_rel_info: &mut ResultRelInfo,
     _proute: &mut PartitionTupleRouting,
     _slot: &mut TupleTableSlot,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
 ) -> *mut ResultRelInfo {
     unimplemented!()
 }
@@ -57,7 +58,7 @@ pub fn ExecCleanupTupleRouting(
 /// `leafpart_rti_map` carries RT indexes (or 0). In-memory planner/executor
 /// state - idiomatic Rust, no layout contract.
 pub struct PartitionedRelPruningData {
-    pub partrel: Relation,
+    pub partrel: Arc<RelationData>,
     pub nparts: i32,
     pub subplan_map: Vec<i32>,
     pub subpart_map: Vec<i32>,
@@ -95,7 +96,7 @@ pub struct PartitionPruneState {
     pub partprunedata: Vec<Box<PartitionPruningData>>,
 }
 
-pub fn ExecDoInitialPruning(_estate: &mut EState) {
+pub fn ExecDoInitialPruning(_estate: &mut EState<'_>) {
     unimplemented!()
 }
 

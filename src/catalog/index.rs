@@ -11,9 +11,10 @@ use crate::postgres_ext::Oid;
 use crate::access::attmap::AttrMap;
 use crate::executor::tuptable::TupleTableSlot;
 use crate::storage::itemptr::ItemPointerData;
-use crate::utils::rel::Relation;
 use crate::utils::snapshot::Snapshot;
 use crate::utils::tuplesort::Tuplesortstate;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 pub const DEFAULT_INDEX_TYPE: &str = "btree";
 
@@ -52,7 +53,7 @@ pub struct ValidateIndexState {
 }
 
 pub fn index_check_primary_key(
-    heap_rel: &Relation,
+    heap_rel: &Arc<RelationData>,
     index_info: &IndexInfo,
     is_alter_table: bool,
     stmt: &IndexStmt,
@@ -96,7 +97,7 @@ bitflags! {
 pub use crate::backend::catalog::index::{index_build, index_create, make_index_info};
 
 pub fn index_concurrently_create_copy(
-    heap_relation: &Relation,
+    heap_relation: &Arc<RelationData>,
     old_index_id: Oid,
     tablespace_oid: Oid,
     new_name: &str,
@@ -122,7 +123,7 @@ pub fn index_concurrently_set_dead(heap_id: Oid, index_id: Oid) {
 
 #[allow(clippy::too_many_arguments)]
 pub fn index_constraint_create(
-    heap_relation: &Relation,
+    heap_relation: &Arc<RelationData>,
     index_relation_id: Oid,
     parent_constraint_id: Oid,
     index_info: &IndexInfo,
@@ -151,12 +152,12 @@ pub fn index_drop(index_id: Oid, concurrent: bool, concurrent_lock_mode: bool) {
     unimplemented!()
 }
 
-pub fn BuildIndexInfo(index: &Relation) -> IndexInfo {
+pub fn BuildIndexInfo(index: &Arc<RelationData>) -> IndexInfo {
     let _ = index;
     unimplemented!()
 }
 
-pub fn BuildDummyIndexInfo(index: &Relation) -> IndexInfo {
+pub fn BuildDummyIndexInfo(index: &Arc<RelationData>) -> IndexInfo {
     let _ = index;
     unimplemented!()
 }
@@ -182,7 +183,7 @@ pub fn CompareIndexInfo(
     unimplemented!()
 }
 
-pub fn BuildSpeculativeIndexInfo(index: &Relation, ii: &mut IndexInfo) {
+pub fn BuildSpeculativeIndexInfo(index: &Arc<RelationData>, ii: &mut IndexInfo) {
     let _ = (index, ii);
     unimplemented!()
 }
@@ -191,7 +192,7 @@ pub fn BuildSpeculativeIndexInfo(index: &Relation, ii: &mut IndexInfo) {
 pub fn FormIndexDatum(
     index_info: &IndexInfo,
     slot: &TupleTableSlot,
-    estate: &EState,
+    estate: &EState<'_>,
 ) -> Vec<Option<Datum>> {
     let _ = (index_info, slot, estate);
     unimplemented!()
@@ -276,7 +277,7 @@ pub fn RestoreReindexState(reindexstate: &[u8]) {
     unimplemented!()
 }
 
-pub fn IndexSetParentIndex(partition_idx: &Relation, parent_oid: Oid) {
+pub fn IndexSetParentIndex(partition_idx: &Arc<RelationData>, parent_oid: Oid) {
     let _ = (partition_idx, parent_oid);
     unimplemented!()
 }

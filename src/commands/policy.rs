@@ -3,9 +3,8 @@
 use crate::catalog::objectaddress::ObjectAddress;
 use crate::nodes::parsenodes::{AlterPolicyStmt, CreatePolicyStmt, RenameStmt};
 use crate::postgres_ext::Oid;
-use crate::utils::relcache::Relation;
 
-pub fn RelationBuildRowSecurity(relation: Relation) {
+pub fn RelationBuildRowSecurity(relation: &crate::utils::rel::RelationData) {
     unimplemented!()
 }
 
@@ -34,6 +33,6 @@ pub fn rename_policy(stmt: &mut RenameStmt) -> ObjectAddress {
     unimplemented!()
 }
 
-pub fn relation_has_policies(rel: Relation) -> bool {
+pub fn relation_has_policies(rel: &crate::utils::rel::RelationData) -> bool {
     unimplemented!()
 }

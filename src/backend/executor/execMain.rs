@@ -8,6 +8,8 @@
 //! milestone (rules.md s4). The whole M1 const path is synchronous (rules.md s5):
 //! no node reaches an I/O leaf, so ExecutorRun does not `.await`.
 
+use crate::utils::rel::RelationData;
+
 use std::sync::Arc;
 
 use crate::access::sdir::{scan_direction_is_no_movement, ScanDirection};
@@ -19,54 +21,30 @@ use crate::shared_state::SharedState;
 use crate::backend::executor::execProcnode::{exec_end_node, exec_init_node, exec_proc_node, PlanStateNode};
 use crate::backend::executor::execTuples::exec_reset_tuple_table;
 use crate::backend::executor::execUtils::{create_executor_state, free_executor_state};
-use crate::utils::relcache::RelationData;
+use crate::nodes::execnodes::RangeTableRels;
 
 // ---------------------------------------------------------------------------
-// Executor range-table relation registry (the es_relations equivalent).
+// Executor range-table relations (PG `es_relations`).
 //
 // PG's `ExecInitRangeTable` sizes `estate->es_relations` and the scan/result-rel
-// openers (`ExecGetRangeTableRelation`) fill each slot with the open `Relation`.
-// In this port the `EState.relations` field is typed to the opaque forward
-// placeholder `nodes::execnodes::Relation` (a ZST stand-in, not the real
-// `*mut RelationData`), so it cannot carry a real relation handle. Until that
-// placeholder is wired to `*mut RelationData`, the executor reads its open
-// relations from this per-task registry keyed by RT index: the caller establishes
-// the scope (`with_exec_relations`) around ExecutorStart..End with the relations
-// it has opened (faithful to PG, where the caller's range-table relations are
-// already open under the right locks before InitPlan).
+// openers (`ExecGetRangeTableRelation`) fill each slot with the open relation,
+// already opened under the right locks by the caller before InitPlan. Here the
+// command/statement frame opens them into its owning `Arc<RelationData>`s (the
+// `'rel` root that strictly encloses ExecutorStart..End) and passes a BORROW --
+// `RangeTableRels<'rel>` indexed by RT index -- into `standard_executor_start`,
+// which publishes it on `EState.es_range_table_rels`. No task-local, no per-node
+// `Arc` clone: the executor borrows the relations from a suspended ancestor frame.
 // ---------------------------------------------------------------------------
 
-tokio::task_local! {
-    static EXEC_RELATIONS: std::cell::RefCell<std::collections::HashMap<usize, *mut RelationData>>;
-}
-
-/// Run `fut` with the executor's per-task range-table relation registry populated
-/// from `(rti, relation)` pairs. The scope must enclose ExecutorStart..ExecutorEnd
-/// for any plan that scans or modifies a relation (M2). PG's equivalent is the
-/// open range-table relations the caller hands InitPlan via the EState.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the registry holds raw Relation handles (!Send), task-confined for one backend's query; the scoped future is driven on one task."
-)]
-pub async fn with_exec_relations<F, T>(relations: Vec<(usize, *mut RelationData)>, fut: F) -> T
-where
-    F: std::future::Future<Output = T>,
-{
-    let map = relations.into_iter().collect::<std::collections::HashMap<_, _>>();
-    EXEC_RELATIONS.scope(std::cell::RefCell::new(map), fut).await
-}
-
-/// The open `Relation` for range-table index `rti` from the per-task registry, or
-/// `None` if absent (no scope established, or the RTI was not registered).
-pub(crate) fn exec_relation_for_rti(rti: usize) -> Option<*mut RelationData> {
-    EXEC_RELATIONS
-        .try_with(|m| m.borrow().get(&rti).copied())
-        .ok()
-        .flatten()
-}
-
-/// PG `standard_ExecutorStart`: set up the EState and the plan-state tree.
-pub fn standard_executor_start(query_desc: &mut QueryDesc, eflags: i32) {
+/// PG `standard_ExecutorStart`: set up the EState and the plan-state tree. The
+/// borrowed range-table relations + query snapshot are published on the EState
+/// (the `'rel` owners are the command frame's `Arc`s, see the module note).
+pub fn standard_executor_start<'rel>(
+    query_desc: &mut QueryDesc<'rel>,
+    range_table_rels: RangeTableRels<'rel>,
+    snapshot_ref: Option<&'rel crate::utils::snapshot::SnapshotData>,
+    eflags: i32,
+) {
     crate::assert!(query_desc.estate.is_none());
 
     let estate = create_executor_state();
@@ -76,6 +54,8 @@ pub fn standard_executor_start(query_desc: &mut QueryDesc, eflags: i32) {
         .as_mut()
         .unwrap_or_else(|| unreachable!("estate just set"));
 
+    estate.es_range_table_rels = range_table_rels;
+    estate.es_snapshot_ref = snapshot_ref;
     estate.top_eflags = eflags;
     // es_snapshot / es_crosscheck_snapshot: the scan path (M2) reads tuples under
     // the query snapshot, so copy it from the QueryDesc (the caller registers the
@@ -99,7 +79,7 @@ pub fn standard_executor_start(query_desc: &mut QueryDesc, eflags: i32) {
 /// executor range table (`ExecInitRangeTable`) and, for a data-modifying command,
 /// the result relation(s) (`ExecInitResultRelation`), then `ExecInitNode`. The
 /// rowmark/pruning/subplan/junkfilter setup grows with those features.
-fn init_plan(query_desc: &mut QueryDesc, eflags: i32) {
+fn init_plan(query_desc: &mut QueryDesc<'_>, eflags: i32) {
     let plannedstmt = query_desc
         .plannedstmt
         .as_ref()
@@ -114,11 +94,11 @@ fn init_plan(query_desc: &mut QueryDesc, eflags: i32) {
         .as_mut()
         .unwrap_or_else(|| unreachable!("estate set by ExecutorStart"));
 
-    // ExecInitRangeTable: publish the rangetable. The open `Relation`s for the
-    // RTE_RELATION entries live in the per-task `EXEC_RELATIONS` registry (the
-    // es_relations equivalent; see the module-level note), read by
-    // ExecGetRangeTableRelation during node init. The scan/result-rel openers
-    // resolve relations from there by RT index.
+    // ExecInitRangeTable: publish the rangetable. The open relations for the
+    // RTE_RELATION entries were borrowed onto `estate.es_range_table_rels` by
+    // standard_executor_start (PG's es_relations; see the module-level note), read
+    // by ExecGetRangeTableRelation during node init. The scan/result-rel openers
+    // index that borrowed slice by RT index.
     estate.range_table_size = rtable.len();
     estate.range_table = rtable;
     // Result relations are surfaced to ExecInitModifyTable via the planned
@@ -140,7 +120,7 @@ fn init_plan(query_desc: &mut QueryDesc, eflags: i32) {
 }
 
 /// The result TupleDesc of a plan-state node (PG `ExecGetResultType`).
-fn result_type_of(node: &PlanStateNode) -> Option<crate::access::tupdesc::TupleDesc> {
+fn result_type_of(node: &PlanStateNode<'_>) -> Option<crate::access::tupdesc::TupleDesc> {
     match node {
         PlanStateNode::Result(rs) => rs.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::SeqScan(ss) => ss.state.ss.ps.ps_result_tuple_desc.clone(),
@@ -154,13 +134,9 @@ fn result_type_of(node: &PlanStateNode) -> Option<crate::access::tupdesc::TupleD
 /// the M1 const path still resolves immediately (no `.await` on the inner futures
 /// hits an I/O leaf). `dest.receive_slot` stays synchronous (printtup buffers into
 /// the send buffer synchronously, step 09).
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the executor's per-query state (TupleTableSlot value arrays, raw Relation handles) is !Send and task-confined; a backend's plan runs on one task, never sent across tasks. Same contract as the table AM scan/insert futures."
-)]
 pub async fn standard_executor_run(
     shared: Option<&Arc<SharedState>>,
-    query_desc: &mut QueryDesc,
+    query_desc: &mut QueryDesc<'_>,
     direction: ScanDirection,
     count: u64,
 ) {
@@ -208,13 +184,9 @@ pub async fn standard_executor_run(
 /// next `ExecProcNode` so there is no per-tuple clone. A non-RETURNING
 /// ModifyTable returns None on its single drive (the count lives in es_processed),
 /// so the loop ends immediately.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: task-confined per-query state (the borrowed scan/result slot, raw Relation handles) is !Send; the plan runs on one backend task. See standard_executor_run."
-)]
 async fn execute_plan(
     shared: Option<&Arc<SharedState>>,
-    query_desc: &mut QueryDesc,
+    query_desc: &mut QueryDesc<'_>,
     operation: CmdType,
     send_tuples: bool,
     number_tuples: u64,
@@ -281,7 +253,7 @@ async fn execute_plan(
 
 /// PG `standard_ExecutorFinish`: run any post-processing (ModifyTable to
 /// completion). Nothing to do for a SELECT.
-pub fn standard_executor_finish(query_desc: &mut QueryDesc) {
+pub fn standard_executor_finish(query_desc: &mut QueryDesc<'_>) {
     if let Some(estate) = query_desc.estate.as_mut() {
         estate.finished = true;
     }
@@ -290,7 +262,7 @@ pub fn standard_executor_finish(query_desc: &mut QueryDesc) {
 /// PG `standard_ExecutorEnd`: tear down the plan and free the EState. Takes
 /// `shared` so node teardown can release buffers/scans (heap_endscan). Stays
 /// synchronous (buffer release does not `.await`).
-pub fn standard_executor_end(shared: Option<&Arc<SharedState>>, query_desc: &mut QueryDesc) {
+pub fn standard_executor_end(shared: Option<&Arc<SharedState>>, query_desc: &mut QueryDesc<'_>) {
     if let Some(mut planstate) = query_desc.planstate.take() {
         exec_end_plan(shared, &mut planstate, query_desc);
     }
@@ -302,7 +274,7 @@ pub fn standard_executor_end(shared: Option<&Arc<SharedState>>, query_desc: &mut
 }
 
 /// PG `ExecEndPlan`: end the node tree and release the tuple table / relations.
-fn exec_end_plan(shared: Option<&Arc<SharedState>>, planstate: &mut PlanStateNode, query_desc: &mut QueryDesc) {
+fn exec_end_plan(shared: Option<&Arc<SharedState>>, planstate: &mut PlanStateNode<'_>, query_desc: &mut QueryDesc<'_>) {
     exec_end_node(shared, planstate);
     if let Some(estate) = query_desc.estate.as_mut() {
         exec_reset_tuple_table(&mut estate.tuple_table, false);
@@ -320,8 +292,7 @@ fn eflag_marker() -> ExecFlag {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::sync::Mutex;
 
     use crate::access::sdir::ScanDirection;
     use crate::access::tupdesc::TupleDesc;
@@ -347,7 +318,7 @@ mod tests {
     /// In-memory DestReceiver writing each row's (datum, isnull) into a shared
     /// `Collected` the test keeps a handle to.
     struct CollectingDest {
-        sink: Rc<RefCell<Collected>>,
+        sink: Arc<Mutex<Collected>>,
     }
 
     impl DestReceiver for CollectingDest {
@@ -359,14 +330,14 @@ mod tests {
                     (v.unwrap_or(Datum(0)), v.is_none())
                 })
                 .collect();
-            self.sink.borrow_mut().rows.push(row);
+            self.sink.lock().unwrap().rows.push(row);
             true
         }
         fn r_startup(&mut self, _operation: CmdType, _typeinfo: TupleDesc) {
-            self.sink.borrow_mut().startups += 1;
+            self.sink.lock().unwrap().startups += 1;
         }
         fn r_shutdown(&mut self) {
-            self.sink.borrow_mut().shutdowns += 1;
+            self.sink.lock().unwrap().shutdowns += 1;
         }
         fn mydest(&self) -> CommandDest {
             CommandDest::DestNone
@@ -389,7 +360,7 @@ mod tests {
     }
 
     /// Build a QueryDesc with a collecting receiver writing into `sink`.
-    fn query_desc(sql: &str, sink: &Rc<RefCell<Collected>>) -> QueryDesc {
+    fn query_desc(sql: &str, sink: &Arc<Mutex<Collected>>) -> QueryDesc<'static> {
         let stmt = plan(sql);
         #[allow(deprecated)]
         QueryDesc {
@@ -399,7 +370,7 @@ mod tests {
             snapshot: None,
             crosscheck_snapshot: None,
             dest: Some(Box::new(CollectingDest {
-                sink: Rc::clone(sink),
+                sink: Arc::clone(sink),
             })),
             params: None,
             queryEnv: None,
@@ -414,7 +385,7 @@ mod tests {
 
     #[test]
     fn select_one_executes_to_single_int4_row() {
-        let sink = Rc::new(RefCell::new(Collected::default()));
+        let sink = Arc::new(Mutex::new(Collected::default()));
         let mut qd = query_desc("SELECT 1", &sink);
         ExecutorStart(&mut qd, 0);
 
@@ -427,7 +398,7 @@ mod tests {
         ExecutorFinish(&mut qd);
 
         {
-            let dest = sink.borrow();
+            let dest = sink.lock().unwrap();
             assert_eq!(dest.startups, 1);
             assert_eq!(dest.shutdowns, 1);
             assert_eq!(dest.rows.len(), 1, "exactly one row");
@@ -456,24 +427,24 @@ mod tests {
 
     #[test]
     fn select_42_executes_to_42() {
-        let sink = Rc::new(RefCell::new(Collected::default()));
+        let sink = Arc::new(Mutex::new(Collected::default()));
         let mut qd = query_desc("SELECT 42", &sink);
         ExecutorStart(&mut qd, 0);
         block_on_ready(ExecutorRun(None, &mut qd, ScanDirection::Forward, 0));
         ExecutorFinish(&mut qd);
-        assert_eq!(DatumGetInt32(sink.borrow().rows[0][0].0), 42);
+        assert_eq!(DatumGetInt32(sink.lock().unwrap().rows[0][0].0), 42);
         ExecutorEnd(None, &mut qd);
     }
 
     #[test]
     fn select_two_constants_one_row_two_attrs() {
-        let sink = Rc::new(RefCell::new(Collected::default()));
+        let sink = Arc::new(Mutex::new(Collected::default()));
         let mut qd = query_desc("SELECT 1, 2", &sink);
         ExecutorStart(&mut qd, 0);
         block_on_ready(ExecutorRun(None, &mut qd, ScanDirection::Forward, 0));
         ExecutorFinish(&mut qd);
         {
-            let dest = sink.borrow();
+            let dest = sink.lock().unwrap();
             assert_eq!(dest.rows.len(), 1);
             assert_eq!(dest.rows[0].len(), 2);
             assert_eq!(DatumGetInt32(dest.rows[0][0].0), 1);

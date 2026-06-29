@@ -7,7 +7,7 @@ use crate::nodes::plannodes::HashJoin;
 use crate::storage::buffile::BufFile;
 
 // TODO(ptr)
-pub fn ExecInitHashJoin(_node: &HashJoin, _estate: &mut EState, _eflags: i32) -> *mut HashJoinState {
+pub fn ExecInitHashJoin(_node: &HashJoin, _estate: &mut EState<'_>, _eflags: i32) -> *mut HashJoinState {
     unimplemented!()
 }
 

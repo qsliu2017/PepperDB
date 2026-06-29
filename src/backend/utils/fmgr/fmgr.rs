@@ -130,8 +130,9 @@ fn fmgr_info_cxt_security(
     // whole struct is valid, and some FmgrInfo structs survive elogs.
     finfo.oid = InvalidOid;
     finfo.extra = 0;
-    finfo.mcxt = mcxt;
-    finfo.expr = core::ptr::null_mut(); // caller may set this later
+    let _ = mcxt; // fn_mcxt tombstoned (see FmgrInfo.mcxt)
+    finfo.mcxt = ();
+    finfo.expr = None; // caller may set this later
 
     if let Some(fbp) = fmgr_isbuiltin(function_id) {
         // Fast path for builtin functions: don't bother consulting pg_proc.
@@ -176,8 +177,11 @@ pub fn fmgr_info_copy(dstinfo: &mut FmgrInfo, srcinfo: &mut FmgrInfo, destcxt: M
     dstinfo.strict = srcinfo.strict;
     dstinfo.retset = srcinfo.retset;
     dstinfo.stats = srcinfo.stats;
-    dstinfo.expr = srcinfo.expr;
-    dstinfo.mcxt = destcxt;
+    // fn_expr is None on every path that reaches a copy in this port; the C
+    // shallow copy shares the parse-tree pointer, which we never need here.
+    dstinfo.expr = None;
+    let _ = destcxt; // fn_mcxt tombstoned (see FmgrInfo.mcxt)
+    dstinfo.mcxt = ();
     dstinfo.extra = 0;
 }
 
@@ -197,13 +201,13 @@ fn local_fcinfo(
     flinfo: Option<Box<FmgrInfo>>,
     nargs: i16,
     collation: Oid,
-    context: *mut Node,
-    resultinfo: *mut Node,
+    context: Option<Box<Node>>,
+    resultinfo: Option<Box<Node>>,
 ) -> FunctionCallInfoBaseData {
     let mut fcinfo = FunctionCallInfoBaseData {
         flinfo: None,
-        context: core::ptr::null_mut(),
-        resultinfo: core::ptr::null_mut(),
+        context: None,
+        resultinfo: None,
         fncollation: InvalidOid,
         isnull: false,
         nargs: 0,
@@ -249,7 +253,7 @@ macro_rules! direct_function_call {
         #[doc = stringify!($name)]
         /// `.
         pub fn $name(func: PGFunction, collation: Oid, $($arg: Datum),+) -> Option<Datum> {
-            let mut fcinfo = local_fcinfo(None, $n, collation, core::ptr::null_mut(), core::ptr::null_mut());
+            let mut fcinfo = local_fcinfo(None, $n, collation, None, None);
             set_args(&mut fcinfo, &[$($arg),+]);
             let result = invoke(func, &mut fcinfo);
             if fcinfo.isnull {
@@ -287,8 +291,8 @@ pub fn CallerFInfoFunctionCall1(
         Some(Box::new(clone_flinfo(flinfo))),
         1,
         collation,
-        core::ptr::null_mut(),
-        core::ptr::null_mut(),
+        None,
+        None,
     );
     set_arg(&mut fcinfo, 0, arg1);
     let result = invoke(func, &mut fcinfo);
@@ -311,8 +315,8 @@ pub fn CallerFInfoFunctionCall2(
         Some(Box::new(clone_flinfo(flinfo))),
         2,
         collation,
-        core::ptr::null_mut(),
-        core::ptr::null_mut(),
+        None,
+        None,
     );
     set_arg(&mut fcinfo, 0, arg1);
     set_arg(&mut fcinfo, 1, arg2);
@@ -334,8 +338,8 @@ fn clone_flinfo(src: &FmgrInfo) -> FmgrInfo {
         retset: src.retset,
         stats: src.stats,
         extra: src.extra,
-        mcxt: src.mcxt,
-        expr: src.expr,
+        mcxt: (),
+        expr: None,
     }
 }
 
@@ -372,8 +376,8 @@ macro_rules! function_call {
                 Some(Box::new(clone_flinfo(flinfo))),
                 $n,
                 collation,
-                core::ptr::null_mut(),
-                core::ptr::null_mut(),
+                None,
+                None,
             );
             set_args(&mut fcinfo, &[$($arg),*]);
             function_call_invoke_checked(&mut fcinfo, fn_oid)
@@ -423,7 +427,7 @@ oid_function_call!(OidFunctionCall9Coll, FunctionCall9Coll, arg1, arg2, arg3, ar
 
 /// A zeroed FmgrInfo to be filled by `fmgr_info` (PG's stack `FmgrInfo flinfo;`).
 #[allow(deprecated)]
-fn empty_flinfo() -> FmgrInfo {
+pub fn empty_flinfo() -> FmgrInfo {
     FmgrInfo {
         fn_addr: None,
         oid: InvalidOid,
@@ -432,8 +436,8 @@ fn empty_flinfo() -> FmgrInfo {
         retset: false,
         stats: 0,
         extra: 0,
-        mcxt: current_memory_context(),
-        expr: core::ptr::null_mut(),
+        mcxt: (),
+        expr: None,
     }
 }
 
@@ -457,8 +461,8 @@ pub fn InputFunctionCall(
         Some(Box::new(clone_flinfo(flinfo))),
         3,
         InvalidOid,
-        core::ptr::null_mut(),
-        core::ptr::null_mut(),
+        None,
+        None,
     );
     set_arg(&mut fcinfo, 0, CStringGetDatum(str.as_ptr().cast::<i8>()));
     set_arg(&mut fcinfo, 1, ObjectIdGetDatum(typioparam));
@@ -648,50 +652,44 @@ fn detoast_attr_slice(_datum: *mut varlena, _first: i32, _count: i32) -> *mut va
 /// PG `get_fn_expr_rettype`: actual return-type OID, or `InvalidOid`.
 #[allow(deprecated)]
 pub fn get_fn_expr_rettype(flinfo: &mut FmgrInfo) -> Oid {
-    if flinfo.expr.is_null() {
+    let Some(expr) = flinfo.expr.as_deref() else {
         return InvalidOid;
-    }
-    expr_type(flinfo.expr)
+    };
+    expr_type(expr)
 }
 
 /// PG `get_fn_expr_argtype`: actual type OID of argument `argnum` (from 0).
 #[allow(deprecated)]
 pub fn get_fn_expr_argtype(flinfo: &mut FmgrInfo, argnum: i32) -> Oid {
-    if flinfo.expr.is_null() {
+    let Some(expr) = flinfo.expr.as_deref() else {
         return InvalidOid;
-    }
-    get_call_expr_argtype(flinfo.expr, argnum)
+    };
+    get_call_expr_argtype(expr, argnum)
 }
 
 /// PG `get_call_expr_argtype`: like above but from the calling expression tree.
-pub fn get_call_expr_argtype(expr: *mut Node, _argnum: i32) -> Oid {
-    if expr.is_null() {
-        return InvalidOid;
-    }
+pub fn get_call_expr_argtype(_expr: &Node, _argnum: i32) -> Oid {
     unimplemented!("get_call_expr_argtype needs node IsA dispatch + exprType")
 }
 
 /// PG `get_fn_expr_arg_stable`: whether arg `argnum` is constant for the query.
 #[allow(deprecated)]
 pub fn get_fn_expr_arg_stable(flinfo: &mut FmgrInfo, argnum: i32) -> bool {
-    if flinfo.expr.is_null() {
+    let Some(expr) = flinfo.expr.as_deref() else {
         return false;
-    }
-    get_call_expr_arg_stable(flinfo.expr, argnum)
+    };
+    get_call_expr_arg_stable(expr, argnum)
 }
 
 /// PG `get_call_expr_arg_stable`: as above, from the calling expression tree.
-pub fn get_call_expr_arg_stable(expr: *mut Node, _argnum: i32) -> bool {
-    if expr.is_null() {
-        return false;
-    }
+pub fn get_call_expr_arg_stable(_expr: &Node, _argnum: i32) -> bool {
     unimplemented!("get_call_expr_arg_stable needs node IsA dispatch")
 }
 
 /// PG `get_fn_expr_variadic`: the VARIADIC flag from the call, or false.
 #[allow(deprecated)]
 pub fn get_fn_expr_variadic(flinfo: &mut FmgrInfo) -> bool {
-    if flinfo.expr.is_null() {
+    if flinfo.expr.is_none() {
         return false;
     }
     unimplemented!("get_fn_expr_variadic needs FuncExpr IsA dispatch")
@@ -706,7 +704,7 @@ pub fn set_fn_opclass_options(_flinfo: &mut FmgrInfo, _options: *mut bytea) {
 /// PG `has_fn_opclass_options`: whether opclass options are present.
 #[allow(deprecated)]
 pub fn has_fn_opclass_options(flinfo: &mut FmgrInfo) -> bool {
-    if flinfo.expr.is_null() {
+    if flinfo.expr.is_none() {
         return false;
     }
     unimplemented!("has_fn_opclass_options needs Const IsA dispatch")
@@ -715,7 +713,7 @@ pub fn has_fn_opclass_options(flinfo: &mut FmgrInfo) -> bool {
 /// PG `get_fn_opclass_options`: the cached opclass-options bytea, or ERROR.
 #[allow(deprecated)]
 pub fn get_fn_opclass_options(flinfo: &mut FmgrInfo) -> *mut bytea {
-    if !flinfo.expr.is_null() {
+    if flinfo.expr.is_some() {
         unimplemented!("get_fn_opclass_options needs Const IsA dispatch")
     }
     ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
@@ -726,7 +724,7 @@ pub fn get_fn_opclass_options(flinfo: &mut FmgrInfo) -> *mut bytea {
 }
 
 /// Tree introspection leaf: PG `exprType(Node*)` (nodeFuncs), deferred.
-fn expr_type(_expr: *mut Node) -> Oid {
+fn expr_type(_expr: &Node) -> Oid {
     unimplemented!("exprType (nodeFuncs) deferred")
 }
 
@@ -806,7 +804,7 @@ mod tests {
     /// FunctionCallInfo arg get/set roundtrip through the fcinfo helpers.
     #[test]
     fn fcinfo_arg_roundtrip() {
-        let mut fcinfo = local_fcinfo(None, 2, InvalidOid, core::ptr::null_mut(), core::ptr::null_mut());
+        let mut fcinfo = local_fcinfo(None, 2, InvalidOid, None, None);
         assert_eq!(fcinfo.nargs, 2);
         assert!(fcinfo.args[0].isnull);
 

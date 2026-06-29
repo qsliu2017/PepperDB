@@ -3,7 +3,7 @@
 use crate::nodes::execnodes::{EState, NestLoopState};
 use crate::nodes::plannodes::NestLoop;
 
-pub fn ExecInitNestLoop(_node: &NestLoop, _estate: &mut EState, _eflags: i32) -> *mut NestLoopState {
+pub fn ExecInitNestLoop(_node: &NestLoop, _estate: &mut EState<'_>, _eflags: i32) -> *mut NestLoopState {
     unimplemented!() // TODO(ptr)
 }
 pub fn ExecEndNestLoop(_node: &mut NestLoopState) {

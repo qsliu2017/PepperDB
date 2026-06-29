@@ -5,7 +5,8 @@ use crate::catalog::objectaddress::ObjectAddress;
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::DropBehavior;
 use crate::postgres_ext::Oid;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 pub const AttrDefaultRelationId: Oid = Oid(2604);
 
@@ -31,7 +32,7 @@ pub type Form_pg_attrdef = *mut FormData_pg_attrdef; // TODO(ptr)
 
 pub type AttrNumber = i16;
 
-pub fn StoreAttrDefault(_rel: &Relation, _attnum: AttrNumber, _expr: &Node, _is_internal: bool) -> Oid {
+pub fn StoreAttrDefault(_rel: &Arc<RelationData>, _attnum: AttrNumber, _expr: &Node, _is_internal: bool) -> Oid {
     unimplemented!()
 }
 

@@ -10,7 +10,7 @@ use crate::nodes::queryjumble::JumbleState;
 use crate::parser::parse_node::{ParseExprKind, ParseState};
 use crate::postgres_ext::Oid;
 use crate::utils::queryenvironment::QueryEnvironment;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// Hook for plugins to get control at end of parse analysis.
 pub type PostParseAnalyzeHookType =
@@ -114,7 +114,7 @@ pub fn applyLockingClause(
 }
 
 pub fn BuildOnConflictExcludedTargetlist(
-    _target_rel: Relation,
+    _target_rel: &RelationData,
     _excl_rel_index: usize,
 ) -> Vec<Node> {
     unimplemented!()

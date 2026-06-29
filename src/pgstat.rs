@@ -16,7 +16,8 @@ use crate::replication::conflict::{ConflictType, CONFLICT_NUM_TYPES};
 use crate::replication::slot::ReplicationSlot;
 use crate::storage::procnumber::ProcNumber;
 use crate::utils::pgstat_kind::PgStat_Kind;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // Paths for the statistics files (relative to $PGDATA).
 pub const PGSTAT_STAT_PERMANENT_DIRECTORY: &str = "pg_stat";
@@ -107,7 +108,7 @@ pub struct PgStat_TableStatus {
     pub shared: bool,   // is it a shared catalog?
     pub trans: Option<Box<PgStat_TableXactStatus>>, // lowest subxact's counts; TODO(ptr)
     pub counts: PgStat_TableCounts,
-    pub relation: Relation, // rel using this entry; TODO(ptr)
+    pub relation: Arc<RelationData>, // rel using this entry; TODO(ptr)
 }
 
 // Per-table, per-subtransaction status (an intrusive linked stack in C).
@@ -608,22 +609,23 @@ pub fn find_funcstat_entry(func_id: Oid) -> Option<&'static mut PgStat_FunctionC
 
 // ---- Functions in pgstat_relation.c ----
 
-pub fn pgstat_create_relation(rel: Relation) {
+pub fn pgstat_create_relation(rel: &RelationData) {
     unimplemented!()
 }
-pub fn pgstat_drop_relation(rel: Relation) {
+pub fn pgstat_drop_relation(rel: &RelationData) {
     unimplemented!()
 }
-pub fn pgstat_copy_relation_stats(dst: Relation, src: Relation) {
+pub fn pgstat_copy_relation_stats(dst: &RelationData, src: &RelationData) {
     unimplemented!()
 }
-pub fn pgstat_init_relation(rel: Relation) {
+pub fn pgstat_init_relation(rel: &crate::utils::rel::RelationData) {
+    let _ = rel;
     unimplemented!()
 }
-pub fn pgstat_assoc_relation(rel: Relation) {
+pub fn pgstat_assoc_relation(rel: &RelationData) {
     unimplemented!()
 }
-pub fn pgstat_unlink_relation(rel: Relation) {
+pub fn pgstat_unlink_relation(rel: &RelationData) {
     unimplemented!()
 }
 pub fn pgstat_report_vacuum(
@@ -636,7 +638,7 @@ pub fn pgstat_report_vacuum(
     unimplemented!()
 }
 pub fn pgstat_report_analyze(
-    rel: Relation,
+    rel: &RelationData,
     livetuples: PgStat_Counter,
     deadtuples: PgStat_Counter,
     resetcounter: bool,
@@ -648,19 +650,19 @@ pub fn pgstat_report_analyze(
 // pgstat_should_count_relation / pgstat_count_heap_*/buffer_* inline macros read
 // rel->pgstat_info; deferred until RelationData carries the pgstat hook.
 
-pub fn pgstat_count_heap_insert(rel: Relation, n: PgStat_Counter) {
+pub fn pgstat_count_heap_insert(rel: &RelationData, n: PgStat_Counter) {
     unimplemented!()
 }
-pub fn pgstat_count_heap_update(rel: Relation, hot: bool, newpage: bool) {
+pub fn pgstat_count_heap_update(rel: &RelationData, hot: bool, newpage: bool) {
     unimplemented!()
 }
-pub fn pgstat_count_heap_delete(rel: Relation) {
+pub fn pgstat_count_heap_delete(rel: &RelationData) {
     unimplemented!()
 }
-pub fn pgstat_count_truncate(rel: Relation) {
+pub fn pgstat_count_truncate(rel: &RelationData) {
     unimplemented!()
 }
-pub fn pgstat_update_heap_dead_tuples(rel: Relation, delta: i32) {
+pub fn pgstat_update_heap_dead_tuples(rel: &RelationData, delta: i32) {
     unimplemented!()
 }
 pub fn pgstat_twophase_postcommit(xid: TransactionId, info: u16, recdata: &[u8]) {

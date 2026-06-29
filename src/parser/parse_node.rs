@@ -10,7 +10,8 @@ use crate::nodes::primnodes::{Alias, Const, Param, SubscriptingRef, VarReturning
 use crate::postgres_ext::Oid;
 use crate::utils::elog::ErrorContextCallback;
 use crate::utils::queryenvironment::QueryEnvironment;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// Expression kinds distinguished by transformExpr().  Used so that
 /// context-specific error messages can be printed.
@@ -158,8 +159,8 @@ pub struct ParseState {
     pub p_future_ctes: Vec<CommonTableExpr>,
     /// this query's containing CTE
     pub p_parent_cte: Option<Box<CommonTableExpr>>,
-    /// INSERT/UPDATE/DELETE/MERGE target rel
-    pub p_target_relation: Relation,
+    /// INSERT/UPDATE/DELETE/MERGE target rel (None = no target)
+    pub p_target_relation: Option<Arc<RelationData>>,
     /// target rel's NSItem, or None
     pub p_target_nsitem: Option<Box<ParseNamespaceItem>>,
     /// NSItem for grouping, or None
@@ -215,7 +216,7 @@ pub struct ParseNamespaceItem {
     pub perminfo: Option<Box<RTEPermissionInfo>>,
     /// per-column data (array of same length as names->colnames)
     pub nscolumns: Vec<ParseNamespaceColumn>,
-    /// Relation name is visible?
+    /// Arc<RelationData> name is visible?
     pub rel_visible: bool,
     /// Column names visible as unqualified refs?
     pub cols_visible: bool,

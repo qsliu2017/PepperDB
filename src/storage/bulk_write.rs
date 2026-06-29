@@ -2,7 +2,8 @@
 
 use crate::common::relpath::ForkNumber;
 use crate::storage::block::BlockNumber;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // Bulk writer state, contents private to bulk_write.c.
 pub struct BulkWriteState {
@@ -17,7 +18,7 @@ pub struct PGIOAlignedBlock;
 // Temporary page-sized buffer reserved via smgr_bulk_get_buf.
 pub type BulkWriteBuffer = *mut PGIOAlignedBlock; // TODO(ptr)
 
-pub fn smgr_bulk_start_rel(_rel: &Relation, _forknum: ForkNumber) -> BulkWriteState {
+pub fn smgr_bulk_start_rel(_rel: &Arc<RelationData>, _forknum: ForkNumber) -> BulkWriteState {
     unimplemented!()
 }
 

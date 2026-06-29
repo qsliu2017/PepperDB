@@ -4,7 +4,7 @@
 //! `ExecScanRecheckMtd` fn-pointer typedefs already live in
 //! `crate::executor::executor`; re-exported here for call-site parity. The two
 //! `pg_attribute_always_inline` helpers below carry the EPQ-recheck control
-//! flow; bodies are stubbed pending the EState/EPQ field model in Phase 2.
+//! flow; bodies are stubbed pending the EState<'_>/EPQ field model in Phase 2.
 
 use crate::executor::executor::{ExecScanAccessMtd, ExecScanRecheckMtd};
 use crate::executor::tuptable::TupleTableSlot;

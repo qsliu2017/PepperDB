@@ -5,9 +5,9 @@ use crate::nodes::parsenodes::RefreshMatViewStmt;
 use crate::postgres_ext::Oid;
 use crate::tcop::cmdtag::QueryCompletion;
 use crate::tcop::dest::DestReceiver;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
-pub fn SetMatViewPopulatedState(_relation: Relation, _newstate: bool) {
+pub fn SetMatViewPopulatedState(_relation: &RelationData, _newstate: bool) {
     unimplemented!()
 }
 

@@ -4,26 +4,27 @@
 
 use crate::storage::block::BlockNumber;
 use crate::storage::relfilelocator::RelFileLocator;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // The real logic lives in `backend::storage::freespace::freespace` (smgr-level
 // args, async, reads the FSM fork through the buffer manager). These C-named,
-// `Relation`-based shims stay `unimplemented!()` until the relcache
+// `Arc<RelationData>`-based shims stay `unimplemented!()` until the relcache
 // (`RelationGetSmgr`) is wired; new code calls the backend functions directly.
 
 #[deprecated(note = "use `backend::storage::freespace::freespace::get_recorded_free_space`")]
-pub fn GetRecordedFreeSpace(_rel: Relation, _heap_blk: BlockNumber) -> usize {
+pub fn GetRecordedFreeSpace(_rel: &RelationData, _heap_blk: BlockNumber) -> usize {
     unimplemented!("use backend::storage::freespace::freespace::get_recorded_free_space")
 }
 
 #[deprecated(note = "use `backend::storage::freespace::freespace::get_page_with_free_space`")]
-pub fn GetPageWithFreeSpace(_rel: Relation, _space_needed: usize) -> Option<BlockNumber> {
+pub fn GetPageWithFreeSpace(_rel: &RelationData, _space_needed: usize) -> Option<BlockNumber> {
     unimplemented!("use backend::storage::freespace::freespace::get_page_with_free_space")
 }
 
 #[deprecated(note = "use `backend::storage::freespace::freespace::record_and_get_page_with_free_space`")]
 pub fn RecordAndGetPageWithFreeSpace(
-    _rel: Relation,
+    _rel: &RelationData,
     _old_page: BlockNumber,
     _old_space_avail: usize,
     _space_needed: usize,
@@ -32,7 +33,7 @@ pub fn RecordAndGetPageWithFreeSpace(
 }
 
 #[deprecated(note = "use `backend::storage::freespace::freespace::record_page_with_free_space`")]
-pub fn RecordPageWithFreeSpace(_rel: Relation, _heap_blk: BlockNumber, _space_avail: usize) {
+pub fn RecordPageWithFreeSpace(_rel: &RelationData, _heap_blk: BlockNumber, _space_avail: usize) {
     unimplemented!("use backend::storage::freespace::freespace::record_page_with_free_space")
 }
 
@@ -46,16 +47,16 @@ pub fn XLogRecordPageWithFreeSpace(
 }
 
 #[deprecated(note = "use `backend::storage::freespace::freespace::free_space_map_prepare_truncate_rel`")]
-pub fn FreeSpaceMapPrepareTruncateRel(_rel: Relation, _nblocks: BlockNumber) -> BlockNumber {
+pub fn FreeSpaceMapPrepareTruncateRel(_rel: &RelationData, _nblocks: BlockNumber) -> BlockNumber {
     unimplemented!("use backend::storage::freespace::freespace::free_space_map_prepare_truncate_rel")
 }
 
 #[deprecated(note = "use `backend::storage::freespace::freespace::free_space_map_vacuum`")]
-pub fn FreeSpaceMapVacuum(_rel: Relation) {
+pub fn FreeSpaceMapVacuum(_rel: &RelationData) {
     unimplemented!("use backend::storage::freespace::freespace::free_space_map_vacuum")
 }
 
 #[deprecated(note = "use `backend::storage::freespace::freespace::free_space_map_vacuum_range`")]
-pub fn FreeSpaceMapVacuumRange(_rel: Relation, _start: BlockNumber, _end: BlockNumber) {
+pub fn FreeSpaceMapVacuumRange(_rel: &RelationData, _start: BlockNumber, _end: BlockNumber) {
     unimplemented!("use backend::storage::freespace::freespace::free_space_map_vacuum_range")
 }

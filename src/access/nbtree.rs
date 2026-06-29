@@ -45,7 +45,7 @@ use crate::storage::bufmgr::{BUFFER_LOCK_EXCLUSIVE, BUFFER_LOCK_SHARE};
 use crate::storage::bufpage::{LocationIndex, Page, SizeOfPageHeaderData};
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 use crate::utils::skipsupport::SkipSupport;
 
 /// C `ItemPointer` is `ItemPointerData *`; itemptr.rs only exports the value type.
@@ -235,7 +235,7 @@ pub fn BTPageGetDeleteXid(page: &Page) -> FullTransactionId {
 }
 
 /// Is an existing page recyclable? (static inline)
-pub fn BTPageIsRecyclable(page: &Page, heaprel: Relation) -> bool {
+pub fn BTPageIsRecyclable(page: &Page, heaprel: &RelationData) -> bool {
     let opaque = unsafe { &*BTPageGetOpaque(page) };
     if P_ISDELETED(opaque) {
         let safexid = BTPageGetDeleteXid(page);
@@ -363,7 +363,7 @@ pub fn BTreeTupleSetDownLink(pivot: &mut IndexTupleData, blkno: BlockNumber) {
 
 /// Number of attributes within a tuple (excludes implicit heap-TID tiebreaker).
 /// C macro (avoids including rel.h); `rel` only used in the non-pivot branch.
-pub fn BTreeTupleGetNAtts(itup: &IndexTupleData, rel: Relation) -> u16 {
+pub fn BTreeTupleGetNAtts(itup: &IndexTupleData, rel: &RelationData) -> u16 {
     if BTreeTupleIsPivot(itup) {
         itup.tid.offset_number_no_check() & BT_OFFSET_MASK
     } else {
@@ -466,7 +466,7 @@ pub struct BTScanInsertData {
     pub anynullkeys: bool,
     pub nextkey: bool,
     pub backward: bool, // backward index scan?
-    pub scantid: Option<ItemPointer>, // tiebreaker for scankeys (TODO(ptr))
+    pub scantid: Option<ItemPointerData>, // tiebreaker for scankeys (owned heap TID)
     pub keysz: i32,     // Size of scankeys array
     pub scankeys: Vec<ScanKeyData>,
 }
@@ -709,15 +709,15 @@ pub struct BTOptions {
 
 /// BTGetFillFactor -- reloption fillfactor, or BTREE_DEFAULT_FILLFACTOR. Reaches
 /// into RelationData (rd_options/rd_rel) not yet available in the skeleton.
-pub fn BTGetFillFactor(_relation: Relation) -> i32 {
+pub fn BTGetFillFactor(_relation: &RelationData) -> i32 {
     unimplemented!()
 }
 /// BTGetTargetPageFreeSpace -- target free space from the fill factor.
-pub fn BTGetTargetPageFreeSpace(relation: Relation) -> i32 {
+pub fn BTGetTargetPageFreeSpace(relation: &RelationData) -> i32 {
     crate::pg_config::BLCKSZ as i32 * (100 - BTGetFillFactor(relation)) / 100
 }
 /// BTGetDeduplicateItems -- reloption deduplicate_items (default true).
-pub fn BTGetDeduplicateItems(_relation: Relation) -> bool {
+pub fn BTGetDeduplicateItems(_relation: &RelationData) -> bool {
     unimplemented!()
 }
 
@@ -729,16 +729,16 @@ pub const PROGRESS_BTREE_PHASE_LEAF_LOAD: i32 = 5;
 
 // === external entry points for btree, in nbtree.c (stubs) ===
 
-pub fn btbuildempty(_index: Relation) {
+pub fn btbuildempty(_index: &RelationData) {
     unimplemented!()
 }
 
 pub fn btinsert(
-    _rel: Relation,
+    _rel: &RelationData,
     _values: &[Datum],
     _isnull: &[bool],
     _ht_ctid: ItemPointer,
-    _heap_rel: Relation,
+    _heap_rel: &RelationData,
     _check_unique: IndexUniqueCheck,
     _index_unchanged: bool,
     _index_info: &mut IndexInfo,
@@ -746,11 +746,11 @@ pub fn btinsert(
     unimplemented!()
 }
 
-pub fn btbeginscan(_rel: Relation, _nkeys: i32, _norderbys: i32) -> IndexScanDesc {
+pub fn btbeginscan(_rel: &RelationData, _nkeys: i32, _norderbys: i32) -> IndexScanDesc {
     unimplemented!()
 }
 
-pub fn btestimateparallelscan(_rel: Relation, _nkeys: i32, _norderbys: i32) -> usize {
+pub fn btestimateparallelscan(_rel: &RelationData, _nkeys: i32, _norderbys: i32) -> usize {
     unimplemented!()
 }
 
@@ -807,11 +807,11 @@ pub fn btvacuumcleanup(
     unimplemented!()
 }
 
-pub fn btcanreturn(_index: Relation, _attno: i32) -> bool {
+pub fn btcanreturn(_index: &RelationData, _attno: i32) -> bool {
     unimplemented!()
 }
 
-pub fn btgettreeheight(_rel: Relation) -> i32 {
+pub fn btgettreeheight(_rel: &RelationData) -> i32 {
     unimplemented!()
 }
 
@@ -853,7 +853,7 @@ pub fn _bt_parallel_primscan_schedule(_scan: IndexScanDesc, _curr_page: BlockNum
 // === prototypes for functions in nbtdedup.c (stubs) ===
 
 pub fn _bt_dedup_pass(
-    _rel: Relation,
+    _rel: &RelationData,
     _buf: Buffer,
     _newitem: *mut IndexTupleData,
     _newitemsz: usize,
@@ -863,9 +863,9 @@ pub fn _bt_dedup_pass(
 }
 
 pub fn _bt_bottomupdel_pass(
-    _rel: Relation,
+    _rel: &RelationData,
     _buf: Buffer,
-    _heap_rel: Relation,
+    _heap_rel: &RelationData,
     _newitemsz: usize,
 ) -> bool {
     unimplemented!()
@@ -910,22 +910,22 @@ pub fn _bt_swap_posting(
 // === prototypes for functions in nbtinsert.c (stubs) ===
 
 pub fn _bt_doinsert(
-    _rel: Relation,
+    _rel: &RelationData,
     _itup: *mut IndexTupleData,
     _check_unique: IndexUniqueCheck,
     _index_unchanged: bool,
-    _heap_rel: Relation,
+    _heap_rel: &RelationData,
 ) -> bool {
     unimplemented!()
 }
 
-pub fn _bt_finish_split(_rel: Relation, _heaprel: Relation, _lbuf: Buffer, _stack: BTStack) {
+pub fn _bt_finish_split(_rel: &RelationData, _heaprel: &RelationData, _lbuf: Buffer, _stack: BTStack) {
     unimplemented!()
 }
 
 pub fn _bt_getstackbuf(
-    _rel: Relation,
-    _heaprel: Relation,
+    _rel: &RelationData,
+    _heaprel: &RelationData,
     _stack: BTStack,
     _child: BlockNumber,
 ) -> Buffer {
@@ -936,7 +936,7 @@ pub fn _bt_getstackbuf(
 
 /// Returns (split_offset, newitemonleft). C `*newitemonleft` out-param folded in.
 pub fn _bt_findsplitloc(
-    _rel: Relation,
+    _rel: &RelationData,
     _origpage: &Page,
     _newitemoff: OffsetNumber,
     _newitemsz: usize,
@@ -956,11 +956,11 @@ pub fn _bt_initmetapage(
     unimplemented!()
 }
 
-pub fn _bt_vacuum_needs_cleanup(_rel: Relation) -> bool {
+pub fn _bt_vacuum_needs_cleanup(_rel: &RelationData) -> bool {
     unimplemented!()
 }
 
-pub fn _bt_set_cleanup_info(_rel: Relation, _num_delpages: BlockNumber) {
+pub fn _bt_set_cleanup_info(_rel: &RelationData, _num_delpages: BlockNumber) {
     unimplemented!()
 }
 
@@ -968,56 +968,56 @@ pub fn _bt_upgrademetapage(_page: &mut Page) {
     unimplemented!()
 }
 
-pub fn _bt_getroot(_rel: Relation, _heaprel: Relation, _access: i32) -> Buffer {
+pub fn _bt_getroot(_rel: &RelationData, _heaprel: &RelationData, _access: i32) -> Buffer {
     unimplemented!()
 }
 
-pub fn _bt_gettrueroot(_rel: Relation) -> Buffer {
+pub fn _bt_gettrueroot(_rel: &RelationData) -> Buffer {
     unimplemented!()
 }
 
-pub fn _bt_getrootheight(_rel: Relation) -> i32 {
+pub fn _bt_getrootheight(_rel: &RelationData) -> i32 {
     unimplemented!()
 }
 
 /// Returns (heapkeyspace, allequalimage). C bool out-params folded into a tuple.
-pub fn _bt_metaversion(_rel: Relation) -> (bool, bool) {
+pub fn _bt_metaversion(_rel: &RelationData) -> (bool, bool) {
     unimplemented!()
 }
 
-pub fn _bt_checkpage(_rel: Relation, _buf: Buffer) {
+pub fn _bt_checkpage(_rel: &RelationData, _buf: Buffer) {
     unimplemented!()
 }
 
-pub fn _bt_getbuf(_rel: Relation, _blkno: BlockNumber, _access: i32) -> Buffer {
+pub fn _bt_getbuf(_rel: &RelationData, _blkno: BlockNumber, _access: i32) -> Buffer {
     unimplemented!()
 }
 
-pub fn _bt_allocbuf(_rel: Relation, _heaprel: Relation) -> Buffer {
+pub fn _bt_allocbuf(_rel: &RelationData, _heaprel: &RelationData) -> Buffer {
     unimplemented!()
 }
 
-pub fn _bt_relandgetbuf(_rel: Relation, _obuf: Buffer, _blkno: BlockNumber, _access: i32) -> Buffer {
+pub fn _bt_relandgetbuf(_rel: &RelationData, _obuf: Buffer, _blkno: BlockNumber, _access: i32) -> Buffer {
     unimplemented!()
 }
 
-pub fn _bt_relbuf(_rel: Relation, _buf: Buffer) {
+pub fn _bt_relbuf(_rel: &RelationData, _buf: Buffer) {
     unimplemented!()
 }
 
-pub fn _bt_lockbuf(_rel: Relation, _buf: Buffer, _access: i32) {
+pub fn _bt_lockbuf(_rel: &RelationData, _buf: Buffer, _access: i32) {
     unimplemented!()
 }
 
-pub fn _bt_unlockbuf(_rel: Relation, _buf: Buffer) {
+pub fn _bt_unlockbuf(_rel: &RelationData, _buf: Buffer) {
     unimplemented!()
 }
 
-pub fn _bt_conditionallockbuf(_rel: Relation, _buf: Buffer) -> bool {
+pub fn _bt_conditionallockbuf(_rel: &RelationData, _buf: Buffer) -> bool {
     unimplemented!()
 }
 
-pub fn _bt_upgradelockbufcleanup(_rel: Relation, _buf: Buffer) {
+pub fn _bt_upgradelockbufcleanup(_rel: &RelationData, _buf: Buffer) {
     unimplemented!()
 }
 
@@ -1026,7 +1026,7 @@ pub fn _bt_pageinit(_page: &mut Page, _size: usize) {
 }
 
 pub fn _bt_delitems_vacuum(
-    _rel: Relation,
+    _rel: &RelationData,
     _buf: Buffer,
     _deletable: &[OffsetNumber],
     _updatable: &mut [BTVacuumPosting],
@@ -1035,23 +1035,23 @@ pub fn _bt_delitems_vacuum(
 }
 
 pub fn _bt_delitems_delete_check(
-    _rel: Relation,
+    _rel: &RelationData,
     _buf: Buffer,
-    _heap_rel: Relation,
+    _heap_rel: &RelationData,
     _delstate: &mut crate::access::tableam::TM_IndexDeleteOp,
 ) {
     unimplemented!()
 }
 
-pub fn _bt_pagedel(_rel: Relation, _leafbuf: Buffer, _vstate: &mut BTVacState) {
+pub fn _bt_pagedel(_rel: &RelationData, _leafbuf: Buffer, _vstate: &mut BTVacState) {
     unimplemented!()
 }
 
-pub fn _bt_pendingfsm_init(_rel: Relation, _vstate: &mut BTVacState, _cleanuponly: bool) {
+pub fn _bt_pendingfsm_init(_rel: &RelationData, _vstate: &mut BTVacState, _cleanuponly: bool) {
     unimplemented!()
 }
 
-pub fn _bt_pendingfsm_finalize(_rel: Relation, _vstate: &mut BTVacState) {
+pub fn _bt_pendingfsm_finalize(_rel: &RelationData, _vstate: &mut BTVacState) {
     unimplemented!()
 }
 
@@ -1065,20 +1065,20 @@ pub fn _bt_preprocess_keys(_scan: IndexScanDesc) {
 
 /// Returns (stack, buf). C `*bufP` out-param folded into the return tuple.
 pub fn _bt_search(
-    _rel: Relation,
-    _heaprel: Relation,
+    _rel: &RelationData,
+    _heaprel: &RelationData,
     _key: BTScanInsert,
     _access: i32,
 ) -> (BTStack, Buffer) {
     unimplemented!()
 }
 
-pub fn _bt_binsrch_insert(_rel: Relation, _insertstate: BTInsertState) -> OffsetNumber {
+pub fn _bt_binsrch_insert(_rel: &RelationData, _insertstate: BTInsertState) -> OffsetNumber {
     unimplemented!()
 }
 
 pub fn _bt_compare(
-    _rel: Relation,
+    _rel: &RelationData,
     _key: BTScanInsert,
     _page: &Page,
     _offnum: OffsetNumber,
@@ -1094,13 +1094,13 @@ pub fn _bt_next(_scan: IndexScanDesc, _dir: ScanDirection) -> bool {
     unimplemented!()
 }
 
-pub fn _bt_get_endpoint(_rel: Relation, _level: u32, _rightmost: bool) -> Buffer {
+pub fn _bt_get_endpoint(_rel: &RelationData, _level: u32, _rightmost: bool) -> Buffer {
     unimplemented!()
 }
 
 // === prototypes for functions in nbtutils.c (stubs) ===
 
-pub fn _bt_mkscankey(_rel: Relation, _itup: *mut IndexTupleData) -> BTScanInsert {
+pub fn _bt_mkscankey(_rel: &RelationData, _itup: *mut IndexTupleData) -> BTScanInsert {
     unimplemented!()
 }
 
@@ -1155,15 +1155,15 @@ pub fn _bt_killitems(_scan: IndexScanDesc) {
     unimplemented!()
 }
 
-pub fn _bt_vacuum_cycleid(_rel: Relation) -> BTCycleId {
+pub fn _bt_vacuum_cycleid(_rel: &RelationData) -> BTCycleId {
     unimplemented!()
 }
 
-pub fn _bt_start_vacuum(_rel: Relation) -> BTCycleId {
+pub fn _bt_start_vacuum(_rel: &RelationData) -> BTCycleId {
     unimplemented!()
 }
 
-pub fn _bt_end_vacuum(_rel: Relation) {
+pub fn _bt_end_vacuum(_rel: &RelationData) {
     unimplemented!()
 }
 
@@ -1198,7 +1198,7 @@ pub fn btbuildphasename(_phasenum: i64) -> Option<String> {
 }
 
 pub fn _bt_truncate(
-    _rel: Relation,
+    _rel: &RelationData,
     _lastleft: *mut IndexTupleData,
     _firstright: *mut IndexTupleData,
     _itup_key: BTScanInsert,
@@ -1207,7 +1207,7 @@ pub fn _bt_truncate(
 }
 
 pub fn _bt_keep_natts_fast(
-    _rel: Relation,
+    _rel: &RelationData,
     _lastleft: *mut IndexTupleData,
     _firstright: *mut IndexTupleData,
 ) -> i32 {
@@ -1215,7 +1215,7 @@ pub fn _bt_keep_natts_fast(
 }
 
 pub fn _bt_check_natts(
-    _rel: Relation,
+    _rel: &RelationData,
     _heapkeyspace: bool,
     _page: &Page,
     _offnum: OffsetNumber,
@@ -1224,8 +1224,8 @@ pub fn _bt_check_natts(
 }
 
 pub fn _bt_check_third_page(
-    _rel: Relation,
-    _heap: Relation,
+    _rel: &RelationData,
+    _heap: &RelationData,
     _needheaptidspace: bool,
     _page: &Page,
     _newtup: *mut IndexTupleData,
@@ -1233,7 +1233,7 @@ pub fn _bt_check_third_page(
     unimplemented!()
 }
 
-pub fn _bt_allequalimage(_rel: Relation, _debugmessage: bool) -> bool {
+pub fn _bt_allequalimage(_rel: &RelationData, _debugmessage: bool) -> bool {
     unimplemented!()
 }
 
@@ -1254,7 +1254,7 @@ pub fn btadjustmembers(
 
 // === prototypes for functions in nbtsort.c (stubs) ===
 
-pub fn btbuild(_heap: Relation, _index: Relation, _index_info: &mut IndexInfo) -> IndexBuildResult {
+pub fn btbuild(_heap: &RelationData, _index: &RelationData, _index_info: &mut IndexInfo) -> IndexBuildResult {
     unimplemented!()
 }
 
@@ -1263,12 +1263,6 @@ pub fn _bt_parallel_build_main(_seg: &mut dsm_segment, _toc: &mut shm_toc) {
 }
 
 /// IndexRelationGetNumberOfAttributes(rel) -- rel->rd_index->indnatts.
-#[allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "macro-style accessor over a live index Relation handle, faithful to the C macro"
-)]
-pub fn IndexRelationGetNumberOfAttributes(rel: Relation) -> u16 {
-    // SAFETY: `rel` is a live index relation whose rd_index points at its pg_index
-    // fixed part (set by relation_init_index_access_info / the index builder).
-    unsafe { (*rel).index_number_of_attributes() as u16 }
+pub fn IndexRelationGetNumberOfAttributes(rel: &RelationData) -> u16 {
+    rel.index_number_of_attributes() as u16
 }

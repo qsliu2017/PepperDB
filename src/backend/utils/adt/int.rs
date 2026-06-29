@@ -586,8 +586,8 @@ fn remap_args(
 ) -> FunctionCallInfoBaseData {
     let mut fcinfo = FunctionCallInfoBaseData {
         flinfo: None,
-        context: core::ptr::null_mut(),
-        resultinfo: core::ptr::null_mut(),
+        context: None,
+        resultinfo: None,
         fncollation: src.fncollation,
         isnull: false,
         nargs,
@@ -1078,8 +1078,8 @@ mod tests {
     fn fc(args: &[Datum]) -> FunctionCallInfoBaseData {
         FunctionCallInfoBaseData {
             flinfo: None,
-            context: core::ptr::null_mut(),
-            resultinfo: core::ptr::null_mut(),
+            context: None,
+            resultinfo: None,
             fncollation: crate::postgres_ext::InvalidOid,
             isnull: false,
             nargs: args.len() as i16,
@@ -1277,8 +1277,8 @@ mod tests {
             retset: entry.retset,
             stats: 0,
             extra: 0,
-            mcxt: core::ptr::null_mut(),
-            expr: core::ptr::null_mut(),
+            mcxt: (),
+            expr: None,
         };
         let s = crate::fmgr::OutputFunctionCall(&mut flinfo, Int32GetDatum(1));
         assert_eq!(s, "1");

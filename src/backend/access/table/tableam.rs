@@ -15,21 +15,19 @@ use std::sync::Arc;
 use crate::access::sdir::ScanDirection;
 use crate::access::tableam::{ScanOptions, TableAmKind};
 use crate::backend::access::heap::heapam::{
-    heap_beginscan, heap_endscan, heap_getnext, heap_rescan, HeapScanDescData, SendRelation,
+    heap_beginscan, heap_endscan, heap_getnext, heap_rescan, HeapScanDescData,
 };
 use crate::backend::access::table::tableamapi::get_table_am_routine;
 use crate::c::CommandId;
 use crate::executor::tuptable::TupleTableSlot;
 use crate::shared_state::SharedState;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 use crate::utils::snapshot::SnapshotData;
 
 /// The AM kind of a relation (its `rd_tableam`, resolved through the closed
 /// enum). M2: every relation that reaches table AM is heap.
-fn rel_am_kind(relation: Relation) -> TableAmKind {
-    // SAFETY: live relation.
-    let amhandler = unsafe { (*relation).rd_amhandler };
-    get_table_am_routine(amhandler)
+fn rel_am_kind(relation: &RelationData) -> TableAmKind {
+    get_table_am_routine(relation.rd_amhandler)
 }
 
 /// `table_tuple_insert`: insert the tuple in `slot` into `rel`.
@@ -37,18 +35,14 @@ fn rel_am_kind(relation: Relation) -> TableAmKind {
 /// Grow guard on the slot half (executor `ExecFetchSlotHeapTuple` is staged);
 /// dispatches to the heap handler. Callers holding a built `HeapTuple` use
 /// `heap_insert` directly for M2.
-#[allow(
-    clippy::future_not_send,
-    reason = "staged: dispatches to the executor-slot insert (TupleTableSlot is !Send, unported); the M2-complete insert path (heap_insert) is Send"
-)]
 pub async fn table_tuple_insert(
     shared: &Arc<SharedState>,
-    rel: SendRelation,
+    rel: &RelationData,
     slot: &mut TupleTableSlot,
     cid: CommandId,
     options: i32,
 ) {
-    match rel_am_kind(rel.get()) {
+    match rel_am_kind(rel) {
         TableAmKind::Heap => {
             crate::backend::access::heap::heapam_handler::heapam_tuple_insert(
                 shared, rel, slot, cid, options,
@@ -61,25 +55,31 @@ pub async fn table_tuple_insert(
 /// `table_beginscan`: start a sequential scan of `rel` under `snapshot`. Returns
 /// the heap scan descriptor (the AM-specific handle). M2: forward seqscan,
 /// page-at-a-time, no scan keys.
-pub fn table_beginscan(rel: SendRelation, snapshot: Arc<SnapshotData>) -> Box<HeapScanDescData> {
+///
+/// Borrow-based ownership (relation-ownership-plan step 1): the relation/snapshot
+/// `Arc` owners live in the caller's frame; the descriptor borrows `&'rel`/`&'snap`.
+pub fn table_beginscan<'rel, 'snap>(
+    rel: &'rel RelationData,
+    snapshot: &'snap SnapshotData,
+) -> Box<HeapScanDescData<'rel, 'snap>> {
     let flags = ScanOptions::TYPE_SEQSCAN
         | ScanOptions::ALLOW_STRAT
         | ScanOptions::ALLOW_SYNC
         | ScanOptions::ALLOW_PAGEMODE;
-    match rel_am_kind(rel.get()) {
+    match rel_am_kind(rel) {
         TableAmKind::Heap => heap_beginscan(rel, snapshot, 0, flags),
     }
 }
 
 /// `table_endscan`: release a scan.
-pub fn table_endscan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData) {
+pub fn table_endscan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData<'_, '_>) {
     match rel_am_kind(scan.base.rs_rd) {
         TableAmKind::Heap => heap_endscan(shared, scan),
     }
 }
 
 /// `table_rescan`: restart a scan from the beginning.
-pub fn table_rescan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData) {
+pub fn table_rescan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData<'_, '_>) {
     match rel_am_kind(scan.base.rs_rd) {
         TableAmKind::Heap => heap_rescan(shared, scan),
     }
@@ -91,19 +91,14 @@ pub fn table_rescan(shared: &Arc<SharedState>, scan: &mut HeapScanDescData) {
 /// Grow guard on the slot store (executor `ExecStoreBufferHeapTuple` staged);
 /// the scan/visibility core is reachable via `table_scan_getnext` /
 /// `heap_getnext`.
-#[allow(
-    clippy::future_not_send,
-    reason = "staged: dispatches to the executor-slot store (TupleTableSlot is !Send, unported); the M2-complete scan path (table_scan_getnext / heap_getnext) is Send"
-)]
 pub async fn table_scan_getnextslot(
     shared: &Arc<SharedState>,
-    scan: &mut HeapScanDescData,
+    scan: &mut HeapScanDescData<'_, '_>,
     direction: ScanDirection,
     slot: &mut TupleTableSlot,
 ) -> bool {
     // C sets slot->tts_tableOid = RelationGetRelid(scan->rs_rd) here.
-    // SAFETY: live relation.
-    slot.tableOid = unsafe { (*scan.base.rs_rd).rd_id };
+    slot.tableOid = scan.base.rs_rd.rd_id;
     match rel_am_kind(scan.base.rs_rd) {
         TableAmKind::Heap => {
             crate::backend::access::heap::heapam_handler::heap_getnextslot(
@@ -119,7 +114,7 @@ pub async fn table_scan_getnextslot(
 /// `table_scan_getnextslot` layers on top once the executor slot store lands.
 pub async fn table_scan_getnext(
     shared: &Arc<SharedState>,
-    scan: &mut HeapScanDescData,
+    scan: &mut HeapScanDescData<'_, '_>,
     direction: ScanDirection,
 ) -> Option<crate::access::htup::HeapTuple> {
     match rel_am_kind(scan.base.rs_rd) {

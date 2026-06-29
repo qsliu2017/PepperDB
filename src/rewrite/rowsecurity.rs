@@ -5,7 +5,8 @@ use crate::nodes::nodes::{CmdType, Node};
 use crate::nodes::parsenodes::{Query, RangeTblEntry};
 use crate::utils::array::ArrayType;
 use crate::utils::palloc::MemoryContext;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 pub struct RowSecurityPolicy {
     /// Name of the policy
@@ -31,8 +32,8 @@ pub struct RowSecurityDesc {
     pub policies: Vec<RowSecurityPolicy>,
 }
 
-/// C: `List *(*row_security_policy_hook_type)(CmdType, Relation);`
-pub type RowSecurityPolicyHookType = fn(cmdtype: CmdType, relation: Relation) -> Vec<RowSecurityPolicy>;
+/// C: `List *(*row_security_policy_hook_type)(CmdType, Arc<RelationData>);`
+pub type RowSecurityPolicyHookType = fn(cmdtype: CmdType, relation: &RelationData) -> Vec<RowSecurityPolicy>;
 
 // TODO(global): migrate these hook pointers to session/extension registry.
 pub static mut ROW_SECURITY_POLICY_HOOK_PERMISSIVE: Option<RowSecurityPolicyHookType> = None;

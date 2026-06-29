@@ -5,7 +5,7 @@ use crate::nodes::nodes::{CmdType, Node};
 use crate::nodes::parsenodes::RuleStmt;
 use crate::nodes::primnodes::RangeVar;
 use crate::postgres_ext::Oid;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 pub const RULE_FIRES_ON_ORIGIN: u8 = b'O';
 pub const RULE_FIRES_ALWAYS: u8 = b'A';
@@ -36,6 +36,6 @@ pub fn set_rule_check_as_user(_node: &mut Node, _userid: Oid) {
     unimplemented!()
 }
 
-pub fn enable_disable_rule(_rel: Relation, _rulename: &str, _fires_when: u8) {
+pub fn enable_disable_rule(_rel: &RelationData, _rulename: &str, _fires_when: u8) {
     unimplemented!()
 }

@@ -3,7 +3,7 @@
 use crate::nodes::execnodes::{EState, ProjectSetState};
 use crate::nodes::plannodes::ProjectSet;
 
-pub fn ExecInitProjectSet(_node: &ProjectSet, _estate: &mut EState, _eflags: i32) -> *mut ProjectSetState {
+pub fn ExecInitProjectSet(_node: &ProjectSet, _estate: &mut EState<'_>, _eflags: i32) -> *mut ProjectSetState {
     unimplemented!() // TODO(ptr)
 }
 pub fn ExecEndProjectSet(_node: &mut ProjectSetState) {

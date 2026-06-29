@@ -14,7 +14,7 @@ use crate::parser::parse_node::ParseState;
 use crate::partitioning::partdefs::{PartitionBoundInfo, PartitionKey};
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// PartitionBoundInfoData encapsulates a set of partition bounds. In-memory
 /// planner/descriptor state (not on-disk), so modeled idiomatically.
@@ -64,7 +64,7 @@ pub fn compute_partition_hash_value(
 }
 
 pub fn get_qual_from_partbound(
-    _parent: Relation,
+    _parent: &RelationData,
     _spec: &PartitionBoundSpec,
 ) -> Vec<crate::nodes::nodes::Node> {
     unimplemented!()
@@ -114,7 +114,7 @@ pub fn partitions_are_ordered(_boundinfo: &PartitionBoundInfoData, _live_parts: 
 
 pub fn check_new_partition_bound(
     _relname: &str,
-    _parent: Relation,
+    _parent: &RelationData,
     _spec: &PartitionBoundSpec,
     _pstate: &mut ParseState,
 ) {
@@ -122,8 +122,8 @@ pub fn check_new_partition_bound(
 }
 
 pub fn check_default_partition_contents(
-    _parent: Relation,
-    _default_rel: Relation,
+    _parent: &RelationData,
+    _default_rel: &RelationData,
     _new_spec: &PartitionBoundSpec,
 ) {
     unimplemented!()

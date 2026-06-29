@@ -10,7 +10,6 @@ use crate::postgres::{Datum, ObjectIdGetDatum, PointerGetDatum};
 use crate::postgres_ext::Oid;
 use crate::storage::buf::Buffer;
 use crate::storage::itemptr::ItemPointerData;
-use crate::utils::palloc::MemoryContext;
 
 // C: `typedef MinimalTupleData *MinimalTuple`. htup_details defines the value
 // struct; the pointer handle is not aliased there, so define it here.
@@ -41,7 +40,7 @@ pub struct TupleTableSlot {
     pub tupleDescriptor: Option<TupleDesc>, // slot's tuple descriptor (None if unset)
     pub values: Vec<Datum>,        // current per-attribute values (C tts_values[])
     pub isnull: Vec<bool>,         // current per-attribute isnull flags (C tts_isnull[])
-    pub mcxt: MemoryContext,       // slot itself is in this context
+    pub mcxt: (),                  // slot's owning context; tombstoned in this port (no live MemoryContext handle), keeps the slot genuinely Send
     pub tid: ItemPointerData,      // stored tuple's tid
     pub tableOid: Oid,             // table oid of tuple
 }
@@ -50,7 +49,11 @@ pub struct TupleTableSlot {
 /// a struct of fn pointers). routine-struct group C: per-instance behaviour
 /// table. `get_heap_tuple`/`get_minimal_tuple` are set NULL when the slot
 /// cannot own that tuple form -> Option-returning default methods (None).
-pub trait TupleTableSlotOps {
+///
+/// `Send + Sync`: the impls are stateless zero-sized vtables (TTSOpsVirtual/
+/// HeapTuple/MinimalTuple/BufferHeapTuple), so a `&'static dyn TupleTableSlotOps`
+/// is `Send` (requires `dyn: Sync`), keeping `TupleTableSlot` genuinely `Send`.
+pub trait TupleTableSlotOps: Send + Sync {
     /// Minimum size of the slot (C `base_slot_size`).
     fn base_slot_size(&self) -> usize;
 
@@ -350,3 +353,4 @@ pub fn ExecCopySlot<'a>(
     ops.copyslot(dstslot, srcslot);
     dstslot
 }
+

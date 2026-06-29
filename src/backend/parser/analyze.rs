@@ -15,10 +15,6 @@
 //! tree. Every not-yet-reachable statement tag / clause routes through a single
 //! clearly-marked staging arm (rules.md s4); none is half-written.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the async parse-analysis path holds the per-backend ParseState (which carries a task-confined raw target Relation) across the relation-open awaits; the future runs on one backend task and never migrates the pointee mid-await. Same contract as the catalog/relcache/bootstrap modules."
-)]
 
 use std::sync::Arc;
 
@@ -475,9 +471,9 @@ fn check_insert_targets(
     pstate: &ParseState,
     cols: &[Node],
 ) -> (Vec<Node>, Vec<crate::access::attnum::AttrNumber>) {
-    // SAFETY: p_target_relation is a live open relation set by set_target_table.
-    let rel = pstate.p_target_relation;
-    let tupdesc = unsafe { (*rel).rd_att.as_ref() }
+    let rel = pstate.p_target_relation.as_ref()
+        .unwrap_or_else(|| unreachable!("target relation set by set_target_table"));
+    let tupdesc = rel.rd_att.as_ref()
         .unwrap_or_else(|| unreachable!("target relation has a descriptor"));
 
     if cols.is_empty() {

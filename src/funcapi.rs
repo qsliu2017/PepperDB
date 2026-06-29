@@ -150,7 +150,7 @@ pub fn HeapTupleHeaderGetDatum(_tuple: *mut HeapTupleHeaderData) -> Datum {
 
 /// Convert a HeapTuple to a Datum (inline in C).
 pub fn HeapTupleGetDatum(tuple: &HeapTupleData) -> Datum {
-    HeapTupleHeaderGetDatum(tuple.t_data)
+    HeapTupleHeaderGetDatum(tuple.t_data())
 }
 
 /// Obsolete `TupleGetDatum(_slot, _tuple)` -> just `HeapTupleGetDatum`.

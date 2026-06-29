@@ -42,8 +42,9 @@ use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
 use crate::storage::read_stream::ReadStream;
 use crate::storage::relfilelocator::RelFileLocator;
-use crate::utils::relcache::Relation;
 use crate::utils::snapshot::Snapshot;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// Default table access method name.
 pub const DEFAULT_TABLE_ACCESS_METHOD: &str = "heap";
@@ -161,7 +162,7 @@ pub struct TM_IndexStatus {
 
 /// State for table_index_delete_tuples(). The two C arrays are kept as `Vec`.
 pub struct TM_IndexDeleteOp {
-    pub irel: Relation,         // target index relation
+    pub irel: Arc<RelationData>,         // target index relation
     pub iblknum: BlockNumber,   // index block number (for error reports)
     pub bottomup: bool,         // bottom-up (not simple) deletion?
     pub bottomupfreespace: i32, // bottom-up space target
@@ -194,7 +195,7 @@ bitflags! {
 /// Callback for table_index_build_scan. The C `void *state` opaque context is
 /// captured by the closure (function-mapping.md 6.3).
 pub type IndexBuildCallback<'a> = dyn FnMut(
-        Relation,          // index
+        Arc<RelationData>,          // index
         &ItemPointerData,  // tid
         &[Datum],          // values
         &[bool],           // isnull
@@ -256,14 +257,14 @@ pub trait TableAm {
     // --- Slot related callbacks ---
 
     /// slot_callbacks: slot implementation suitable for this AM's tuples.
-    fn slot_callbacks(&self, rel: Relation) -> &'static dyn TupleTableSlotOps;
+    fn slot_callbacks(&self, rel: &RelationData) -> &'static dyn TupleTableSlotOps;
 
     // --- Table scan callbacks (required) ---
 
     /// scan_begin: start a scan of `rel`; returns the AM's scan descriptor.
     fn scan_begin(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         snapshot: Snapshot,
         nkeys: i32,
         key: &mut [ScanKeyData],
@@ -297,18 +298,18 @@ pub trait TableAm {
     // --- Parallel table scan (required) ---
 
     /// parallelscan_estimate: shared-memory size for a parallel scan.
-    fn parallelscan_estimate(&self, rel: Relation) -> usize;
+    fn parallelscan_estimate(&self, rel: &RelationData) -> usize;
 
     /// parallelscan_initialize: init shared parallel scan state; returns its size.
-    fn parallelscan_initialize(&self, rel: Relation, pscan: ParallelTableScanDesc) -> usize;
+    fn parallelscan_initialize(&self, rel: &RelationData, pscan: ParallelTableScanDesc) -> usize;
 
     /// parallelscan_reinitialize: reset shared state for a new scan.
-    fn parallelscan_reinitialize(&self, rel: Relation, pscan: ParallelTableScanDesc);
+    fn parallelscan_reinitialize(&self, rel: &RelationData, pscan: ParallelTableScanDesc);
 
     // --- Index scan callbacks (required; asserted by GetTableAmRoutine) ---
 
     /// index_fetch_begin: prepare to fetch tuples for an index scan.
-    fn index_fetch_begin(&self, rel: Relation) -> *mut IndexFetchTableData;
+    fn index_fetch_begin(&self, rel: &RelationData) -> *mut IndexFetchTableData;
 
     /// index_fetch_reset: release cross-fetch resources.
     fn index_fetch_reset(&self, data: *mut IndexFetchTableData);
@@ -331,7 +332,7 @@ pub trait TableAm {
     /// tuple_fetch_row_version: fetch the version exactly at `tid` into `slot`.
     fn tuple_fetch_row_version(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         tid: &ItemPointerData,
         snapshot: Snapshot,
         slot: &mut TupleTableSlot,
@@ -346,21 +347,21 @@ pub trait TableAm {
     /// tuple_satisfies_snapshot: does the tuple in `slot` satisfy `snapshot`?
     fn tuple_satisfies_snapshot(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         slot: &mut TupleTableSlot,
         snapshot: Snapshot,
     ) -> bool;
 
     /// index_delete_tuples: which index TIDs are safe to delete; returns the
     /// snapshotConflictHorizon XID.
-    fn index_delete_tuples(&self, rel: Relation, delstate: &mut TM_IndexDeleteOp) -> TransactionId;
+    fn index_delete_tuples(&self, rel: &RelationData, delstate: &mut TM_IndexDeleteOp) -> TransactionId;
 
     // --- Manipulations of physical tuples (required) ---
 
     /// tuple_insert: insert the tuple from `slot`.
     fn tuple_insert(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         slot: &mut TupleTableSlot,
         cid: CommandId,
         options: TableInsertOptions,
@@ -370,7 +371,7 @@ pub trait TableAm {
     /// tuple_insert_speculative: speculative insert (INSERT .. ON CONFLICT).
     fn tuple_insert_speculative(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         slot: &mut TupleTableSlot,
         cid: CommandId,
         options: TableInsertOptions,
@@ -381,7 +382,7 @@ pub trait TableAm {
     /// tuple_complete_speculative: confirm/abort a speculative insert.
     fn tuple_complete_speculative(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         slot: &mut TupleTableSlot,
         spec_token: u32,
         succeeded: bool,
@@ -390,7 +391,7 @@ pub trait TableAm {
     /// multi_insert: insert multiple tuples in one operation.
     fn multi_insert(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         slots: &mut [*mut TupleTableSlot],
         cid: CommandId,
         options: TableInsertOptions,
@@ -400,7 +401,7 @@ pub trait TableAm {
     /// tuple_delete: delete the tuple at `tid`. On failure, fills `tmfd`.
     fn tuple_delete(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         tid: &ItemPointerData,
         cid: CommandId,
         snapshot: Snapshot,
@@ -414,7 +415,7 @@ pub trait TableAm {
     /// mode and which indexes need updating (the two C out-params).
     fn tuple_update(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         otid: &ItemPointerData,
         slot: &mut TupleTableSlot,
         cid: CommandId,
@@ -429,7 +430,7 @@ pub trait TableAm {
     /// tuple_lock: lock the tuple at `tid` in the given mode.
     fn tuple_lock(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         tid: &ItemPointerData,
         snapshot: Snapshot,
         slot: &mut TupleTableSlot,
@@ -445,23 +446,23 @@ pub trait TableAm {
     /// relation_set_new_filelocator: create new storage; returns freeze cutoffs.
     fn relation_set_new_filelocator(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         newrlocator: &RelFileLocator,
         persistence: u8,
     ) -> NewFilelocatorCutoffs;
 
     /// relation_nontransactional_truncate: drop all contents of current storage.
-    fn relation_nontransactional_truncate(&self, rel: Relation);
+    fn relation_nontransactional_truncate(&self, rel: &RelationData);
 
     /// relation_copy_data: copy storage to a new relfilelocator.
-    fn relation_copy_data(&self, rel: Relation, newrlocator: &RelFileLocator);
+    fn relation_copy_data(&self, rel: &RelationData, newrlocator: &RelFileLocator);
 
     /// relation_copy_for_cluster: copy/sort for CLUSTER or VACUUM FULL.
     fn relation_copy_for_cluster(
         &self,
-        old_table: Relation,
-        new_table: Relation,
-        old_index: Relation,
+        old_table: &RelationData,
+        new_table: &RelationData,
+        old_index: &RelationData,
         use_sort: bool,
         oldest_xmin: TransactionId,
         xid_cutoff: TransactionId,
@@ -471,7 +472,7 @@ pub trait TableAm {
     /// relation_vacuum: react to a VACUUM command on the relation.
     fn relation_vacuum(
         &self,
-        rel: Relation,
+        rel: &RelationData,
         params: &mut VacuumParams,
         bstrategy: Option<&BufferAccessStrategy>,
     );
@@ -494,8 +495,8 @@ pub trait TableAm {
     /// the live-tuple count. `callback_state` is captured by the closure.
     fn index_build_range_scan(
         &self,
-        table_rel: Relation,
-        index_rel: Relation,
+        table_rel: &RelationData,
+        index_rel: &RelationData,
         index_info: &mut IndexInfo,
         allow_sync: bool,
         anyvisible: bool,
@@ -509,8 +510,8 @@ pub trait TableAm {
     /// index_validate_scan: second table scan for a concurrent index build.
     fn index_validate_scan(
         &self,
-        table_rel: Relation,
-        index_rel: Relation,
+        table_rel: &RelationData,
+        index_rel: &RelationData,
         index_info: &mut IndexInfo,
         snapshot: Snapshot,
         state: &mut ValidateIndexState,
@@ -519,24 +520,24 @@ pub trait TableAm {
     // --- Miscellaneous (required) ---
 
     /// relation_size: current size of `rel`'s `fork_number` in bytes.
-    fn relation_size(&self, rel: Relation, fork_number: ForkNumber) -> u64;
+    fn relation_size(&self, rel: &RelationData, fork_number: ForkNumber) -> u64;
 
     /// relation_needs_toast_table: does this relation need a TOAST table?
-    fn relation_needs_toast_table(&self, rel: Relation) -> bool;
+    fn relation_needs_toast_table(&self, rel: &RelationData) -> bool;
 
     /// relation_toast_am: OID of the table AM implementing TOAST for this AM.
-    fn relation_toast_am(&self, rel: Relation) -> Oid;
+    fn relation_toast_am(&self, rel: &RelationData) -> Oid;
 
     // --- Planner related (required) ---
 
     /// relation_estimate_size: planner size/row estimates (out-params + the
     /// in/out `attr_widths` cache).
-    fn relation_estimate_size(&self, rel: Relation, attr_widths: &mut [i32]) -> RelationSizeEstimate;
+    fn relation_estimate_size(&self, rel: &RelationData, attr_widths: &mut [i32]) -> RelationSizeEstimate;
 }
 
 /// finish_bulk_insert -- optional. Complete inserts made with a BulkInsertState.
 pub trait FinishBulkInsert: TableAm {
-    fn finish_bulk_insert(&self, rel: Relation, options: TableInsertOptions);
+    fn finish_bulk_insert(&self, rel: &RelationData, options: TableInsertOptions);
 }
 
 /// TID-range scanning -- optional group (both callbacks or neither).
@@ -590,7 +591,7 @@ pub trait ToastFetch: TableAm {
     /// relation_fetch_toast_slice: fetch all/part of a TOAST value into `result`.
     fn relation_fetch_toast_slice(
         &self,
-        toastrel: Relation,
+        toastrel: &RelationData,
         valueid: Oid,
         attrsize: i32,
         sliceoffset: i32,
@@ -604,14 +605,14 @@ pub trait ToastFetch: TableAm {
 // ----------------------------------------------------------------------------
 
 /// Slot callbacks suitable for tuples of `relation` (tables/views/foreign/etc).
-pub fn table_slot_callbacks(_relation: Relation) -> &'static dyn TupleTableSlotOps {
+pub fn table_slot_callbacks(_relation: &RelationData) -> &'static dyn TupleTableSlotOps {
     unimplemented!()
 }
 
 /// Create a slot via table_slot_callbacks() and register it on `reglist`.
 /// (C's `List **reglist` becomes the registration `Vec`.)
 pub fn table_slot_create(
-    _relation: Relation,
+    _relation: &RelationData,
     _reglist: &mut Vec<*mut TupleTableSlot>,
 ) -> *mut TupleTableSlot {
     unimplemented!()
@@ -623,7 +624,7 @@ pub fn table_slot_create(
 
 /// Start a scan of `rel` (seqscan, all allow_* on).
 pub fn table_beginscan(
-    _rel: Relation,
+    _rel: &RelationData,
     _snapshot: Snapshot,
     _nkeys: i32,
     _key: &mut [ScanKeyData],
@@ -633,7 +634,7 @@ pub fn table_beginscan(
 
 /// Like table_beginscan(), but uses a catalog-appropriate snapshot.
 pub fn table_beginscan_catalog(
-    _relation: Relation,
+    _relation: &RelationData,
     _nkeys: i32,
     _key: &mut [ScanKeyData],
 ) -> TableScanDesc {
@@ -642,7 +643,7 @@ pub fn table_beginscan_catalog(
 
 /// Like table_beginscan(), with control over access strategy and syncscan.
 pub fn table_beginscan_strat(
-    _rel: Relation,
+    _rel: &RelationData,
     _snapshot: Snapshot,
     _nkeys: i32,
     _key: &mut [ScanKeyData],
@@ -654,7 +655,7 @@ pub fn table_beginscan_strat(
 
 /// Set up a TableScanDesc for a bitmap heap scan.
 pub fn table_beginscan_bm(
-    _rel: Relation,
+    _rel: &RelationData,
     _snapshot: Snapshot,
     _nkeys: i32,
     _key: &mut [ScanKeyData],
@@ -664,7 +665,7 @@ pub fn table_beginscan_bm(
 
 /// Set up a TableScanDesc for a TABLESAMPLE scan.
 pub fn table_beginscan_sampling(
-    _rel: Relation,
+    _rel: &RelationData,
     _snapshot: Snapshot,
     _nkeys: i32,
     _key: &mut [ScanKeyData],
@@ -676,12 +677,12 @@ pub fn table_beginscan_sampling(
 }
 
 /// Set up a TableScanDesc for a TID scan.
-pub fn table_beginscan_tid(_rel: Relation, _snapshot: Snapshot) -> TableScanDesc {
+pub fn table_beginscan_tid(_rel: &RelationData, _snapshot: Snapshot) -> TableScanDesc {
     unimplemented!()
 }
 
 /// Set up a TableScanDesc for an ANALYZE scan.
-pub fn table_beginscan_analyze(_rel: Relation) -> TableScanDesc {
+pub fn table_beginscan_analyze(_rel: &RelationData) -> TableScanDesc {
     unimplemented!()
 }
 
@@ -721,7 +722,7 @@ pub fn table_scan_getnextslot(
 
 /// Set up a TableScanDesc for a TID range scan.
 pub fn table_beginscan_tidrange(
-    _rel: Relation,
+    _rel: &RelationData,
     _snapshot: Snapshot,
     _mintid: &ItemPointerData,
     _maxtid: &ItemPointerData,
@@ -752,13 +753,13 @@ pub fn table_scan_getnextslot_tidrange(
 // ----------------------------------------------------------------------------
 
 /// Shared-memory size for a parallel scan of `rel`.
-pub fn table_parallelscan_estimate(_rel: Relation, _snapshot: Snapshot) -> usize {
+pub fn table_parallelscan_estimate(_rel: &RelationData, _snapshot: Snapshot) -> usize {
     unimplemented!()
 }
 
 /// Initialize `pscan` for a parallel scan; call once in the leader.
 pub fn table_parallelscan_initialize(
-    _rel: Relation,
+    _rel: &RelationData,
     _pscan: ParallelTableScanDesc,
     _snapshot: Snapshot,
 ) {
@@ -767,14 +768,14 @@ pub fn table_parallelscan_initialize(
 
 /// Begin a parallel scan against a previously-initialized `pscan`.
 pub fn table_beginscan_parallel(
-    _relation: Relation,
+    _relation: &RelationData,
     _pscan: ParallelTableScanDesc,
 ) -> TableScanDesc {
     unimplemented!()
 }
 
 /// Restart a parallel scan (call in the leader).
-pub fn table_parallelscan_reinitialize(_rel: Relation, _pscan: ParallelTableScanDesc) {
+pub fn table_parallelscan_reinitialize(_rel: &RelationData, _pscan: ParallelTableScanDesc) {
     unimplemented!()
 }
 
@@ -783,7 +784,7 @@ pub fn table_parallelscan_reinitialize(_rel: Relation, _pscan: ParallelTableScan
 // ----------------------------------------------------------------------------
 
 /// Prepare to fetch tuples for an index scan.
-pub fn table_index_fetch_begin(_rel: Relation) -> *mut IndexFetchTableData {
+pub fn table_index_fetch_begin(_rel: &RelationData) -> *mut IndexFetchTableData {
     unimplemented!()
 }
 
@@ -810,7 +811,7 @@ pub fn table_index_fetch_tuple(
 /// Convenience wrapper: do table tuples exist for this index entry? (unique
 /// conflict check). Returns found + all_dead.
 pub fn table_index_fetch_tuple_check(
-    _rel: Relation,
+    _rel: &RelationData,
     _tid: &ItemPointerData,
     _snapshot: Snapshot,
 ) -> (bool, bool) {
@@ -823,7 +824,7 @@ pub fn table_index_fetch_tuple_check(
 
 /// Fetch the version exactly at `tid` into `slot`, with a visibility test.
 pub fn table_tuple_fetch_row_version(
-    _rel: Relation,
+    _rel: &RelationData,
     _tid: &ItemPointerData,
     _snapshot: Snapshot,
     _slot: &mut TupleTableSlot,
@@ -843,7 +844,7 @@ pub fn table_tuple_get_latest_tid(_scan: TableScanDesc, _tid: &mut ItemPointerDa
 
 /// Does the tuple in `slot` satisfy `snapshot`?
 pub fn table_tuple_satisfies_snapshot(
-    _rel: Relation,
+    _rel: &RelationData,
     _slot: &mut TupleTableSlot,
     _snapshot: Snapshot,
 ) -> bool {
@@ -852,7 +853,7 @@ pub fn table_tuple_satisfies_snapshot(
 
 /// Determine which index tuples are safe to delete by their table TID; returns
 /// the snapshotConflictHorizon XID.
-pub fn table_index_delete_tuples(_rel: Relation, _delstate: &mut TM_IndexDeleteOp) -> TransactionId {
+pub fn table_index_delete_tuples(_rel: &RelationData, _delstate: &mut TM_IndexDeleteOp) -> TransactionId {
     unimplemented!()
 }
 
@@ -862,7 +863,7 @@ pub fn table_index_delete_tuples(_rel: Relation, _delstate: &mut TM_IndexDeleteO
 
 /// Insert a tuple from `slot`.
 pub fn table_tuple_insert(
-    _rel: Relation,
+    _rel: &RelationData,
     _slot: &mut TupleTableSlot,
     _cid: CommandId,
     _options: TableInsertOptions,
@@ -873,7 +874,7 @@ pub fn table_tuple_insert(
 
 /// Speculative insert (INSERT .. ON CONFLICT).
 pub fn table_tuple_insert_speculative(
-    _rel: Relation,
+    _rel: &RelationData,
     _slot: &mut TupleTableSlot,
     _cid: CommandId,
     _options: TableInsertOptions,
@@ -885,7 +886,7 @@ pub fn table_tuple_insert_speculative(
 
 /// Complete a speculative insert (confirm if succeeded, else remove).
 pub fn table_tuple_complete_speculative(
-    _rel: Relation,
+    _rel: &RelationData,
     _slot: &mut TupleTableSlot,
     _spec_token: u32,
     _succeeded: bool,
@@ -895,7 +896,7 @@ pub fn table_tuple_complete_speculative(
 
 /// Insert multiple tuples in one operation.
 pub fn table_multi_insert(
-    _rel: Relation,
+    _rel: &RelationData,
     _slots: &mut [*mut TupleTableSlot],
     _cid: CommandId,
     _options: TableInsertOptions,
@@ -907,7 +908,7 @@ pub fn table_multi_insert(
 /// Delete the tuple at `tid`. On failure fills `tmfd`.
 #[allow(clippy::too_many_arguments)]
 pub fn table_tuple_delete(
-    _rel: Relation,
+    _rel: &RelationData,
     _tid: &ItemPointerData,
     _cid: CommandId,
     _snapshot: Snapshot,
@@ -922,7 +923,7 @@ pub fn table_tuple_delete(
 /// Update the tuple at `otid`; reports lock mode and index-update needs.
 #[allow(clippy::too_many_arguments)]
 pub fn table_tuple_update(
-    _rel: Relation,
+    _rel: &RelationData,
     _otid: &ItemPointerData,
     _slot: &mut TupleTableSlot,
     _cid: CommandId,
@@ -939,7 +940,7 @@ pub fn table_tuple_update(
 /// Lock the tuple at `tid` in `mode`.
 #[allow(clippy::too_many_arguments)]
 pub fn table_tuple_lock(
-    _rel: Relation,
+    _rel: &RelationData,
     _tid: &ItemPointerData,
     _snapshot: Snapshot,
     _slot: &mut TupleTableSlot,
@@ -953,7 +954,7 @@ pub fn table_tuple_lock(
 }
 
 /// Complete inserts made with a BulkInsertState (optional callback).
-pub fn table_finish_bulk_insert(_rel: Relation, _options: TableInsertOptions) {
+pub fn table_finish_bulk_insert(_rel: &RelationData, _options: TableInsertOptions) {
     unimplemented!()
 }
 
@@ -963,7 +964,7 @@ pub fn table_finish_bulk_insert(_rel: Relation, _options: TableInsertOptions) {
 
 /// Create storage for `rel` in `newrlocator`; returns freeze cutoffs.
 pub fn table_relation_set_new_filelocator(
-    _rel: Relation,
+    _rel: &RelationData,
     _newrlocator: &RelFileLocator,
     _persistence: u8,
 ) -> NewFilelocatorCutoffs {
@@ -971,20 +972,20 @@ pub fn table_relation_set_new_filelocator(
 }
 
 /// Non-transactionally remove all contents of `rel`.
-pub fn table_relation_nontransactional_truncate(_rel: Relation) {
+pub fn table_relation_nontransactional_truncate(_rel: &RelationData) {
     unimplemented!()
 }
 
 /// Copy data from `rel` into the new relfilelocator.
-pub fn table_relation_copy_data(_rel: Relation, _newrlocator: &RelFileLocator) {
+pub fn table_relation_copy_data(_rel: &RelationData, _newrlocator: &RelFileLocator) {
     unimplemented!()
 }
 
 /// Copy/sort data for CLUSTER or VACUUM FULL.
 pub fn table_relation_copy_for_cluster(
-    _old_table: Relation,
-    _new_table: Relation,
-    _old_index: Relation,
+    _old_table: &RelationData,
+    _new_table: &RelationData,
+    _old_index: &RelationData,
     _use_sort: bool,
     _oldest_xmin: TransactionId,
     _xid_cutoff: TransactionId,
@@ -995,7 +996,7 @@ pub fn table_relation_copy_for_cluster(
 
 /// Perform VACUUM on the relation.
 pub fn table_relation_vacuum(
-    _rel: Relation,
+    _rel: &RelationData,
     _params: &mut VacuumParams,
     _bstrategy: Option<&BufferAccessStrategy>,
 ) {
@@ -1019,8 +1020,8 @@ pub fn table_scan_analyze_next_tuple(
 
 /// Scan the table to find tuples to index (whole table); returns live count.
 pub fn table_index_build_scan(
-    _table_rel: Relation,
-    _index_rel: Relation,
+    _table_rel: &RelationData,
+    _index_rel: &RelationData,
     _index_info: &mut IndexInfo,
     _allow_sync: bool,
     _progress: bool,
@@ -1033,8 +1034,8 @@ pub fn table_index_build_scan(
 /// As table_index_build_scan() but only `numblocks` blocks (or to end).
 #[allow(clippy::too_many_arguments)]
 pub fn table_index_build_range_scan(
-    _table_rel: Relation,
-    _index_rel: Relation,
+    _table_rel: &RelationData,
+    _index_rel: &RelationData,
     _index_info: &mut IndexInfo,
     _allow_sync: bool,
     _anyvisible: bool,
@@ -1049,8 +1050,8 @@ pub fn table_index_build_range_scan(
 
 /// Second table scan validating a concurrently-built index.
 pub fn table_index_validate_scan(
-    _table_rel: Relation,
-    _index_rel: Relation,
+    _table_rel: &RelationData,
+    _index_rel: &RelationData,
     _index_info: &mut IndexInfo,
     _snapshot: Snapshot,
     _state: &mut ValidateIndexState,
@@ -1063,23 +1064,23 @@ pub fn table_index_validate_scan(
 // ----------------------------------------------------------------------------
 
 /// Current size of `rel`'s `fork_number` in bytes.
-pub fn table_relation_size(_rel: Relation, _fork_number: ForkNumber) -> u64 {
+pub fn table_relation_size(_rel: &RelationData, _fork_number: ForkNumber) -> u64 {
     unimplemented!()
 }
 
 /// Does this relation need a TOAST table?
-pub fn table_relation_needs_toast_table(_rel: Relation) -> bool {
+pub fn table_relation_needs_toast_table(_rel: &RelationData) -> bool {
     unimplemented!()
 }
 
 /// OID of the AM implementing the TOAST table for this relation.
-pub fn table_relation_toast_am(_rel: Relation) -> Oid {
+pub fn table_relation_toast_am(_rel: &RelationData) -> Oid {
     unimplemented!()
 }
 
 /// Fetch all/part of a TOAST value from a TOAST table into `result`.
 pub fn table_relation_fetch_toast_slice(
-    _toastrel: Relation,
+    _toastrel: &RelationData,
     _valueid: Oid,
     _attrsize: i32,
     _sliceoffset: i32,
@@ -1095,7 +1096,7 @@ pub fn table_relation_fetch_toast_slice(
 
 /// AM-specific size estimate for estimate_rel_size().
 pub fn table_relation_estimate_size(
-    _rel: Relation,
+    _rel: &RelationData,
     _attr_widths: &mut [i32],
 ) -> RelationSizeEstimate {
     unimplemented!()
@@ -1133,18 +1134,18 @@ pub fn table_scan_sample_next_tuple(
 // ----------------------------------------------------------------------------
 
 /// Simple wrapper around table_tuple_insert (no concurrent-update handling).
-pub fn simple_table_tuple_insert(_rel: Relation, _slot: &mut TupleTableSlot) {
+pub fn simple_table_tuple_insert(_rel: &RelationData, _slot: &mut TupleTableSlot) {
     unimplemented!()
 }
 
 /// Simple wrapper around table_tuple_delete (panics on concurrent update).
-pub fn simple_table_tuple_delete(_rel: Relation, _tid: &ItemPointerData, _snapshot: Snapshot) {
+pub fn simple_table_tuple_delete(_rel: &RelationData, _tid: &ItemPointerData, _snapshot: Snapshot) {
     unimplemented!()
 }
 
 /// Simple wrapper around table_tuple_update; reports index-update needs.
 pub fn simple_table_tuple_update(
-    _rel: Relation,
+    _rel: &RelationData,
     _otid: &ItemPointerData,
     _slot: &mut TupleTableSlot,
     _snapshot: Snapshot,
@@ -1157,20 +1158,20 @@ pub fn simple_table_tuple_update(
 // Helper functions to implement parallel scans for block-oriented AMs.
 // ----------------------------------------------------------------------------
 
-pub fn table_block_parallelscan_estimate(_rel: Relation) -> usize {
+pub fn table_block_parallelscan_estimate(_rel: &RelationData) -> usize {
     unimplemented!()
 }
 
-pub fn table_block_parallelscan_initialize(_rel: Relation, _pscan: ParallelTableScanDesc) -> usize {
+pub fn table_block_parallelscan_initialize(_rel: &RelationData, _pscan: ParallelTableScanDesc) -> usize {
     unimplemented!()
 }
 
-pub fn table_block_parallelscan_reinitialize(_rel: Relation, _pscan: ParallelTableScanDesc) {
+pub fn table_block_parallelscan_reinitialize(_rel: &RelationData, _pscan: ParallelTableScanDesc) {
     unimplemented!()
 }
 
 pub fn table_block_parallelscan_nextpage(
-    _rel: Relation,
+    _rel: &RelationData,
     _pbscanwork: *mut ParallelBlockTableScanWorkerData,
     _pbscan: *mut ParallelBlockTableScanDescData,
 ) -> BlockNumber {
@@ -1178,7 +1179,7 @@ pub fn table_block_parallelscan_nextpage(
 }
 
 pub fn table_block_parallelscan_startblock_init(
-    _rel: Relation,
+    _rel: &RelationData,
     _pbscanwork: *mut ParallelBlockTableScanWorkerData,
     _pbscan: *mut ParallelBlockTableScanDescData,
 ) {
@@ -1189,12 +1190,12 @@ pub fn table_block_parallelscan_startblock_init(
 // Helper functions to implement relation sizing for block-oriented AMs.
 // ----------------------------------------------------------------------------
 
-pub fn table_block_relation_size(_rel: Relation, _fork_number: ForkNumber) -> u64 {
+pub fn table_block_relation_size(_rel: &RelationData, _fork_number: ForkNumber) -> u64 {
     unimplemented!()
 }
 
 pub fn table_block_relation_estimate_size(
-    _rel: Relation,
+    _rel: &RelationData,
     _attr_widths: &mut [i32],
     _overhead_bytes_per_tuple: usize,
     _usable_bytes_per_page: usize,

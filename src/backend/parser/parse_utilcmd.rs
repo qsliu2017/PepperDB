@@ -25,7 +25,7 @@ use crate::nodes::parsenodes::{
 use crate::nodes::primnodes::RangeVar;
 use crate::parser::parse_node::ParseState;
 use crate::postgres_ext::Oid;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// Panic for a CREATE-element feature not yet translated for this milestone
 /// (rules.md s4).
@@ -123,7 +123,7 @@ pub fn transformCreateSchemaStmtElements(
 
 pub fn transformPartitionBound(
     _pstate: &mut ParseState,
-    _parent: Relation,
+    _parent: &RelationData,
     _spec: &PartitionBoundSpec,
 ) -> Box<PartitionBoundSpec> {
     unimplemented!()
@@ -139,7 +139,7 @@ pub fn expandTableLikeClause(
 /// `constraintOid` out-param folded into the return tuple.
 pub fn generateClonedIndexStmt(
     _heap_rel: &RangeVar,
-    _source_idx: Relation,
+    _source_idx: &RelationData,
     _attmap: &AttrMap,
 ) -> (Box<IndexStmt>, Oid) {
     unimplemented!()

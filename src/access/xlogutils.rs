@@ -10,7 +10,8 @@ use crate::storage::buf::Buffer;
 use crate::storage::bufmgr::ReadBufferMode;
 use crate::storage::relfilelocator::RelFileLocator;
 use crate::postgres_ext::Oid;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// GUC variable.
 pub static mut ignore_invalid_pages: bool = false;
@@ -106,12 +107,12 @@ pub fn XLogReadBufferExtended(
     unimplemented!()
 }
 
-pub fn CreateFakeRelcacheEntry(rlocator: RelFileLocator) -> Relation {
+pub fn CreateFakeRelcacheEntry(rlocator: RelFileLocator) -> Arc<RelationData> {
     let _ = rlocator;
     unimplemented!()
 }
 
-pub fn FreeFakeRelcacheEntry(fakerel: Relation) {
+pub fn FreeFakeRelcacheEntry(fakerel: &crate::utils::rel::RelationData) {
     let _ = fakerel;
     unimplemented!()
 }

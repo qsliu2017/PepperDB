@@ -20,14 +20,6 @@
 //! M2 path warms the relcache before the sync opens run.
 
 #![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the catalog caches are PER-BACKEND task-confined state (raw HeapTuple/FmgrInfo pointers); their populate futures never migrate threads mid-await. await_holding_lock/refcell are clean (enforced)."
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "catalog-cache routines take raw Relation/HeapTuple pointers per the C API; the deref is faithful to C (callers pass live handles)"
-)]
-#![allow(
     clippy::cast_ptr_alignment,
     reason = "faithful GETSTRUCT reinterpretation of a heap tuple to a Form_* struct (MAXALIGN'd body covers the Form alignment)"
 )]
@@ -38,8 +30,9 @@ use crate::access::htup::HeapTupleData;
 use crate::access::htup_details::GETSTRUCT;
 use crate::access::skey::ScanKeyData;
 use crate::backend::access::common::heaptuple::{heap_copytuple, heap_freetuple};
-use crate::backend::access::heap::heapam::SendPtr;
-use crate::backend::access::index::genam::{systable_beginscan, systable_endscan, systable_getnext};
+use crate::backend::access::index::genam::{
+    systable_beginscan, systable_endscan, systable_getnext, systable_scan_snapshot,
+};
 use crate::backend::bootstrap::bootstrap::{formrdesc_tupdesc, BootstrapCatalog, FORMRDESC_CATALOGS};
 use crate::catalog::pg_attribute::{
     AttributeRelationId, Anum_pg_attribute_attrelid,
@@ -52,15 +45,17 @@ use crate::postgres::ObjectIdGetDatum;
 use crate::postgres_ext::Oid;
 use crate::shared_state::SharedState;
 use crate::utils::rel::{LockRelId, RelationData};
-use crate::utils::relcache::Relation;
 
 // ---------------------------------------------------------------------------
 // Per-task relcache state
 // ---------------------------------------------------------------------------
 
 struct RelCacheState {
-    /// OID -> owned relation descriptor (C `RelationIdCache` dynahash).
-    by_oid: std::collections::HashMap<u32, Box<RelationData>>,
+    /// OID -> shared relation descriptor (C `RelationIdCache` dynahash). The entry
+    /// is `Arc`-owned: holders (scans, the executor registry) keep clones; an
+    /// invalidation rebuild SWAPS the slot with a freshly built `Arc` so live
+    /// holders keep seeing their snapshot (never `Arc::make_mut`).
+    by_oid: std::collections::HashMap<u32, Arc<RelationData>>,
     /// Whether the critical (formrdesc) catalogs have been nailed.
     phase3_done: bool,
 }
@@ -103,24 +98,20 @@ fn with_state<R>(f: impl FnOnce(&mut RelCacheState) -> R) -> Option<R> {
     RELCACHE_STATE.try_with(|cell| f(&mut cell.borrow_mut())).ok()
 }
 
-/// Look up a cached relation by OID, returning a raw handle into the owned entry.
-fn cache_lookup(relid: Oid) -> Option<Relation> {
-    with_state(|st| {
-        st.by_oid
-            .get_mut(&relid.0)
-            .map(|b| std::ptr::from_mut::<RelationData>(b.as_mut()))
-    })
-    .flatten()
+/// Look up a cached relation by OID, returning an `Arc` clone of the entry.
+fn cache_lookup(relid: Oid) -> Option<Arc<RelationData>> {
+    with_state(|st| st.by_oid.get(&relid.0).map(Arc::clone)).flatten()
 }
 
-/// Insert an owned relation; return a handle into the stored entry.
-fn cache_insert(rel: Box<RelationData>) -> Relation {
+/// Insert a freshly built relation; return an `Arc` clone of the stored entry.
+/// If an entry already exists (a concurrent warm), the existing one is kept.
+fn cache_insert(rel: RelationData) -> Arc<RelationData> {
+    let rel = Arc::new(rel);
     with_state(|st| {
         let oid = rel.rd_id.0;
-        let entry = st.by_oid.entry(oid).or_insert(rel);
-        std::ptr::from_mut::<RelationData>(entry.as_mut())
+        Arc::clone(st.by_oid.entry(oid).or_insert(rel))
     })
-    .unwrap_or(core::ptr::null_mut())
+    .unwrap_or_else(|| unreachable!("relcache state must be established to insert"))
 }
 
 // ---------------------------------------------------------------------------
@@ -133,30 +124,23 @@ fn cache_insert(rel: Box<RelationData>) -> Relation {
 /// the entry first via [`relation_build_desc`] / Phase3). Increments the entry's
 /// reference count on success.
 #[must_use]
-pub fn relation_id_get_relation(relation_id: Oid) -> Option<Relation> {
+pub fn relation_id_get_relation(relation_id: Oid) -> Option<Arc<RelationData>> {
     let rd = cache_lookup(relation_id)?;
-    // SAFETY: handle into a live owned entry.
-    unsafe {
-        if (*rd).rd_droppedSubid != crate::c::InvalidSubTransactionId {
-            return None;
-        }
-        (*rd).rd_refcnt += 1;
+    if rd.rd_droppedSubid != crate::c::InvalidSubTransactionId {
+        return None;
     }
+    rd.incr_ref_count();
     Some(rd)
 }
 
 /// `RelationClose`: decrement the reference count. The entry stays cached (LRU);
-/// nailed entries are never freed.
-pub fn relation_close(relation: Relation) {
-    if relation.is_null() {
-        return;
-    }
-    // SAFETY: live relation handle.
-    unsafe {
-        if (*relation).rd_refcnt > 0 {
-            (*relation).rd_refcnt -= 1;
-        }
-    }
+/// nailed entries are never freed. The `Arc` clone the caller held drops here.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "takes the Arc BY VALUE on purpose: closing a relation drops the caller's cache pin (the Arc clone) -- the drop is the point, not a borrow"
+)]
+pub fn relation_close(relation: Arc<RelationData>) {
+    relation.decr_ref_count();
 }
 
 // ---------------------------------------------------------------------------
@@ -191,11 +175,11 @@ pub fn relation_cache_initialize_phase3() {
 fn nail_formrdesc_catalog(cat: &BootstrapCatalog) {
     let desc = formrdesc_tupdesc(cat.relid, cat.reltype, cat.schema);
 
-    let mut rel = Box::new(RelationData::blank());
+    let mut rel = RelationData::blank();
     rel.rd_id = cat.relid;
     rel.rd_isnailed = true;
-    rel.rd_isvalid = true;
-    rel.rd_refcnt = 1;
+    *rel.rd_isvalid.get_mut() = true;
+    *rel.rd_refcnt.get_mut() = 1;
     rel.rd_att = Some(desc);
 
     // Physical address (PG RelationInitPhysicalAddr, bootstrap form: the
@@ -228,7 +212,7 @@ fn nail_formrdesc_catalog(cat: &BootstrapCatalog) {
     form.relpersistence = RELPERSISTENCE_PERMANENT;
     form.relam = HEAP_TABLE_AM_OID;
     form.relnatts = i16::try_from(cat.schema.len()).unwrap_or(0);
-    rel.rd_rel = Box::into_raw(form);
+    rel.rd_rel = Some(form);
 
     cache_insert(rel);
 }
@@ -248,7 +232,7 @@ pub fn is_nailed_catalog(relid: Oid) -> bool {
 /// new entry is inserted into the relcache and a handle returned; `None` if the
 /// relation does not exist. The M2 path calls this to WARM the relcache before the
 /// sync `relation_open`/`RelationIdGetRelation`.
-pub async fn relation_build_desc(shared: &Arc<SharedState>, target_rel_id: Oid) -> Option<Relation> {
+pub async fn relation_build_desc(shared: &Arc<SharedState>, target_rel_id: Oid) -> Option<Arc<RelationData>> {
     if let Some(r) = cache_lookup(target_rel_id) {
         return Some(r);
     }
@@ -268,15 +252,24 @@ pub async fn relation_build_desc(shared: &Arc<SharedState>, target_rel_id: Oid) 
     heap_freetuple(pg_class_tuple); // data is now copied into form_copy
 
     // 2. Allocate the descriptor and copy rd_rel.
-    let mut rel = Box::new(RelationData::blank());
+    let mut rel = RelationData::blank();
     rel.rd_id = target_rel_id;
     rel.rd_isnailed = false;
-    rel.rd_isvalid = true;
-    rel.rd_refcnt = 0;
-    rel.rd_lockInfo = crate::utils::rel::LockInfoData {
-        lockRelId: LockRelId { relId: target_rel_id, dbId: crate::postgres_ext::InvalidOid },
+    *rel.rd_isvalid.get_mut() = true;
+    *rel.rd_refcnt.get_mut() = 0;
+    // RelationInitPhysicalAddr: a user table's storage lives at {default
+    // tablespace, current db, relfilenode == relid} (M2: filenode == oid). Filled
+    // here at build time (the entry is unshared) so the shared Arc is immutable.
+    let dbid = crate::session::current().database_id();
+    rel.rd_locator = crate::storage::relfilelocator::RelFileLocator {
+        spcOid: crate::common::relpath::DEFAULTTABLESPACE_OID,
+        dbOid: dbid,
+        relNumber: target_rel_id,
     };
-    rel.rd_rel = Box::into_raw(form_copy);
+    rel.rd_lockInfo = crate::utils::rel::LockInfoData {
+        lockRelId: LockRelId { relId: target_rel_id, dbId: dbid },
+    };
+    rel.rd_rel = Some(form_copy);
 
     // 3. Build the tuple descriptor from pg_attribute (PG RelationBuildTupleDesc).
     let td = Box::pin(relation_build_tuple_desc(shared, target_rel_id, relnatts)).await;
@@ -285,7 +278,7 @@ pub async fn relation_build_desc(shared: &Arc<SharedState>, target_rel_id: Oid) 
     // 4. Access-method info (index relations only). M2 reaches table rels; the
     //    index path is RelationInitIndexAccessInfo (staged support-proc resolution).
     if relkind == crate::catalog::pg_class::RELKIND_INDEX {
-        relation_init_index_access_info(std::ptr::from_mut::<RelationData>(rel.as_mut()));
+        relation_init_index_access_info(&mut rel);
     }
 
     Some(cache_insert(rel))
@@ -294,9 +287,9 @@ pub async fn relation_build_desc(shared: &Arc<SharedState>, target_rel_id: Oid) 
 /// `ScanPgRelation`: fetch the pg_class tuple for `target_rel_id` (heap scan of
 /// pg_class on its oid key). Returns an owned tuple copy.
 async fn scan_pg_relation(shared: &Arc<SharedState>, target_rel_id: Oid) -> Option<HeapTupleData> {
-    // pg_class is nailed; open it (sync, nailed -> no build). SendPtr so the handle
-    // can live across the scan's `.await`.
-    let pg_class = SendPtr(relation_id_get_relation(RelationRelationId)?);
+    // pg_class is nailed; open it (sync, nailed -> no build). The `Arc` handle is
+    // Send, so it can live across the scan's `.await`.
+    let pg_class = relation_id_get_relation(RelationRelationId)?;
     let key = [ScanKeyData {
         flags: 0,
         attno: Anum_pg_class_oid as i16,
@@ -306,14 +299,21 @@ async fn scan_pg_relation(shared: &Arc<SharedState>, target_rel_id: Oid) -> Opti
         func: zero_fmgr_info(),
         argument: ObjectIdGetDatum(target_rel_id),
     }];
-    let mut scan =
-        systable_beginscan(shared, pg_class.get(), crate::postgres_ext::InvalidOid, false, None, &key);
+    let snap = systable_scan_snapshot(shared, &pg_class, None);
+    let mut scan = systable_beginscan(
+        shared,
+        &pg_class,
+        crate::postgres_ext::InvalidOid,
+        false,
+        &snap,
+        &key,
+    );
     let result = Box::pin(systable_getnext(shared, &mut scan))
         .await
         // SAFETY: live scan tuple; copy before endscan.
         .map(|t| unsafe { heap_copytuple(&*t) });
     systable_endscan(shared, &mut scan);
-    relation_close(pg_class.get());
+    relation_close(pg_class);
     result
 }
 
@@ -331,10 +331,8 @@ async fn relation_build_tuple_desc(
     let mut desc = TupleDescData::create_template(i32::from(natts));
     desc.tdtypmod = -1;
 
-    let pg_attribute = SendPtr(
-        relation_id_get_relation(AttributeRelationId)
-            .unwrap_or_else(|| unreachable!("pg_attribute is nailed")),
-    );
+    let pg_attribute = relation_id_get_relation(AttributeRelationId)
+        .unwrap_or_else(|| unreachable!("pg_attribute is nailed"));
     let key = [ScanKeyData {
         flags: 0,
         attno: Anum_pg_attribute_attrelid as i16,
@@ -344,12 +342,13 @@ async fn relation_build_tuple_desc(
         func: zero_fmgr_info(),
         argument: ObjectIdGetDatum(relid),
     }];
+    let snap = systable_scan_snapshot(shared, &pg_attribute, None);
     let mut scan = systable_beginscan(
         shared,
-        pg_attribute.get(),
+        &pg_attribute,
         crate::postgres_ext::InvalidOid,
         false,
-        None,
+        &snap,
         &key,
     );
 
@@ -370,7 +369,7 @@ async fn relation_build_tuple_desc(
     }
 
     systable_endscan(shared, &mut scan);
-    relation_close(pg_attribute.get());
+    relation_close(pg_attribute);
 
     Arc::new(desc)
 }
@@ -401,70 +400,32 @@ pub const BT_AMSUPPORT: usize = crate::access::nbtree::BTNProcs as usize;
 /// `rd_supportinfo` entries start with `fn_oid = InvalidOid`; `index_getprocinfo`
 /// fills each on first use via `fmgr_info` (the builtin fast path resolves the
 /// `bt*cmp` comparators).
-pub fn relation_init_index_access_info(relation: Relation) {
-    if relation.is_null() {
-        return;
-    }
-    // SAFETY: live index relation.
-    let rel = unsafe { &mut *relation };
-    if rel.rd_index.is_null() {
+pub fn relation_init_index_access_info(rel: &mut RelationData) {
+    let Some(idx) = rel.rd_index.as_deref() else {
         // No pg_index row attached yet: leave the descriptor index-invalid; the
         // builder will attach rd_index and call index_init_opclass_support.
-        rel.rd_indexvalid = false;
+        *rel.rd_indexvalid.get_mut() = false;
         return;
-    }
-    // SAFETY: rd_index points at this index's pg_index fixed part.
-    let (indnatts, indnkeyatts) = unsafe {
-        ((*rel.rd_index).indnatts as usize, (*rel.rd_index).indnkeyatts as usize)
     };
+    let (indnatts, indnkeyatts) = (idx.indnatts as usize, idx.indnkeyatts as usize);
 
     alloc_index_arrays(rel, indnatts, indnkeyatts);
-    rel.rd_indexvalid = true;
+    *rel.rd_indexvalid.get_mut() = true;
 }
 
 /// Allocate (boxed-leak) the zeroed per-column index-access arrays on `rel`. The
 /// support arrays span `indnatts` columns (included columns have no opclass, so
 /// opclass arrays span only `indnkeyatts`). Idempotent: frees prior arrays.
 fn alloc_index_arrays(rel: &mut RelationData, indnatts: usize, indnkeyatts: usize) {
-    use crate::c::RegProcedure;
-    use crate::fmgr::FmgrInfo;
     use crate::postgres_ext::InvalidOid;
 
-    free_index_arrays(rel);
-
     let nsupport = indnatts * BT_AMSUPPORT;
-    rel.rd_support = leak_slice::<RegProcedure>(vec![InvalidOid; nsupport]);
-    rel.rd_supportinfo = leak_slice::<FmgrInfo>(
-        (0..nsupport).map(|_| zero_fmgr_info()).collect::<Vec<_>>(),
-    );
-    rel.rd_opfamily = leak_slice::<Oid>(vec![InvalidOid; indnkeyatts]);
-    rel.rd_opcintype = leak_slice::<Oid>(vec![InvalidOid; indnkeyatts]);
-    rel.rd_indcollation = leak_slice::<Oid>(vec![InvalidOid; indnkeyatts]);
-    rel.rd_indoption = leak_slice::<i16>(vec![0i16; indnkeyatts]);
-}
-
-/// Free the boxed index-access arrays previously allocated by [`alloc_index_arrays`].
-fn free_index_arrays(rel: &mut RelationData) {
-    use crate::c::RegProcedure;
-    use crate::fmgr::FmgrInfo;
-    // SAFETY: each pointer was produced by leak_slice (Box::into_raw of a slice's
-    // first element with a known length recorded by the consumer); here we only
-    // null them out -- the relcache leaks index arrays for a relation's lifetime
-    // (PG keeps them in rd_indexcxt, freed on relcache flush, which M2 omits).
-    rel.rd_support = core::ptr::null_mut::<RegProcedure>();
-    rel.rd_supportinfo = core::ptr::null_mut::<FmgrInfo>();
-    rel.rd_opfamily = core::ptr::null_mut();
-    rel.rd_opcintype = core::ptr::null_mut();
-    rel.rd_indcollation = core::ptr::null_mut();
-    rel.rd_indoption = core::ptr::null_mut();
-}
-
-/// Leak a `Vec<T>` as a raw element pointer (the relcache owns index arrays for
-/// the entry's lifetime; M2 does not flush the relcache, so this is a deliberate
-/// long-lived allocation mirroring PG's `rd_indexcxt`).
-fn leak_slice<T>(v: Vec<T>) -> *mut T {
-    let boxed = v.into_boxed_slice();
-    Box::into_raw(boxed).cast::<T>()
+    rel.rd_support = vec![InvalidOid; nsupport];
+    rel.rd_supportinfo = (0..nsupport).map(|_| zero_fmgr_info()).collect();
+    rel.rd_opfamily = vec![InvalidOid; indnkeyatts];
+    rel.rd_opcintype = vec![InvalidOid; indnkeyatts];
+    rel.rd_indcollation = vec![InvalidOid; indnkeyatts];
+    rel.rd_indoption = vec![0i16; indnkeyatts];
 }
 
 /// `IndexSupportInitialize` (M2 direct form): fill an index relation's support
@@ -478,33 +439,28 @@ fn leak_slice<T>(v: Vec<T>) -> *mut T {
 /// for M2). This is the data `IndexSupportInitialize` reads from pg_amproc; the
 /// seed mapping is encoded in [`btree_opclass_cmp_proc`].
 pub fn index_init_opclass_support(
-    relation: Relation,
+    rel: &mut RelationData,
     opclasses: &[Oid],
     collations: &[Oid],
     indoption: &[i16],
 ) {
-    // SAFETY: live index relation with arrays allocated.
-    let rel = unsafe { &mut *relation };
-    debug_assert!(!rel.rd_support.is_null(), "call relation_init_index_access_info first");
+    debug_assert!(!rel.rd_support.is_empty(), "call relation_init_index_access_info first");
     let indnkeyatts = opclasses.len();
     #[allow(
         clippy::needless_range_loop,
-        reason = "index drives writes into several parallel raw relcache arrays by column number"
+        reason = "index drives writes into several parallel relcache arrays by column number"
     )]
     for i in 0..indnkeyatts {
         let opclass = opclasses[i];
-        // SAFETY: arrays sized >= indnkeyatts by alloc_index_arrays.
-        unsafe {
-            *rel.rd_opcintype.add(i) = btree_opclass_intype(opclass);
-            *rel.rd_indcollation.add(i) = collations.get(i).copied().unwrap_or(crate::postgres_ext::InvalidOid);
-            *rel.rd_indoption.add(i) = indoption.get(i).copied().unwrap_or(0);
-            // rd_support layout: column-major, BT_AMSUPPORT slots per column.
-            let base = i * BT_AMSUPPORT;
-            *rel.rd_support.add(base + (crate::access::nbtree::BTORDER_PROC as usize - 1)) =
-                btree_opclass_cmp_proc(opclass);
-        }
+        rel.rd_opcintype[i] = btree_opclass_intype(opclass);
+        rel.rd_indcollation[i] = collations.get(i).copied().unwrap_or(crate::postgres_ext::InvalidOid);
+        rel.rd_indoption[i] = indoption.get(i).copied().unwrap_or(0);
+        // rd_support layout: column-major, BT_AMSUPPORT slots per column.
+        let base = i * BT_AMSUPPORT;
+        rel.rd_support[base + (crate::access::nbtree::BTORDER_PROC as usize - 1)] =
+            btree_opclass_cmp_proc(opclass);
     }
-    rel.rd_indexvalid = true;
+    *rel.rd_indexvalid.get_mut() = true;
 }
 
 /// The `BTORDER_PROC` (comparator) function OID for a builtin btree opclass OID.
@@ -569,7 +525,7 @@ fn zero_fmgr_info() -> crate::fmgr::FmgrInfo {
         retset: false,
         stats: 0,
         extra: 0,
-        mcxt: core::ptr::null_mut(),
-        expr: core::ptr::null_mut(),
+        mcxt: (),
+        expr: None,
     }
 }

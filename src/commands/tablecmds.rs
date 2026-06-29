@@ -15,7 +15,7 @@ use crate::nodes::primnodes::{OnCommitAction, RangeVar};
 use crate::postgres_ext::Oid;
 use crate::storage::lock::LOCKMODE;
 use crate::tcop::utility::AlterTableUtilityContext;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 // out-param typaddress folded into the returned tuple.
 pub fn DefineRelation(
@@ -74,7 +74,7 @@ pub fn AlterTableNamespace(_stmt: &AlterObjectSchemaStmt) -> (ObjectAddress, Oid
 }
 
 pub fn AlterTableNamespaceInternal(
-    _rel: Relation,
+    _rel: &RelationData,
     _oldNspOid: Oid,
     _nspOid: Oid,
     _objsMoved: &mut ObjectAddresses,
@@ -83,7 +83,7 @@ pub fn AlterTableNamespaceInternal(
 }
 
 pub fn AlterRelationNamespaceInternal(
-    _classRel: Relation,
+    _classRel: &RelationData,
     _relOid: Oid,
     _oldNspOid: Oid,
     _newNspOid: Oid,
@@ -93,7 +93,7 @@ pub fn AlterRelationNamespaceInternal(
     unimplemented!()
 }
 
-pub fn CheckTableNotInUse(_rel: Relation, _stmt: &str) {
+pub fn CheckTableNotInUse(_rel: &RelationData, _stmt: &str) {
     unimplemented!()
 }
 
@@ -116,12 +116,12 @@ pub fn SetRelationHasSubclass(_relationId: Oid, _relhassubclass: bool) {
     unimplemented!()
 }
 
-pub fn CheckRelationTableSpaceMove(_rel: Relation, _newTableSpaceId: Oid) -> bool {
+pub fn CheckRelationTableSpaceMove(_rel: &RelationData, _newTableSpaceId: Oid) -> bool {
     unimplemented!()
 }
 
 pub fn SetRelationTableSpace(
-    _rel: Relation,
+    _rel: &RelationData,
     _newTableSpaceId: Oid,
     _newRelFilenumber: RelFileNumber,
 ) {
@@ -155,7 +155,7 @@ pub fn ResetRelRewrite(_myrelid: Oid) {
 
 pub fn find_composite_type_dependencies(
     _typeOid: Oid,
-    _origRelation: Relation,
+    _origRelation: &RelationData,
     _origTypeName: &str,
 ) {
     unimplemented!()
@@ -209,7 +209,7 @@ pub fn RangeVarCallbackOwnsRelation(
 }
 
 pub fn PartConstraintImpliedByRelConstraint(
-    _scanrel: Relation,
+    _scanrel: &RelationData,
     _partConstraint: &[Node],
 ) -> bool {
     unimplemented!()

@@ -113,7 +113,7 @@ pub trait CustomScanMethodsDyn {
 pub trait CustomExecMethods {
     const CUSTOM_NAME: &'static str;
 
-    fn begin_custom_scan(node: &mut CustomScanState, estate: &mut EState, eflags: i32);
+    fn begin_custom_scan(node: &mut CustomScanState, estate: &mut EState<'_>, eflags: i32);
     fn exec_custom_scan(node: &mut CustomScanState) -> Option<Box<TupleTableSlot>>;
     fn end_custom_scan(node: &mut CustomScanState);
     fn rescan_custom_scan(node: &mut CustomScanState);

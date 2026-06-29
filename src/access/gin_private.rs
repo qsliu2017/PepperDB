@@ -27,7 +27,8 @@ use crate::access::tupdesc::TupleDesc;
 use crate::c::{Pointer, Size};
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // C: `typedef ItemPointerData *ItemPointer`. itemptr.rs aliases only the value
 // struct; define the pointer handle locally.
@@ -48,7 +49,7 @@ pub struct GinOptions {
 pub const GIN_DEFAULT_USE_FASTUPDATE: bool = true;
 
 // GinGetUseFastUpdate / GinGetPendingListCleanupSize are accessor macros over a
-// relation's rd_options; they become methods on Relation in Phase 2. Omitted
+// relation's rd_options; they become methods on Arc<RelationData> in Phase 2. Omitted
 // here (they reference rd_options/gin_pending_list_limit not yet available).
 
 // Buffer lock/unlock operation codes (aliases of bufmgr's BUFFER_LOCK_*).
@@ -58,7 +59,7 @@ pub const GIN_EXCLUSIVE: i32 = BUFFER_LOCK_EXCLUSIVE;
 
 /// Working data structure describing the index being worked on. In-memory.
 pub struct GinState {
-    pub index: Relation,
+    pub index: Arc<RelationData>,
     pub one_col: bool, // true if single-column index
 
     /// Nominal tuple descriptor of the index (key types per column).
@@ -85,11 +86,11 @@ pub fn ginoptions(_reloptions: Datum, _validate: bool) -> Option<Vec<u8>> {
     unimplemented!()
 }
 
-pub fn initGinState(_state: &mut GinState, _index: Relation) {
+pub fn initGinState(_state: &mut GinState, _index: &RelationData) {
     unimplemented!()
 }
 
-pub fn GinNewBuffer(_index: Relation) -> Buffer {
+pub fn GinNewBuffer(_index: &RelationData) -> Buffer {
     unimplemented!()
 }
 
@@ -139,17 +140,17 @@ pub fn ginbuildphasename(_phasenum: i64) -> String {
 
 // gininsert.c
 
-pub fn ginbuild(_heap: Relation, _index: Relation, _index_info: &mut IndexInfo)
+pub fn ginbuild(_heap: &RelationData, _index: &RelationData, _index_info: &mut IndexInfo)
     -> *mut IndexBuildResult {
     unimplemented!() // TODO(ptr)
 }
 
-pub fn ginbuildempty(_index: Relation) {
+pub fn ginbuildempty(_index: &RelationData) {
     unimplemented!()
 }
 
-pub fn gininsert(_index: Relation, _values: &[Datum], _isnull: &[bool],
-                 _ht_ctid: ItemPointer, _heap_rel: Relation,
+pub fn gininsert(_index: &RelationData, _values: &[Datum], _isnull: &[bool],
+                 _ht_ctid: ItemPointer, _heap_rel: &RelationData,
                  _check_unique: IndexUniqueCheck, _index_unchanged: bool,
                  _index_info: &mut IndexInfo) -> bool {
     unimplemented!()
@@ -208,7 +209,7 @@ pub struct GinBtreeData {
 
     pub is_data: bool,
 
-    pub index: Relation,
+    pub index: Arc<RelationData>,
     pub root_blkno: BlockNumber,
     pub ginstate: *mut GinState, // not valid in a data scan; TODO(ptr)
     pub full_scan: bool,
@@ -244,7 +245,7 @@ pub fn ginFindLeafPage(_btree: GinBtree, _search_mode: bool, _root_conflict_chec
     unimplemented!() // TODO(ptr)
 }
 
-pub fn ginStepRight(_buffer: Buffer, _index: Relation, _lockmode: i32) -> Buffer {
+pub fn ginStepRight(_buffer: Buffer, _index: &RelationData, _lockmode: i32) -> Buffer {
     unimplemented!()
 }
 
@@ -292,7 +293,7 @@ pub fn GinDataLeafPageGetItemsToTbm(_page: Page, _tbm: &mut TIDBitmap) -> i32 {
     unimplemented!()
 }
 
-pub fn createPostingTree(_index: Relation, _items: &mut [ItemPointerData], _nitems: u32,
+pub fn createPostingTree(_index: &RelationData, _items: &mut [ItemPointerData], _nitems: u32,
                          _build_stats: &mut GinStatsData, _entrybuffer: Buffer) -> BlockNumber {
     unimplemented!()
 }
@@ -305,13 +306,13 @@ pub fn GinPageDeletePostingItem(_page: Page, _offset: OffsetNumber) {
     unimplemented!()
 }
 
-pub fn ginInsertItemPointers(_index: Relation, _root_blkno: BlockNumber,
+pub fn ginInsertItemPointers(_index: &RelationData, _root_blkno: BlockNumber,
                              _items: &mut [ItemPointerData], _nitem: u32,
                              _build_stats: &mut GinStatsData) {
     unimplemented!()
 }
 
-pub fn ginScanBeginPostingTree(_btree: GinBtree, _index: Relation, _root_blkno: BlockNumber)
+pub fn ginScanBeginPostingTree(_btree: GinBtree, _index: &RelationData, _root_blkno: BlockNumber)
     -> *mut GinBtreeStack {
     unimplemented!() // TODO(ptr)
 }
@@ -324,7 +325,7 @@ pub fn ginDataFillRoot(_btree: GinBtree, _root: Page, _lblkno: BlockNumber, _lpa
 /// Opaque; private vacuum state defined in ginvacuum.c, not ported.
 pub struct GinVacuumState;
 
-pub fn ginVacuumPostingTreeLeaf(_indexrel: Relation, _buffer: Buffer, _gvs: &mut GinVacuumState) {
+pub fn ginVacuumPostingTreeLeaf(_indexrel: &RelationData, _buffer: Buffer, _gvs: &mut GinVacuumState) {
     unimplemented!()
 }
 
@@ -431,7 +432,7 @@ pub struct GinScanOpaqueData {
 
 pub type GinScanOpaque = *mut GinScanOpaqueData; // TODO(ptr)
 
-pub fn ginbeginscan(_rel: Relation, _nkeys: i32, _norderbys: i32) -> IndexScanDesc {
+pub fn ginbeginscan(_rel: &RelationData, _nkeys: i32, _norderbys: i32) -> IndexScanDesc {
     unimplemented!()
 }
 

@@ -131,7 +131,7 @@ async fn xact_lock_table_wait_blocks_until_holder_releases() {
                 posid: 0,
             };
             ctid.set_invalid();
-            XactLockTableWait(&s2, xid, std::ptr::null_mut(), &ctid, XLTW_Oper::XltwNone).await;
+            XactLockTableWait(&s2, xid, None, &ctid, XLTW_Oper::XltwNone).await;
         }))
         .await;
     });

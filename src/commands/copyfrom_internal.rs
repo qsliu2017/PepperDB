@@ -12,7 +12,8 @@ use crate::fmgr::FmgrInfo;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::utils::palloc::MemoryContext;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// The different source cases at the bottom level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +60,7 @@ pub struct CopyFromStateData {
     pub conversion_proc: Oid,   // encoding conversion function
 
     // parameters from the COPY command
-    pub rel: Relation,           // relation to copy from
+    pub rel: Arc<RelationData>,           // relation to copy from
     pub attnumlist: Vec<i32>,    // list of attnums to copy
     pub filename: Option<String>, // None for STDIN
     pub is_program: bool,        // is 'filename' a program to popen?

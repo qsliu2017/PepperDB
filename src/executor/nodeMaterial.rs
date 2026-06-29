@@ -6,7 +6,7 @@ use crate::nodes::plannodes::Material;
 // TODO(ptr)
 pub fn ExecInitMaterial(
     _node: &Material,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut MaterialState {
     unimplemented!()

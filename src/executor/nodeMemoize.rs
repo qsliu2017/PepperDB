@@ -4,7 +4,7 @@ use crate::access::parallel::{ParallelContext, ParallelWorkerContext};
 use crate::nodes::execnodes::{EState, MemoizeState};
 use crate::nodes::plannodes::Memoize;
 
-pub fn ExecInitMemoize(_node: &Memoize, _estate: &mut EState, _eflags: i32) -> *mut MemoizeState {
+pub fn ExecInitMemoize(_node: &Memoize, _estate: &mut EState<'_>, _eflags: i32) -> *mut MemoizeState {
     unimplemented!() // TODO(ptr)
 }
 pub fn ExecEndMemoize(_node: &mut MemoizeState) {

@@ -13,7 +13,7 @@ use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::storage::itemptr::ItemPointerData;
 use crate::utils::memutils::MemoryContext;
-use crate::utils::rel::Relation;
+use crate::utils::rel::RelationData;
 
 /* SPGiST opclass support function numbers */
 pub const SPGIST_CONFIG_PROC: u16 = 1;
@@ -240,21 +240,21 @@ pub fn spgoptions(_reloptions: Datum, _validate: bool) -> *mut bytea {
 
 /* spginsert.c */
 pub fn spgbuild(
-    _heap: Relation,
-    _index: Relation,
+    _heap: &RelationData,
+    _index: &RelationData,
     _index_info: &mut IndexInfo,
 ) -> *mut IndexBuildResult {
     unimplemented!()
 }
-pub fn spgbuildempty(_index: Relation) {
+pub fn spgbuildempty(_index: &RelationData) {
     unimplemented!()
 }
 pub fn spginsert(
-    _index: Relation,
+    _index: &RelationData,
     _values: &[Datum],
     _isnull: &[bool],
     _ht_ctid: &mut ItemPointerData,
-    _heap_rel: Relation,
+    _heap_rel: &RelationData,
     _check_unique: IndexUniqueCheck,
     _index_unchanged: bool,
     _index_info: &mut IndexInfo,
@@ -263,7 +263,7 @@ pub fn spginsert(
 }
 
 /* spgscan.c */
-pub fn spgbeginscan(_rel: Relation, _keysz: i32, _orderbysz: i32) -> IndexScanDesc {
+pub fn spgbeginscan(_rel: &RelationData, _keysz: i32, _orderbysz: i32) -> IndexScanDesc {
     unimplemented!()
 }
 pub fn spgendscan(_scan: IndexScanDesc) {
@@ -284,7 +284,7 @@ pub fn spggetbitmap(_scan: IndexScanDesc, _tbm: &mut TIDBitmap) -> i64 {
 pub fn spggettuple(_scan: IndexScanDesc, _dir: ScanDirection) -> bool {
     unimplemented!()
 }
-pub fn spgcanreturn(_index: Relation, _attno: i32) -> bool {
+pub fn spgcanreturn(_index: &RelationData, _attno: i32) -> bool {
     unimplemented!()
 }
 

@@ -14,22 +14,24 @@ use crate::backend::executor::execExpr::exec_build_projection_info;
 use crate::backend::executor::execTuples::TTS_OPS_VIRTUAL;
 
 /// PG `CreateExecutorState`: a fresh EState. `EState::default()` mirrors PG's
-/// palloc0 + `es_direction = ForwardScanDirection` (see execnodes.rs).
-pub fn create_executor_state() -> Box<EState> {
+/// palloc0 + `es_direction = ForwardScanDirection` (see execnodes.rs). The range
+/// table relations default empty (`&[]`, `'static`-coercible), so `'rel` is
+/// unconstrained until `standard_executor_start` publishes the borrowed relations.
+pub fn create_executor_state<'rel>() -> Box<EState<'rel>> {
     Box::new(EState::default())
 }
 
 /// PG `FreeExecutorState`: release the executor state. The exprcontexts, tuple
 /// table and subplan states are owned by the EState and freed when the `Box`
 /// drops; nothing else needs explicit teardown on the M1 path.
-pub fn free_executor_state(estate: Box<EState>) {
+pub fn free_executor_state(estate: Box<EState<'_>>) {
     drop(estate);
 }
 
 /// PG `CreateExprContext`: a per-node expression context linked to `estate`.
 /// The per-query/per-tuple memory contexts are tombstoned; the rest of the
 /// fields default to their zero/empty values, matching CreateExprContextInternal.
-pub fn create_expr_context(_estate: &mut EState) -> Box<ExprContext> {
+pub fn create_expr_context(_estate: &mut EState<'_>) -> Box<ExprContext> {
     Box::new(ExprContext {
         case_value_is_null: true,
         domain_value_is_null: true,
@@ -37,10 +39,10 @@ pub fn create_expr_context(_estate: &mut EState) -> Box<ExprContext> {
     })
 }
 
-/// PG `MakePerTupleExprContext`: get/create the EState's per-output-tuple
+/// PG `MakePerTupleExprContext`: get/create the EState<'_>'s per-output-tuple
 /// exprcontext. Returns the index of the (owned) context in `es_per_tuple`... in
 /// this port the context is stored directly in `per_tuple_exprcontext`.
-pub fn make_per_tuple_expr_context(estate: &mut EState) -> &mut ExprContext {
+pub fn make_per_tuple_expr_context<'e>(estate: &'e mut EState<'_>) -> &'e mut ExprContext {
     if estate.per_tuple_exprcontext.is_none() {
         let ec = create_expr_context(estate);
         estate.per_tuple_exprcontext = Some(ec);
@@ -58,7 +60,7 @@ pub fn make_per_tuple_expr_context(estate: &mut EState) -> &mut ExprContext {
 pub fn reset_expr_context(_econtext: &mut ExprContext) {}
 
 /// PG `ExecAssignExprContext`: give a PlanState its own per-node exprcontext.
-pub fn exec_assign_expr_context(estate: &mut EState, planstate: &mut PlanState) {
+pub fn exec_assign_expr_context(estate: &mut EState<'_>, planstate: &mut PlanState) {
     planstate.ps_expr_context = Some(create_expr_context(estate));
 }
 

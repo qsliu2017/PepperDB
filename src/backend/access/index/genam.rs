@@ -12,21 +12,14 @@
 //! (exactly as `heap_getnext` does). The returned `HeapTuple` references data in a
 //! pinned buffer; per PG it must be copied before the next getnext/endscan.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the catalog caches are PER-BACKEND task-confined state (raw HeapTuple/FmgrInfo pointers); their populate futures never migrate threads mid-await. await_holding_lock/refcell are clean (enforced)."
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "catalog-cache routines take raw Relation/HeapTuple pointers per the C API; the deref is faithful to C (callers pass live handles)"
-)]
+
 use std::sync::Arc;
 
 use crate::access::htup::{HeapTuple, HeapTupleData, HeapTupleIsValid};
 use crate::access::skey::ScanKeyData;
 use crate::access::sdir::ScanDirection;
 use crate::backend::access::heap::heapam::{
-    heap_beginscan, heap_endscan, heap_getnext, HeapScanDescData, SendPtr,
+    heap_beginscan, heap_endscan, heap_getnext, HeapScanDescData,
 };
 use crate::access::tableam::ScanOptions;
 use crate::backend::access::common::heaptuple::{heap_copytuple, heap_freetuple, heap_getattr};
@@ -35,45 +28,41 @@ use crate::postgres::{Datum, DatumGetInt16, DatumGetInt32, DatumGetObjectId};
 use crate::postgres_ext::Oid;
 use crate::shared_state::SharedState;
 use crate::utils::rel::RelationData;
-use crate::utils::relcache::Relation;
 use crate::utils::snapshot::{Snapshot, SnapshotData};
 
 /// The systable scan state. The C `SysScanDescData` is split: the heap-scan arm
-/// owns the boxed `HeapScanDescData`; the index arm is staged. We also carry the
-/// per-call scan-key copy (applied post-fetch, since the M2 heap AM scans with no
-/// pushed-down keys) and the just-copied current tuple (owned, freed on the next
-/// getnext / endscan).
-pub struct SysScanState {
-    heap_rel: Relation,
-    /// Boxed heap scan descriptor (heap-scan arm). `None` when the index arm is in
-    /// use (`iscan` is `Some`).
-    hscan: Option<Box<HeapScanDescData>>,
+/// owns the `HeapScanDescData`; the index arm drives an `IndexScanState`. We also
+/// carry the per-call scan-key copy (applied post-fetch, since the M2 heap AM scans
+/// with no pushed-down keys) and the just-copied current tuple (owned, freed on the
+/// next getnext / endscan).
+///
+/// Borrow-based ownership (relation-ownership-plan step 3): the catalog heap
+/// relation and the registered snapshot are BORROWS (`&'rel`/`&'snap`). Every
+/// systable caller (relcache build, catcache/namespace/catalog) opens the catalog
+/// `Arc` into its own frame, drives the scan, then closes -- the owner strictly
+/// encloses the scan, so the scan can hold `&'rel RelationData` (and a
+/// `HeapScanDescData<'rel,'snap>` borrowing the same) across its `.await`s without a
+/// self-referential struct or the chunk-1 resume-cursor staging.
+pub struct SysScanState<'rel, 'snap> {
+    heap_rel: &'rel RelationData,
+    /// Heap-scan arm. `None` when the index arm is in use (`iscan` is `Some`). Holds
+    /// the `HeapScanDescData` directly (borrowing the same `&'rel`/`&'snap` this
+    /// state borrows) -- no resume-cursor staging now the caller owns the `Arc`s.
+    hscan: Option<Box<HeapScanDescData<'rel, 'snap>>>,
     /// Index-scan arm (the index-scan path, used when the catalog has a usable
-    /// unique index -- Decision 3). `None` on the heap-scan path.
-    iscan: Option<Box<crate::backend::access::index::indexam::IndexScanState>>,
-    /// Registered catalog snapshot for the scan (kept alive for its lifetime).
-    snapshot: Snapshot,
+    /// unique index -- Decision 3). `None` on the heap-scan path. The index over the
+    /// catalog heap shares the heap's `'rel` lifetime (both opened in the caller's
+    /// frame).
+    iscan: Option<crate::backend::access::index::indexam::IndexScanState<'rel, 'rel, 'snap>>,
+    /// Borrowed catalog snapshot for the scan (owned by the caller's frame).
+    snapshot: &'snap SnapshotData,
     /// The scan keys as (heap attno, equality argument) pairs. `ScanKeyData`
     /// carries an `FmgrInfo` (not `Clone`); genam applies equality directly for the
     /// catalog key types, so only attno + argument are needed.
     keys: Vec<(i16, Datum)>,
     /// The current owned tuple copy returned by the last getnext, if any.
-    cur: Option<Box<HeapTupleData>>,
+    cur: Option<Box<HeapTupleData>>, //Option<HeapTupleData>
 }
-
-// The only non-Send field is the raw `Relation` pointer (heap_rel) and the boxed
-// heap scan (which itself is `unsafe impl Send`). Backends run on the tokio
-// multi-thread runtime; the scan is owned by one task for its whole lifetime, so
-// the handle never races. Same contract as `HeapScanDescData`'s Send impl.
-#[allow(
-    clippy::non_send_fields_in_send_ty,
-    reason = "deliberate: the raw Relation pointer is task-confined for the scan's lifetime (same contract as HeapScanDescData's Send impl)"
-)]
-unsafe impl Send for SysScanState {}
-
-/// A `SysScanDesc` handle. The header's `SysScanDesc = *mut SysScanDescData`
-/// pointer alias is replaced by an owned box handle for the M2 path.
-pub type SysScanDesc = Box<SysScanState>;
 
 /// `systable_beginscan`: set up a heap-or-index scan of a catalog.
 ///
@@ -89,17 +78,14 @@ pub type SysScanDesc = Box<SysScanState>;
 /// then we faithfully fall back to the heap scan (PG does the same before
 /// `criticalRelcachesBuilt`).
 #[must_use]
-pub fn systable_beginscan(
-    shared: &Arc<SharedState>,
-    heap_relation: Relation,
+pub fn systable_beginscan<'rel, 'snap>(
+    _shared: &Arc<SharedState>, // narrow scope
+    heap_relation: &'rel RelationData,
     _index_id: Oid,
     _index_ok: bool,
-    snapshot: Snapshot,
+    snapshot: &'snap SnapshotData,
     keys: &[ScanKeyData],
-) -> SysScanDesc {
-    // SAFETY: caller passes a live, open relation.
-    let relid = unsafe { (*heap_relation).rd_id };
-
+) -> SysScanState<'rel, 'snap> {
     // STAGED (step 13-rest): the index-scan arm. PG takes it when
     //   index_ok && !IgnoreSystemIndexes && !ReindexIsProcessingIndex(index_id)
     //   && criticalRelcachesBuilt. It calls index_open(index_id, AccessShareLock),
@@ -107,29 +93,35 @@ pub fn systable_beginscan(
     // We always heap-scan in step 14 (faithful: PG also heap-scans before the
     // critical relcache entries exist).
 
-    let snap = snapshot.map_or_else(|| GetCatalogSnapshot(shared, relid), Some);
-
-    let scan_snapshot: Arc<SnapshotData> = snap
-        .clone()
-        .unwrap_or_else(|| unreachable!("catalog snapshot must be available for a systable scan"));
-
     // M2 heap AM scans with no pushed-down keys; keys are applied post-fetch.
-    let hscan = heap_beginscan(
-        SendPtr(heap_relation),
-        scan_snapshot,
-        0,
-        ScanOptions::ALLOW_PAGEMODE,
-    );
+    let hscan = heap_beginscan(heap_relation, snapshot, 0, ScanOptions::ALLOW_PAGEMODE);
 
     let key_pairs: Vec<(i16, Datum)> = keys.iter().map(|k| (k.attno, k.argument)).collect();
-    Box::new(SysScanState {
+    SysScanState {
         heap_rel: heap_relation,
         hscan: Some(hscan),
         iscan: None,
-        snapshot: snap,
+        snapshot,
         keys: key_pairs,
         cur: None,
-    })
+    }
+}
+
+/// Obtain the catalog snapshot for a systable scan as an OWNED `Arc<SnapshotData>`
+/// the caller binds in its frame (the scan then borrows `&*binding`). When the
+/// caller already has a snapshot it passes it through; otherwise this takes the
+/// per-backend catalog snapshot (PG `GetCatalogSnapshot`). The owned `Arc` is the
+/// `'snap` owner that must strictly enclose the scan (relation-ownership-plan
+/// step 3: the snapshot owner, like the relation owner, lives ABOVE the scan).
+#[must_use]
+pub fn systable_scan_snapshot(
+    shared: &Arc<SharedState>,
+    heap_relation: &RelationData,
+    snapshot: Snapshot,
+) -> Arc<SnapshotData> {
+    snapshot
+        .or_else(|| GetCatalogSnapshot(shared, heap_relation.rd_id))
+        .unwrap_or_else(|| unreachable!("catalog snapshot must be available for a systable scan"))
 }
 
 /// `systable_beginscan` (INDEX path, Decision 3): scan a catalog through its unique
@@ -141,20 +133,16 @@ pub fn systable_beginscan(
 /// This is the faithful path PG takes once `criticalRelcachesBuilt`; the heap-scan
 /// `systable_beginscan` stays the fallback used before the critical indexes exist.
 #[must_use]
-pub fn systable_beginscan_indexed(
-    shared: &Arc<SharedState>,
-    heap_relation: Relation,
-    index_relation: Relation,
-    snapshot: Snapshot,
+pub fn systable_beginscan_indexed<'rel, 'snap>(
+    _shared: &Arc<SharedState>,
+    heap_relation: &'rel RelationData,
+    index_relation: &'rel RelationData,
+    snapshot: &'snap SnapshotData,
     keys: &[ScanKeyData],
-) -> SysScanDesc {
+) -> SysScanState<'rel, 'snap> {
     use crate::backend::access::index::indexam::{index_beginscan, index_rescan};
 
-    // SAFETY: caller passes a live, open relation.
-    let relid = unsafe { (*heap_relation).rd_id };
-    let snap = snapshot.map_or_else(|| GetCatalogSnapshot(shared, relid), Some);
-
-    let mut iscan = index_beginscan(heap_relation, index_relation, snap.clone());
+    let mut iscan = index_beginscan(heap_relation, index_relation, snapshot);
     // The catalog index columns are 1:1 with the heap key columns in `keys`; remap
     // each heap attno to its index column position (1-based, in key order).
     let index_keys: Vec<(i32, Datum)> = keys
@@ -165,14 +153,14 @@ pub fn systable_beginscan_indexed(
     index_rescan(&mut iscan, index_keys);
 
     let key_pairs: Vec<(i16, Datum)> = keys.iter().map(|k| (k.attno, k.argument)).collect();
-    Box::new(SysScanState {
+    SysScanState {
         heap_rel: heap_relation,
         hscan: None,
         iscan: Some(iscan),
-        snapshot: snap,
+        snapshot,
         keys: key_pairs,
         cur: None,
-    })
+    }
 }
 
 /// `systable_getnext`: return the next tuple matching the scan keys, or `None` at
@@ -180,17 +168,15 @@ pub fn systable_beginscan_indexed(
 /// returns a buffer reference; we copy eagerly so the pointer stays valid across
 /// the caller's processing without holding the buffer pin). The previous tuple is
 /// freed here.
-pub async fn systable_getnext(shared: &Arc<SharedState>, sysscan: &mut SysScanState) -> Option<HeapTuple> {
+pub async fn systable_getnext(shared: &Arc<SharedState>, sysscan: &mut SysScanState<'_, '_>) -> Option<HeapTuple> {
     // Free the previously returned copy.
     if let Some(old) = sysscan.cur.take() {
         heap_freetuple(*old); // frees the copied body once
     }
 
-    // Clone the catalog's tuple descriptor (an Arc, Send) up front so we do not
-    // hold a `&RelationData` borrow across the `.await` (keeps the future Send and
-    // avoids await_holding a non-Send reference).
-    // SAFETY: live relation for the scan.
-    let tupdesc = unsafe { (*sysscan.heap_rel).rd_att.clone() }
+    // Clone the catalog's tuple descriptor (an Arc, cheap) up front so the `&mut
+    // sysscan` reborrow below (heap arm) does not conflict with reading `heap_rel`.
+    let tupdesc = sysscan.heap_rel.rd_att.clone()
         .unwrap_or_else(|| unreachable!("open catalog has a tuple descriptor"));
 
     // INDEX path (Decision 3): drive the btree scan + heap fetch. The index already
@@ -213,21 +199,24 @@ pub async fn systable_getnext(shared: &Arc<SharedState>, sysscan: &mut SysScanSt
         return None;
     }
 
-    let hscan = sysscan
-        .hscan
+    // Heap arm: the descriptor borrows the same `&'rel`/`&'snap` this state borrows,
+    // so it advances directly (no resume-cursor re-supply). Disjoint field access:
+    // `hscan`/`cur` mutable, `keys` immutable.
+    let SysScanState { hscan, keys, cur, .. } = sysscan;
+    let hscan = hscan
         .as_mut()
         .unwrap_or_else(|| unreachable!("systable scan has a heap or index arm"));
 
     while let Some(tup) = heap_getnext(shared, hscan, ScanDirection::Forward).await {
         // SAFETY: tup points into the pinned scan buffer; valid until next getnext.
         let tref: &HeapTupleData = unsafe { &*tup };
-        if scankeys_match(tref, &tupdesc, &sysscan.keys) {
+        if scankeys_match(tref, &tupdesc, keys) {
             // Copy before the buffer can be reused (PG: caller must copy).
             // SAFETY: tref is a live tuple over the pinned page.
             let copy = unsafe { heap_copytuple(tref) };
             let mut boxed = Box::new(copy);
             let ptr: *mut HeapTupleData = std::ptr::from_mut::<HeapTupleData>(boxed.as_mut());
-            sysscan.cur = Some(boxed);
+            *cur = Some(boxed);
             return Some(ptr);
         }
     }
@@ -235,8 +224,8 @@ pub async fn systable_getnext(shared: &Arc<SharedState>, sysscan: &mut SysScanSt
 }
 
 /// `systable_endscan`: close the scan and release resources. The owned tuple copy
-/// and registered snapshot are dropped here.
-pub fn systable_endscan(shared: &Arc<SharedState>, sysscan: &mut SysScanState) {
+/// is freed here; the borrowed relation/snapshot are released by the caller's frame.
+pub fn systable_endscan(shared: &Arc<SharedState>, sysscan: &mut SysScanState<'_, '_>) {
     if let Some(old) = sysscan.cur.take() {
         heap_freetuple(*old);
     }
@@ -246,8 +235,6 @@ pub fn systable_endscan(shared: &Arc<SharedState>, sysscan: &mut SysScanState) {
     if let Some(iscan) = sysscan.iscan.take() {
         crate::backend::access::index::indexam::index_endscan(iscan);
     }
-    // The snapshot Arc is released when `sysscan.snapshot` drops.
-    sysscan.snapshot = None;
 }
 
 /// Test whether a heap tuple satisfies every scan key (equality only, as used by
@@ -306,7 +293,7 @@ fn name_eq(a: Datum, b: Datum) -> bool {
 /// `systable_recheck_tuple`: STAGED. Used to recheck visibility after waiting for a
 /// lock; not on the M2 cache-population path.
 #[must_use]
-pub fn systable_recheck_tuple(_sysscan: &SysScanState, _tup: HeapTuple) -> bool {
+pub fn systable_recheck_tuple(_sysscan: &SysScanState<'_, '_>, _tup: HeapTuple) -> bool {
     unimplemented!("systable_recheck_tuple: not on the M2 path")
 }
 

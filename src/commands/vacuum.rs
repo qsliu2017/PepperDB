@@ -26,7 +26,8 @@ use crate::storage::block::BlockNumber;
 use crate::storage::buf::BufferAccessStrategy;
 use crate::storage::lock::LOCKMODE;
 use crate::utils::memutils::MemoryContext;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 const SLOTS: usize = STATISTIC_NUM_SLOTS as usize;
 
@@ -214,18 +215,18 @@ pub fn vacuum(
     unimplemented!()
 }
 
-/// C: `void vac_open_indexes(rel, lockmode, int *nindexes, Relation **Irel)` -
+/// C: `void vac_open_indexes(rel, lockmode, int *nindexes, Arc<RelationData> **Irel)` -
 /// the two out-params fold into the returned `Vec`.
-pub fn vac_open_indexes(relation: Relation, lockmode: LOCKMODE) -> Vec<Relation> {
+pub fn vac_open_indexes(relation: &RelationData, lockmode: LOCKMODE) -> Vec<Arc<RelationData>> {
     unimplemented!()
 }
 
-pub fn vac_close_indexes(nindexes: i32, irel: &mut [Relation], lockmode: LOCKMODE) {
+pub fn vac_close_indexes(nindexes: i32, irel: &mut [Arc<RelationData>], lockmode: LOCKMODE) {
     unimplemented!()
 }
 
 pub fn vac_estimate_reltuples(
-    relation: Relation,
+    relation: &RelationData,
     total_pages: BlockNumber,
     scanned_pages: BlockNumber,
     scanned_tuples: f64,
@@ -235,7 +236,7 @@ pub fn vac_estimate_reltuples(
 
 /// C: out-params `bool *frozenxid_updated, bool *minmulti_updated` -> tuple.
 pub fn vac_update_relstats(
-    relation: Relation,
+    relation: &RelationData,
     num_pages: BlockNumber,
     num_tuples: f64,
     num_all_visible_pages: BlockNumber,
@@ -250,7 +251,7 @@ pub fn vac_update_relstats(
 
 /// C: `bool vacuum_get_cutoffs(rel, params, struct VacuumCutoffs *cutoffs)` -
 /// the success-bool + out-param fold into `Option`.
-pub fn vacuum_get_cutoffs(rel: Relation, params: &VacuumParams) -> Option<VacuumCutoffs> {
+pub fn vacuum_get_cutoffs(rel: &RelationData, params: &VacuumParams) -> Option<VacuumCutoffs> {
     unimplemented!()
 }
 
@@ -276,7 +277,7 @@ pub fn vacuum_open_relation(
     options: VacOpt,
     verbose: bool,
     lmode: LOCKMODE,
-) -> Relation {
+) -> Arc<RelationData> {
     unimplemented!()
 }
 
@@ -307,8 +308,8 @@ pub fn VacuumUpdateCosts() {
 
 // in commands/vacuumparallel.c
 pub fn parallel_vacuum_init(
-    rel: Relation,
-    indrels: &mut [Relation],
+    rel: &RelationData,
+    indrels: &mut [Arc<RelationData>],
     nindexes: i32,
     nrequested_workers: i32,
     vac_work_mem: i32,

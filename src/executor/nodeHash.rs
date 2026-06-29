@@ -9,7 +9,7 @@ use crate::nodes::nodes::Node;
 use crate::nodes::plannodes::Hash;
 
 // TODO(ptr)
-pub fn ExecInitHash(_node: &Hash, _estate: &mut EState, _eflags: i32) -> *mut HashState {
+pub fn ExecInitHash(_node: &Hash, _estate: &mut EState<'_>, _eflags: i32) -> *mut HashState {
     unimplemented!()
 }
 

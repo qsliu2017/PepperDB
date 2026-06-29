@@ -12,7 +12,8 @@ use crate::nodes::parsenodes::ObjectType;
 use crate::nodes::primnodes::RangeVar;
 use crate::postgres_ext::Oid;
 use crate::utils::array::ArrayType;
-use crate::utils::relcache::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // C: typedef int LOCKMODE (storage/lockdefs.h).
 pub type LOCKMODE = i32;
@@ -45,12 +46,12 @@ pub const INVALID_OBJECT_ADDRESS: ObjectAddress = ObjectAddress {
     objectSubId: 0,
 };
 
-// C out-param `Relation *relp` -> returned alongside the address; `missing_ok`
+// C out-param `Arc<RelationData> *relp` -> returned alongside the address; `missing_ok`
 // with an InvalidOid result is the Option semantics callers want at the surface.
 pub fn get_object_address(
     objtype: ObjectType,
     object: &Node,
-    relp: &mut Relation,
+    relp: &mut Arc<RelationData>,
     lockmode: LOCKMODE,
     missing_ok: bool,
 ) -> ObjectAddress {
@@ -61,7 +62,7 @@ pub fn get_object_address_rv(
     objtype: ObjectType,
     rel: &RangeVar,
     object: Vec<Node>,
-    relp: &mut Relation,
+    relp: &mut Arc<RelationData>,
     lockmode: LOCKMODE,
     missing_ok: bool,
 ) -> ObjectAddress {
@@ -73,7 +74,7 @@ pub fn check_object_ownership(
     objtype: ObjectType,
     address: ObjectAddress,
     object: &Node,
-    relation: Relation,
+    relation: &RelationData,
 ) {
     unimplemented!()
 }
@@ -132,7 +133,7 @@ pub fn get_object_namensp_unique(class_id: Oid) -> bool {
 
 /// Invalid HeapTuple sentinel -> None when not found.
 pub fn get_catalog_object_by_oid(
-    catalog: Relation,
+    catalog: &RelationData,
     oidcol: AttrNumber,
     object_id: Oid,
 ) -> Option<HeapTuple> {
@@ -140,7 +141,7 @@ pub fn get_catalog_object_by_oid(
 }
 
 pub fn get_catalog_object_by_oid_extended(
-    catalog: Relation,
+    catalog: &RelationData,
     oidcol: AttrNumber,
     object_id: Oid,
     locktup: bool,

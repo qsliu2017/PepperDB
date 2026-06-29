@@ -4,7 +4,6 @@ use crate::common::relpath::ForkNumber;
 use crate::storage::block::BlockNumber;
 use crate::storage::relfilelocator::RelFileLocator;
 use crate::storage::smgr::SmgrRelation;
-use crate::utils::relcache::Relation;
 
 // GUC variable (process-global today; becomes session/config state in Phase 2).
 pub static mut wal_skip_threshold: i32 = 0;
@@ -17,7 +16,7 @@ pub fn RelationCreateStorage(
     unimplemented!()
 }
 
-pub fn RelationDropStorage(rel: Relation) {
+pub fn RelationDropStorage(rel: &crate::utils::rel::RelationData) {
     unimplemented!()
 }
 
@@ -25,11 +24,11 @@ pub fn RelationPreserveStorage(rlocator: RelFileLocator, at_commit: bool) {
     unimplemented!()
 }
 
-pub fn RelationPreTruncate(rel: Relation) {
+pub fn RelationPreTruncate(rel: &crate::utils::rel::RelationData) {
     unimplemented!()
 }
 
-pub fn RelationTruncate(rel: Relation, nblocks: BlockNumber) {
+pub fn RelationTruncate(rel: &crate::utils::rel::RelationData, nblocks: BlockNumber) {
     unimplemented!()
 }
 

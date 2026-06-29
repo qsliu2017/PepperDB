@@ -6,7 +6,7 @@ use crate::nodes::plannodes::LockRows;
 // TODO(ptr)
 pub fn ExecInitLockRows(
     _node: &LockRows,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut LockRowsState {
     unimplemented!()

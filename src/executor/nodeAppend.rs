@@ -5,7 +5,7 @@ use crate::nodes::execnodes::{AppendState, AsyncRequest, EState};
 use crate::nodes::plannodes::Append;
 
 // TODO(ptr)
-pub fn ExecInitAppend(_node: &Append, _estate: &mut EState, _eflags: i32) -> *mut AppendState {
+pub fn ExecInitAppend(_node: &Append, _estate: &mut EState<'_>, _eflags: i32) -> *mut AppendState {
     unimplemented!()
 }
 

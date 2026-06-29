@@ -11,14 +11,6 @@
 //! Async coloring (rules.md s5): `btbuild` scans the heap (buffer pool) and writes
 //! index pages (buffer pool), so it is `async`.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: holds per-backend raw Relation handles task-confined for the operation; futures never migrate the pointee between tasks"
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "btree AM entry points take raw Relation pointers per the C API; faithful to C"
-)]
 
 use std::sync::Arc;
 
@@ -27,7 +19,7 @@ use crate::access::sdir::ScanDirection;
 use crate::access::tableam::ScanOptions;
 use crate::backend::access::common::heaptuple::heap_getattr;
 use crate::backend::access::heap::heapam::{
-    heap_beginscan, heap_endscan, heap_getnext, SendPtr,
+    heap_beginscan, heap_endscan, heap_getnext,
 };
 use crate::backend::access::nbtree::nbtpage::{bt_allocbuf, bt_initmetapage, bt_relbuf, bt_write_page};
 use crate::backend::access::nbtree::nbtsort::{bt_load, BuildTuple};
@@ -38,7 +30,6 @@ use crate::shared_state::SharedState;
 use crate::storage::bufpage::Page;
 use crate::storage::itemptr::ItemPointerData;
 use crate::utils::rel::RelationData;
-use crate::utils::relcache::Relation;
 
 /// `btbuild`: build a btree index over `heap` for `index`. Scans the heap with the
 /// active snapshot, extracts each live tuple's index key columns + heap TID, sorts
@@ -49,8 +40,8 @@ use crate::utils::relcache::Relation;
 /// predicates are later scope. Returns the heap/index tuple counts.
 pub async fn btbuild(
     shared: &Arc<SharedState>,
-    heap: Relation,
-    index: Relation,
+    heap: &RelationData,
+    index: &RelationData,
     index_info: &IndexInfo,
 ) -> IndexBuildResult {
     let keycols: Vec<i32> = index_info
@@ -62,15 +53,14 @@ pub async fn btbuild(
     // For the M2 builtin opclasses all columns are equalimage.
     let allequalimage = true;
 
-    // SAFETY: live heap relation with a descriptor.
-    let heap_td = unsafe { (*heap).rd_att.clone() }
+    let heap_td = heap.rd_att.clone()
         .unwrap_or_else(|| unreachable!("heap relation has a descriptor"));
 
     let snapshot = GetActiveSnapshot();
     let scan_snapshot = snapshot
         .clone()
         .unwrap_or_else(|| unreachable!("btbuild requires an active snapshot"));
-    let mut hscan = heap_beginscan(SendPtr(heap), scan_snapshot, 0, ScanOptions::ALLOW_PAGEMODE);
+    let mut hscan = heap_beginscan(heap, &scan_snapshot, 0, ScanOptions::ALLOW_PAGEMODE);
 
     let mut tuples: Vec<BuildTuple> = Vec::new();
     let mut heap_count: f64 = 0.0;
@@ -103,26 +93,24 @@ pub async fn btbuild(
 /// Sort the build tuples into index order using each key column's btree comparator
 /// (resolved from the index's opclass support procs). Multi-column lexicographic;
 /// NULLs ordered per the column's NULLS_FIRST option; DESC inverts.
-fn sort_build_tuples(index: Relation, tuples: &mut [BuildTuple]) {
+fn sort_build_tuples(index: &RelationData, tuples: &mut [BuildTuple]) {
     use crate::access::nbtree::{BTORDER_PROC, SK_BT_DESC, SK_BT_INDOPTION_SHIFT, SK_BT_NULLS_FIRST};
     use crate::backend::access::index::indexam::index_getprocinfo;
     use crate::fmgr::FunctionCall2Coll;
 
     struct Col {
-        proc: *mut crate::fmgr::FmgrInfo,
+        proc: std::cell::RefCell<crate::fmgr::FmgrInfo>,
         flags: i32,
         collation: crate::postgres_ext::Oid,
     }
 
-    // SAFETY: live index relation with access info initialized.
-    let r: &RelationData = unsafe { &*index };
+    let r: &RelationData = index;
     let nkeys = r.index_number_of_key_attributes() as usize;
     let cols: Vec<Col> = (0..nkeys)
         .map(|i| {
-            let proc = index_getprocinfo(index, (i + 1) as i32, BTORDER_PROC);
-            // SAFETY: rd_indoption / rd_indcollation sized >= nkeys.
-            let indoption = unsafe { *r.rd_indoption.add(i) };
-            let collation = unsafe { *r.rd_indcollation.add(i) };
+            let proc = std::cell::RefCell::new(index_getprocinfo(index, (i + 1) as i32, BTORDER_PROC));
+            let indoption = r.rd_indoption[i];
+            let collation = r.rd_indcollation[i];
             Col { proc, flags: i32::from(indoption) << SK_BT_INDOPTION_SHIFT, collation }
         })
         .collect();
@@ -149,10 +137,9 @@ fn sort_build_tuples(index: Relation, tuples: &mut [BuildTuple]) {
                     }
                 }
                 (false, false) => {
-                    // SAFETY: proc is a live FmgrInfo (resolved above).
                     let raw = {
-                        let f = unsafe { &mut *col.proc };
-                        let d = FunctionCall2Coll(f, col.collation, av, bv)
+                        let mut f = col.proc.borrow_mut();
+                        let d = FunctionCall2Coll(&mut f, col.collation, av, bv)
                             .unwrap_or_else(|| unreachable!("comparator returned NULL"));
                         crate::postgres::DatumGetInt32(d)
                     };
@@ -173,14 +160,13 @@ fn sort_build_tuples(index: Relation, tuples: &mut [BuildTuple]) {
 /// (descend + place + split). Returns true (M2: no deferred unique conflict).
 pub async fn btinsert(
     shared: &Arc<SharedState>,
-    index: Relation,
+    index: &RelationData,
     values: &[Datum],
     isnull: &[bool],
     heap_tid: &ItemPointerData,
 ) -> bool {
     use crate::backend::access::common::indextuple::{index_form_tuple, pfree_index_tuple};
-    // SAFETY: live index relation with a descriptor.
-    let itupdesc = unsafe { (*index).rd_att.clone() }
+    let itupdesc = index.rd_att.clone()
         .unwrap_or_else(|| unreachable!("index relation has a descriptor"));
     let itup = index_form_tuple(&itupdesc, values, isnull);
     // SAFETY: itup is a freshly formed index tuple.
@@ -197,8 +183,8 @@ pub async fn btinsert(
 
 /// `btbuildempty`: write an empty btree (a meta page with no root). Used for
 /// unlogged indexes; M2 writes it to the main fork via the buffer pool.
-pub async fn btbuildempty(shared: &Arc<SharedState>, index: Relation) {
-    let buf = bt_allocbuf(shared, SendPtr(index)).await;
+pub async fn btbuildempty(shared: &Arc<SharedState>, index: &RelationData) {
+    let buf = bt_allocbuf(shared, index).await;
     let mut metapage = Page::boxed_zeroed();
     bt_initmetapage(&mut metapage, crate::access::nbtree::P_NONE, 0, true);
     bt_write_page(shared, buf, &metapage, crate::access::xlogdefs::INVALID_XLOG_REC_PTR);

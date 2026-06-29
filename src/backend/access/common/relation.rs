@@ -20,8 +20,10 @@ use crate::postgres::ObjectIdGetDatum;
 use crate::postgres_ext::Oid;
 use crate::storage::lockdefs::LockMode;
 use crate::utils::inval::AcceptInvalidationMessages;
-use crate::utils::rel::relation_is_valid;
-use crate::utils::relcache::{Relation, RelationClose, RelationIdGetRelation};
+use std::sync::Arc;
+
+use crate::utils::rel::{relation_is_valid, RelationData};
+use crate::utils::relcache::{RelationClose, RelationIdGetRelation};
 use crate::utils::syscache::{SearchSysCacheExists1, SysCacheIdentifier};
 use crate::elog;
 use crate::utils::elog::ERROR;
@@ -32,41 +34,41 @@ const ACCESS_SHARE_LOCK: i32 = LockMode::AccessShareLock as i32;
 
 /// `relation_open`: open any relation by OID, taking `lockmode` (unless
 /// `NoLock`). Raises if the relation does not exist.
-pub async fn relation_open(relation_id: Oid, lockmode: LockMode) -> Relation {
+pub async fn relation_open(relation_id: Oid, lockmode: LockMode) -> Arc<RelationData> {
     // Get the lock before opening the relcache entry.
     if lockmode != LockMode::NoLock {
         LockRelationOid(relation_id, lockmode as i32).await;
     }
 
     // The relcache does the real work.
-    let r = RelationIdGetRelation(relation_id).unwrap_or(core::ptr::null_mut());
+    let r = RelationIdGetRelation(relation_id);
 
-    if !relation_is_valid(r) {
+    if !relation_is_valid(&r) {
         elog!(ERROR, format!("could not open relation with OID {}", relation_id.0));
     }
+    let r = r.unwrap_or_else(|| unreachable!("relation_is_valid checked above"));
 
     // If we didn't take the lock ourselves, assert the caller holds one (except
     // in bootstrap mode, which uses no locks).
     crate::assert!(
         lockmode != LockMode::NoLock
             || is_bootstrap_processing_mode()
-            || CheckRelationLockedByMe(r, ACCESS_SHARE_LOCK, true)
+            || CheckRelationLockedByMe(&r, ACCESS_SHARE_LOCK, true)
     );
 
     // Note that we've accessed a temporary relation.
-    // SAFETY: `r` is a valid relation (checked above).
-    if unsafe { (*r).uses_local_buffers() } {
+    if r.uses_local_buffers() {
         set_my_xact_flags(MyXactFlags() | XACT_FLAGS_ACCESSEDTEMPNAMESPACE as i32);
     }
 
-    pgstat_init_relation(r);
+    pgstat_init_relation(&r);
 
     r
 }
 
 /// `try_relation_open`: like [`relation_open`] but returns `None` instead of
 /// failing if the relation does not exist.
-pub async fn try_relation_open(relation_id: Oid, lockmode: LockMode) -> Option<Relation> {
+pub async fn try_relation_open(relation_id: Oid, lockmode: LockMode) -> Option<Arc<RelationData>> {
     // Get the lock first.
     if lockmode != LockMode::NoLock {
         LockRelationOid(relation_id, lockmode as i32).await;
@@ -82,28 +84,28 @@ pub async fn try_relation_open(relation_id: Oid, lockmode: LockMode) -> Option<R
     }
 
     // Safe to do a relcache load.
-    let r = RelationIdGetRelation(relation_id).unwrap_or(core::ptr::null_mut());
+    let r = RelationIdGetRelation(relation_id);
 
-    if !relation_is_valid(r) {
+    if !relation_is_valid(&r) {
         elog!(ERROR, format!("could not open relation with OID {}", relation_id.0));
     }
+    let r = r.unwrap_or_else(|| unreachable!("relation_is_valid checked above"));
 
     crate::assert!(
-        lockmode != LockMode::NoLock || CheckRelationLockedByMe(r, ACCESS_SHARE_LOCK, true)
+        lockmode != LockMode::NoLock || CheckRelationLockedByMe(&r, ACCESS_SHARE_LOCK, true)
     );
 
-    // SAFETY: `r` is a valid relation (checked above).
-    if unsafe { (*r).uses_local_buffers() } {
+    if r.uses_local_buffers() {
         set_my_xact_flags(MyXactFlags() | XACT_FLAGS_ACCESSEDTEMPNAMESPACE as i32);
     }
 
-    pgstat_init_relation(r);
+    pgstat_init_relation(&r);
 
     Some(r)
 }
 
 /// `relation_openrv`: open a relation specified by a `RangeVar`.
-pub async fn relation_openrv(relation: &RangeVar, lockmode: LockMode) -> Relation {
+pub async fn relation_openrv(relation: &RangeVar, lockmode: LockMode) -> Arc<RelationData> {
     // Check for shared-cache-inval messages before opening (GRANT/REVOKE take no
     // lock, so we must refresh ACLs ourselves). Skipped for NoLock.
     if lockmode != LockMode::NoLock {
@@ -122,7 +124,7 @@ pub async fn relation_openrv_extended(
     relation: &RangeVar,
     lockmode: LockMode,
     missing_ok: bool,
-) -> Option<Relation> {
+) -> Option<Arc<RelationData>> {
     if lockmode != LockMode::NoLock {
         AcceptInvalidationMessages();
     }
@@ -140,21 +142,13 @@ pub async fn relation_openrv_extended(
 /// `relation_close`: close a relation, releasing `lockmode` (unless `NoLock`).
 /// Holding a lock past close is common (released at xact end), so `NoLock` is a
 /// frequent argument.
-pub fn relation_close(relation: Relation, lockmode: LockMode) {
-    let relid = rel_lock_id(relation);
+pub fn relation_close(relation: Arc<RelationData>, lockmode: LockMode) {
+    let relid = relation.rd_lockInfo.lockRelId;
 
-    // The relcache does the real work.
+    // The relcache does the real work (drops this Arc clone, decrements refcnt).
     RelationClose(relation);
 
     if lockmode != LockMode::NoLock {
         UnlockRelationId(&relid, lockmode as i32);
     }
-}
-
-/// The `lockRelId` carried inside a `Relation` (private; keeps the raw-pointer
-/// deref out of the public `relation_close` signature).
-fn rel_lock_id(relation: Relation) -> crate::utils::rel::LockRelId {
-    // SAFETY: a Relation passed here is a live, open relation (PG asserts
-    // RelationIsValid; rules: trust internal code).
-    unsafe { (*relation).rd_lockInfo.lockRelId }
 }

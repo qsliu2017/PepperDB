@@ -58,7 +58,7 @@ pub fn add_range_table_entry_for_relation(
         .as_ref()
         .unwrap_or_else(|| unreachable!("open relation has a tuple descriptor"));
 
-    let relkind = unsafe { (*rel.rd_rel).relkind };
+    let relkind = rel.form().relkind;
 
     // Build the effective column names from the tupdesc (no user alias for M2).
     let mut eref = makeAlias(&refname, Vec::new());

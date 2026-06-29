@@ -5,12 +5,12 @@ use crate::nodes::execnodes::{EState, ModifyTableState, ResultRelInfo};
 use crate::nodes::nodes::CmdType;
 use crate::nodes::plannodes::ModifyTable;
 
-pub fn ExecInitGenerated(_result_rel_info: &mut ResultRelInfo, _estate: &mut EState, _cmdtype: CmdType) {
+pub fn ExecInitGenerated(_result_rel_info: &mut ResultRelInfo, _estate: &mut EState<'_>, _cmdtype: CmdType) {
     unimplemented!()
 }
 pub fn ExecComputeStoredGenerated(
     _result_rel_info: &mut ResultRelInfo,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _slot: &mut TupleTableSlot,
     _cmdtype: CmdType,
 ) {

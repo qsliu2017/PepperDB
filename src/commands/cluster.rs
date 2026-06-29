@@ -12,7 +12,7 @@ use crate::nodes::parsenodes::ClusterStmt;
 use crate::parser::parse_node::ParseState;
 use crate::postgres_ext::Oid;
 use crate::storage::lock::LOCKMODE;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 bitflags! {
     /// flag bits for ClusterParams->options
@@ -33,15 +33,15 @@ pub fn cluster(_pstate: &mut ParseState, _stmt: &ClusterStmt, _is_top_level: boo
     unimplemented!()
 }
 
-pub fn cluster_rel(_old_heap: Relation, _index_oid: Oid, _params: &ClusterParams) {
+pub fn cluster_rel(_old_heap: &RelationData, _index_oid: Oid, _params: &ClusterParams) {
     unimplemented!()
 }
 
-pub fn check_index_is_clusterable(_old_heap: Relation, _index_oid: Oid, _lockmode: LOCKMODE) {
+pub fn check_index_is_clusterable(_old_heap: &RelationData, _index_oid: Oid, _lockmode: LOCKMODE) {
     unimplemented!()
 }
 
-pub fn mark_index_clustered(_rel: Relation, _index_oid: Oid, _is_internal: bool) {
+pub fn mark_index_clustered(_rel: &RelationData, _index_oid: Oid, _is_internal: bool) {
     unimplemented!()
 }
 

@@ -13,14 +13,6 @@
 //! [`catcache`]: crate::backend::utils::cache::catcache
 
 #![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the catalog caches are PER-BACKEND task-confined state (raw HeapTuple/FmgrInfo pointers); their populate futures never migrate threads mid-await. await_holding_lock/refcell are clean (enforced)."
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "catalog-cache routines take raw Relation/HeapTuple pointers per the C API; the deref is faithful to C (callers pass live handles)"
-)]
-#![allow(
     clippy::cast_ptr_alignment,
     reason = "faithful GETSTRUCT reinterpretation of a heap tuple to a Form_* struct (MAXALIGN'd body covers the Form alignment)"
 )]
@@ -232,9 +224,9 @@ pub async fn get_sys_cache_oid_populate(
 fn read_oid_attr(cache_id: SysCacheIdentifier, tuple: HeapTuple, oidcol: AttrNumber) -> Option<Oid> {
     let reloid = cacheinfo()[cache_id as usize].reloid;
     let rel = crate::utils::relcache::RelationIdGetRelation(reloid)?;
-    // SAFETY: cached relation + held tuple. RelationIdGetRelation bumps the
-    // refcount; balance it with RelationClose after cloning the (Arc) descriptor.
-    let td = unsafe { (*rel).rd_att.clone() };
+    // RelationIdGetRelation bumps the refcount; balance it with RelationClose
+    // after cloning the (Arc) descriptor.
+    let td = rel.rd_att.clone();
     crate::utils::relcache::RelationClose(rel);
     let td = td?;
     let tref: &HeapTupleData = unsafe { &*tuple };

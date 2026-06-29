@@ -11,8 +11,8 @@ use crate::c::INVERT_COMPARE_RESULT;
 use crate::postgres::{DatumGetInt32, DatumGetInt64, Datum};
 use crate::postgres_ext::Oid;
 use crate::utils::palloc::MemoryContext;
-use crate::utils::relcache::Relation;
 use core::cmp::Ordering;
+use crate::utils::rel::RelationData;
 
 /// C: `typedef struct SortSupportData *SortSupport;` non-null handle.
 pub type SortSupport<'a> = &'a mut SortSupportData;
@@ -242,9 +242,9 @@ pub fn PrepareSortSupportComparisonShim(_cmp_func: Oid, _ssup: SortSupport) {
 pub fn PrepareSortSupportFromOrderingOp(_ordering_op: Oid, _ssup: SortSupport) {
     unimplemented!()
 }
-pub fn PrepareSortSupportFromIndexRel(_index_rel: Relation, _reverse: bool, _ssup: SortSupport) {
+pub fn PrepareSortSupportFromIndexRel(_index_rel: &RelationData, _reverse: bool, _ssup: SortSupport) {
     unimplemented!()
 }
-pub fn PrepareSortSupportFromGistIndexRel(_index_rel: Relation, _ssup: SortSupport) {
+pub fn PrepareSortSupportFromGistIndexRel(_index_rel: &RelationData, _ssup: SortSupport) {
     unimplemented!()
 }

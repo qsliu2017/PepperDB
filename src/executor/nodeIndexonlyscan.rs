@@ -7,7 +7,7 @@ use crate::nodes::plannodes::IndexOnlyScan;
 // TODO(ptr)
 pub fn ExecInitIndexOnlyScan(
     _node: &IndexOnlyScan,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut IndexOnlyScanState {
     unimplemented!()

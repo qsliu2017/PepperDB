@@ -4,7 +4,7 @@ use crate::nodes::execnodes::{EState, GroupState};
 use crate::nodes::plannodes::Group;
 
 // TODO(ptr)
-pub fn ExecInitGroup(_node: &Group, _estate: &mut EState, _eflags: i32) -> *mut GroupState {
+pub fn ExecInitGroup(_node: &Group, _estate: &mut EState<'_>, _eflags: i32) -> *mut GroupState {
     unimplemented!()
 }
 

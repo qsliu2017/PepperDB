@@ -23,14 +23,6 @@
 //! supplies one per key column from the opclass (the `bt*cmp` functions in
 //! nbtcompare.rs / the adt files) via fmgr.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the scan/descent holds per-backend raw Relation handles task-confined for the operation; the futures never migrate the pointee between tasks. await_holding_lock is clean (enforced)."
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "btree search takes raw Relation/IndexTuple pointers per the C API; faithful to C"
-)]
 
 use std::sync::Arc;
 
@@ -41,7 +33,6 @@ use crate::access::nbtree::{
 use crate::access::sdir::{scan_direction_is_forward, ScanDirection};
 use crate::access::tupdesc::TupleDescData;
 use crate::backend::access::common::indextuple::index_getattr;
-use crate::backend::access::heap::heapam::SendPtr;
 use crate::backend::access::nbtree::nbtpage::{
     bt_getroot_read, bt_metaversion, bt_read_buffer, bt_read_page_copy, bt_relbuf,
 };
@@ -56,7 +47,7 @@ use crate::storage::bufpage::Page;
 use crate::storage::itemid::LP_NORMAL;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// Reinterpret a page item (the bytes a line pointer covers) as an index tuple.
 ///
@@ -218,7 +209,7 @@ pub fn bt_leaf_scan(firstkey: OffsetNumber, maxoff: OffsetNumber) -> Vec<BtLeafM
 /// `_bt_binsrch` internal-page variant: the last pivot whose key is <= the search
 /// key). Returns an offset in `[P_FIRSTDATAKEY, maxoff]`.
 fn bt_binsrch_internal(
-    rel: Relation,
+    rel: &RelationData,
     key: &mut BTScanInsertData,
     page: &Page,
 ) -> OffsetNumber {
@@ -262,7 +253,7 @@ fn bt_binsrch_internal(
 /// Returns the (block, owned page) to continue from.
 async fn bt_moveright(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
     key: &mut BTScanInsertData,
     mut blkno: BlockNumber,
     mut page: Box<Page>,
@@ -281,7 +272,7 @@ async fn bt_moveright(
             return (blkno, page);
         }
         // Step right.
-        let buf = bt_read_buffer(shared, SendPtr(rel), nextblk).await;
+        let buf = bt_read_buffer(shared, rel, nextblk).await;
         page = bt_read_page_copy(shared, buf);
         bt_relbuf(shared, buf);
         blkno = nextblk;
@@ -293,10 +284,10 @@ async fn bt_moveright(
 /// the index is empty.
 async fn bt_search_read(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
     key: &mut BTScanInsertData,
 ) -> Option<(BlockNumber, Box<Page>)> {
-    let (mut blkno, mut page) = bt_getroot_read(shared, SendPtr(rel)).await?;
+    let (mut blkno, mut page) = bt_getroot_read(shared, rel).await?;
 
     loop {
         // Move right if the page split under a stale downlink.
@@ -318,7 +309,7 @@ async fn bt_search_read(
         // SAFETY: itup is a live pivot tuple.
         let child = BTreeTupleGetDownLink(unsafe { &*itup });
 
-        let buf = bt_read_buffer(shared, SendPtr(rel), child).await;
+        let buf = bt_read_buffer(shared, rel, child).await;
         page = bt_read_page_copy(shared, buf);
         bt_relbuf(shared, buf);
         blkno = child;
@@ -329,9 +320,9 @@ async fn bt_search_read(
 /// first downlink, returning the leftmost leaf page + its block. `None` if empty.
 async fn bt_get_endpoint_leftmost(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
 ) -> Option<(BlockNumber, Box<Page>)> {
-    let (mut blkno, mut page) = bt_getroot_read(shared, SendPtr(rel)).await?;
+    let (mut blkno, mut page) = bt_getroot_read(shared, rel).await?;
     loop {
         // SAFETY: btree page opaque.
         let opaque = unsafe { &*BTPageGetOpaque(&page) };
@@ -344,7 +335,7 @@ async fn bt_get_endpoint_leftmost(
         let itup = item_as_index_tuple(item);
         // SAFETY: itup is a live pivot tuple.
         let child = BTreeTupleGetDownLink(unsafe { &*itup });
-        let buf = bt_read_buffer(shared, SendPtr(rel), child).await;
+        let buf = bt_read_buffer(shared, rel, child).await;
         page = bt_read_page_copy(shared, buf);
         bt_relbuf(shared, buf);
         blkno = child;
@@ -356,7 +347,7 @@ async fn bt_get_endpoint_leftmost(
 /// in-page placement offset.
 #[must_use]
 pub fn bt_binsrch_one(
-    rel: Relation,
+    rel: &RelationData,
     key: &mut BTScanInsertData,
     page: &Page,
     firstkey: OffsetNumber,
@@ -372,11 +363,11 @@ pub fn bt_binsrch_one(
 /// index has a root (the caller's `ensure_root` created one).
 pub async fn bt_search_internal_path(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
     key: &mut BTScanInsertData,
 ) -> (BlockNumber, Box<Page>, Vec<(BlockNumber, OffsetNumber)>) {
     let mut stack: Vec<(BlockNumber, OffsetNumber)> = Vec::new();
-    let (mut blkno, mut page) = bt_getroot_read(shared, SendPtr(rel))
+    let (mut blkno, mut page) = bt_getroot_read(shared, rel)
         .await
         .unwrap_or_else(|| unreachable!("insert path requires an existing root"));
 
@@ -399,7 +390,7 @@ pub async fn bt_search_internal_path(
         // SAFETY: itup is a live pivot tuple.
         let child = BTreeTupleGetDownLink(unsafe { &*itup });
 
-        let buf = bt_read_buffer(shared, SendPtr(rel), child).await;
+        let buf = bt_read_buffer(shared, rel, child).await;
         page = bt_read_page_copy(shared, buf);
         bt_relbuf(shared, buf);
         blkno = child;
@@ -409,8 +400,11 @@ pub async fn bt_search_internal_path(
 /// The btree index-scan opaque state (`BTScanOpaqueData`, M2 owned form). Holds
 /// the index relation, the insertion scankey built from the search arguments, the
 /// current leaf page COPY + scan offset, and the next-leaf right-link block.
-pub struct BtScan {
-    pub rel: Relation,
+pub struct BtScan<'irel> {
+    /// The INDEX relation this scan walks. Borrow (relation-ownership-plan step 2):
+    /// the owner (the `IndexScanState`'s caller frame) holds the `Arc` above; the
+    /// scan borrows it for its bounded, properly-nested lifetime.
+    pub rel: &'irel RelationData,
     /// Search-argument equality keys `(attno, datum)` for the leading columns.
     search_keys: Vec<(i32, Datum)>,
     /// The insertion scankey (comparators + args), built on first `bt_first`.
@@ -428,16 +422,9 @@ pub struct BtScan {
     done: bool,
 }
 
-// SAFETY: the raw Relation is task-confined for the scan's lifetime.
-#[allow(
-    clippy::non_send_fields_in_send_ty,
-    reason = "deliberate: the raw Relation pointer is task-confined for the scan's lifetime"
-)]
-unsafe impl Send for BtScan {}
-
-impl BtScan {
+impl<'irel> BtScan<'irel> {
     #[must_use]
-    pub fn new(rel: Relation) -> Self {
+    pub fn new(rel: &'irel RelationData) -> Self {
         Self {
             rel,
             search_keys: Vec::new(),
@@ -462,7 +449,7 @@ impl BtScan {
 }
 
 /// Read the current item's heap TID from the scan's leaf page at `cur_off`.
-fn scan_current_tid(scan: &BtScan) -> Option<ItemPointerData> {
+fn scan_current_tid(scan: &BtScan<'_>) -> Option<ItemPointerData> {
     let page = scan.cur_page.as_ref()?;
     if scan.cur_off < P_FIRSTDATAKEY_for(page) || scan.cur_off > scan.max_off {
         return None;
@@ -495,7 +482,7 @@ fn P_FIRSTDATAKEY_for(page: &Page) -> OffsetNumber {
 /// descends to the leaf, and binsearches the start offset.
 pub async fn bt_first(
     shared: &Arc<SharedState>,
-    scan: &mut BtScan,
+    scan: &mut BtScan<'_>,
     dir: ScanDirection,
 ) -> Option<ItemPointerData> {
     crate::assert!(scan_direction_is_forward(dir), "M2 btree scan supports forward only");
@@ -504,7 +491,7 @@ pub async fn bt_first(
     // Build the insertion scankey (comparators from the opclass), set heapkeyspace
     // from the meta page, and install the search-argument datums.
     let mut key = bt_mkscankey(scan.rel, None);
-    let (heapkeyspace, allequalimage) = bt_metaversion(shared, SendPtr(scan.rel)).await;
+    let (heapkeyspace, allequalimage) = bt_metaversion(shared, scan.rel).await;
     key.heapkeyspace = heapkeyspace;
     key.allequalimage = allequalimage;
     let args: Vec<(Datum, bool)> = scan.search_keys.iter().map(|&(_a, d)| (d, false)).collect();
@@ -546,7 +533,7 @@ pub async fn bt_first(
 /// `_bt_binsrch` (leaf, relation form): first offset whose key is >= the search
 /// key. Mirrors the page-level [`bt_binsrch_leaf`] but uses [`bt_compare`].
 fn bt_binsrch_leaf_rel(
-    rel: Relation,
+    rel: &RelationData,
     key: &mut BTScanInsertData,
     page: &Page,
     firstkey: OffsetNumber,
@@ -573,7 +560,7 @@ fn bt_binsrch_leaf_rel(
 /// the equality range is exhausted.
 async fn advance_to_match(
     shared: &Arc<SharedState>,
-    scan: &mut BtScan,
+    scan: &mut BtScan<'_>,
 ) -> Option<ItemPointerData> {
     loop {
         if scan.done {
@@ -628,7 +615,7 @@ async fn advance_to_match(
 
 /// `_bt_steppage` (forward): advance to the right-sibling leaf, loading its page
 /// copy. Returns false at the end of the rightmost leaf.
-async fn bt_steppage(shared: &Arc<SharedState>, scan: &mut BtScan) -> bool {
+async fn bt_steppage(shared: &Arc<SharedState>, scan: &mut BtScan<'_>) -> bool {
     let next = {
         let Some(page) = scan.cur_page.as_ref() else { return false };
         // SAFETY: btree leaf page opaque.
@@ -643,7 +630,7 @@ async fn bt_steppage(shared: &Arc<SharedState>, scan: &mut BtScan) -> bool {
         scan.cur_page = None;
         return false;
     }
-    let buf = bt_read_buffer(shared, SendPtr(scan.rel), next).await;
+    let buf = bt_read_buffer(shared, scan.rel, next).await;
     let page = bt_read_page_copy(shared, buf);
     bt_relbuf(shared, buf);
     let firstdatakey = p_firstdatakey_page(&page);
@@ -657,7 +644,7 @@ async fn bt_steppage(shared: &Arc<SharedState>, scan: &mut BtScan) -> bool {
 /// `_bt_next`: return the next matching heap TID, or `None` at end of scan.
 pub async fn bt_next(
     shared: &Arc<SharedState>,
-    scan: &mut BtScan,
+    scan: &mut BtScan<'_>,
     dir: ScanDirection,
 ) -> Option<ItemPointerData> {
     crate::assert!(scan_direction_is_forward(dir), "M2 btree scan supports forward only");

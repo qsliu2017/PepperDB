@@ -21,9 +21,8 @@
 
 use std::sync::Arc;
 
-use crate::access::htup::HeapTuple;
+use crate::access::htup::HeapTupleData;
 use crate::access::htup_details::{MaxHeapTupleSize, MaxHeapTuplesPerPage};
-use crate::backend::access::heap::heapam::{SendPtr, SendRelation};
 use crate::backend::storage::buffer::bufmgr::read_buffer_common;
 use crate::backend::storage::freespace::freespace::{
     get_page_with_free_space, record_and_get_page_with_free_space,
@@ -39,7 +38,6 @@ use crate::storage::off::{OffsetNumber, INVALID_OFFSET_NUMBER};
 use crate::storage::smgr::SmgrRelation;
 use crate::utils::elog::ERROR;
 use crate::utils::rel::{RelationData, HEAP_DEFAULT_FILLFACTOR};
-use crate::utils::relcache::Relation;
 
 /// `BLCKSZ` as a `usize` page size for `Page::init`.
 const PAGE_SIZE: usize = crate::pg_config::BLCKSZ as usize;
@@ -57,13 +55,12 @@ const SIZEOF_ITEM_ID_DATA: usize = core::mem::size_of::<ItemIdData>();
 ///
 /// SAFETY: `tuple` is a live in-memory heap tuple; `page` is the sole writer's
 /// view of the pinned, exclusively-locked buffer.
-pub fn relation_put_heap_tuple(page: &mut Page, block: BlockNumber, tuple: &mut HeapTuple) {
-    // `tuple` is `&mut *mut HeapTupleData`; deref once to the HeapTupleData.
-    // SAFETY: caller guarantees `(*tuple).t_data` points at a valid header+data
-    // block of `t_len` bytes (built by heap_form_tuple / heap_prepare_insert).
+pub fn relation_put_heap_tuple(page: &mut Page, block: BlockNumber, tuple: &mut HeapTupleData) {
+    // SAFETY: caller guarantees `tuple.t_data()` points at a valid header+data
+    // body of `t_len` bytes (built by heap_form_tuple / heap_prepare_insert).
     let (item_bytes, t_len) = unsafe {
-        let td = (**tuple).t_data;
-        let len = (**tuple).t_len as usize;
+        let td = tuple.t_data();
+        let len = tuple.t_len as usize;
         (core::slice::from_raw_parts(td.cast::<u8>(), len), len)
     };
 
@@ -71,10 +68,7 @@ pub fn relation_put_heap_tuple(page: &mut Page, block: BlockNumber, tuple: &mut 
     crate::assert!(offnum != INVALID_OFFSET_NUMBER, "failed to add tuple to page");
 
     // Update the in-memory tuple's self-pointer to where it was stored.
-    // SAFETY: live in-memory tuple (see above).
-    unsafe {
-        (**tuple).t_self.set(block, offnum);
-    }
+    tuple.t_self.set(block, offnum);
 
     // Patch the on-page copy's t_ctid to point at itself (non-speculative). The
     // stored header begins at the item's lp_off; the page is 8-aligned and the
@@ -112,7 +106,7 @@ pub fn relation_put_heap_tuple(page: &mut Page, block: BlockNumber, tuple: &mut 
 )]
 pub async fn relation_get_buffer_for_tuple(
     shared: &Arc<SharedState>,
-    relation: SendRelation,
+    relation: &RelationData,
     len: usize,
     options: i32,
 ) -> Buffer {
@@ -120,18 +114,11 @@ pub async fn relation_get_buffer_for_tuple(
 
     let use_fsm = (options & HEAP_INSERT_SKIP_FSM) == 0;
 
-    // Pull the Send scalars + the (Send) smgr handle out under a short borrow, so
-    // no `&mut RelationData` (it is `!Send`) is held across an `.await`.
-    let (relpersistence, save_free_space, smgr_ptr) = {
-        // SAFETY: `relation` is a live, open relation (caller holds it open).
-        let rel: &mut RelationData = unsafe { &mut *relation.get() };
-        let relpersistence = unsafe { (*rel.rd_rel).relpersistence };
-        let save_free_space = rel.target_page_free_space(HEAP_DEFAULT_FILLFACTOR) as usize;
-        (relpersistence, save_free_space, SendPtr(rel.smgr()))
-    };
-    // SAFETY: relcache-owned smgr handle, valid while the relation is open; Send
-    // (no raw pointers inside SmgrRelation), so the borrow may cross `.await`.
-    let smgr: &mut SmgrRelation = unsafe { &mut *smgr_ptr.get() };
+    let relpersistence = relation.form().relpersistence;
+    let save_free_space = relation.target_page_free_space(HEAP_DEFAULT_FILLFACTOR) as usize;
+    let smgr_ptr = relation.smgr();
+    // SAFETY: relcache-owned smgr handle, valid while the relation is open.
+    let smgr: &mut SmgrRelation = unsafe { &mut *smgr_ptr };
 
     let len = crate::c::MAXALIGN(len);
 
@@ -155,7 +142,7 @@ pub async fn relation_get_buffer_for_tuple(
 
     // Try the cached target page first, then the FSM.
     // SAFETY: short borrow, no await held.
-    let mut target_block = unsafe { (*relation.get()).target_block() };
+    let mut target_block = relation.target_block();
 
     if target_block == INVALID_BLOCK_NUMBER && use_fsm {
         target_block = get_page_with_free_space(shared, smgr, relpersistence, target_free_space)
@@ -202,7 +189,7 @@ pub async fn relation_get_buffer_for_tuple(
         if target_free_space <= page_free_space {
             // Use this page as the future insert target, too.
             // SAFETY: short borrow, no await held.
-            unsafe { (*relation.get()).set_target_block(target_block) };
+            relation.set_target_block(target_block);
             return buffer;
         }
 
@@ -256,7 +243,7 @@ pub async fn relation_get_buffer_for_tuple(
     }
 
     // SAFETY: short borrow, no await held.
-    unsafe { (*relation.get()).set_target_block(new_block) };
+    relation.set_target_block(new_block);
     buffer
 }
 

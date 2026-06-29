@@ -174,7 +174,7 @@ pub fn make_tuple_table_slot(
         tupleDescriptor: tuple_desc,
         values: vec![Datum(0); n],
         isnull: vec![false; n],
-        mcxt: core::ptr::null_mut(),
+        mcxt: (),
         tid: invalid_item_pointer(),
         tableOid: InvalidOid,
     });
@@ -246,7 +246,7 @@ pub fn exec_store_all_null_tuple(slot: &mut TupleTableSlot) {
 // ---------------------------------------------------------------------------
 
 /// PG `ExecTypeFromTL`: build a TupleDesc from a tlist, keeping junk columns.
-/// Returns a shared `Arc<TupleDescData>` handle; co-owners (EState/QueryDesc/
+/// Returns a shared `Arc<TupleDescData>` handle; co-owners (EState<'_>/QueryDesc/
 /// PlanState/slot/Portal/dest) each hold an `Arc` clone, and the descriptor is
 /// freed when the last drops (no leak; the former `Box::into_raw` is gone).
 pub fn exec_type_from_tl(target_list: &[Node]) -> TupleDesc {

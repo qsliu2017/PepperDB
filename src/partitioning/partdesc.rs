@@ -5,7 +5,7 @@
 use crate::partitioning::partdefs::{PartitionBoundInfo, PartitionDesc, PartitionDirectory};
 use crate::postgres_ext::Oid;
 use crate::utils::palloc::MemoryContext;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// Information about partitions of a partitioned table.
 ///
@@ -32,7 +32,7 @@ pub struct PartitionDescData {
     pub last_found_count: i32,
 }
 
-pub fn relation_get_partition_desc(_rel: Relation, _omit_detached: bool) -> PartitionDesc {
+pub fn relation_get_partition_desc(_rel: &RelationData, _omit_detached: bool) -> PartitionDesc {
     unimplemented!()
 }
 
@@ -43,7 +43,7 @@ pub fn create_partition_directory(
     unimplemented!()
 }
 
-pub fn partition_directory_lookup(_pdir: PartitionDirectory, _rel: Relation) -> PartitionDesc {
+pub fn partition_directory_lookup(_pdir: PartitionDirectory, _rel: &RelationData) -> PartitionDesc {
     unimplemented!()
 }
 

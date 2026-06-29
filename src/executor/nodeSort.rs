@@ -4,7 +4,7 @@ use crate::access::parallel::{ParallelContext, ParallelWorkerContext};
 use crate::nodes::execnodes::{EState, SortState};
 use crate::nodes::plannodes::Sort;
 
-pub fn ExecInitSort(_node: &Sort, _estate: &mut EState, _eflags: i32) -> *mut SortState {
+pub fn ExecInitSort(_node: &Sort, _estate: &mut EState<'_>, _eflags: i32) -> *mut SortState {
     unimplemented!() // TODO(ptr)
 }
 pub fn ExecEndSort(_node: &mut SortState) {

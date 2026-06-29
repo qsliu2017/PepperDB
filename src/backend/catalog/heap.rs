@@ -1,4 +1,4 @@
-//! Relation creation: the catalog orchestrator. Translated from the M2-reachable
+//! Arc<RelationData> creation: the catalog orchestrator. Translated from the M2-reachable
 //! parts of `src/backend/catalog/heap.c`.
 //!
 //! `heap_create_with_catalog` is the engine behind `CREATE TABLE`: assign an OID,
@@ -15,14 +15,6 @@
 //! needs none), no defaults/constraints, no array type, no partitioning. Those
 //! paths are staged stubs (rules.md s4).
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: holds per-backend raw Relation/HeapTuple handles task-confined for the operation; same contract as relcache/genam"
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "catalog routines take raw Relation/HeapTuple pointers per the C API; faithful to C"
-)]
 #![allow(
     clippy::too_many_arguments,
     reason = "heap_create/heap_create_with_catalog mirror the C signatures 1:1 (port-inherent)"
@@ -56,7 +48,6 @@ use crate::shared_state::SharedState;
 use crate::storage::relfilelocator::RelFileLocator;
 use crate::storage::smgr::SmgrRelation;
 use crate::utils::rel::{LockInfoData, LockRelId, RelationData};
-use crate::utils::relcache::Relation;
 
 const HEAP_TABLE_AM_OID: Oid = Oid(2);
 const RECORDOID: Oid = Oid(2249);
@@ -86,7 +77,7 @@ fn build_local_relation(
     relkind: i8,
     relpersistence: i8,
     shared_relation: bool,
-) -> Relation {
+) -> Arc<RelationData> {
     let dbid = if shared_relation {
         InvalidOid
     } else {
@@ -125,36 +116,25 @@ fn build_local_relation(
     form.relfrozenxid = crate::access::transam::INVALID_TRANSACTION_ID;
     form.relminmxid = crate::access::transam::INVALID_TRANSACTION_ID;
 
-    let mut rel = Box::new(RelationData::blank());
+    let mut rel = RelationData::blank();
     rel.rd_id = relid;
     rel.rd_isnailed = false;
-    rel.rd_isvalid = true;
-    rel.rd_refcnt = 1;
-    rel.rd_rel = Box::into_raw(form);
+    *rel.rd_isvalid.get_mut() = true;
+    *rel.rd_refcnt.get_mut() = 1;
+    rel.rd_rel = Some(form);
     rel.rd_att = Some(tupdesc);
     rel.rd_amhandler = accessmtd;
     rel.rd_locator = RelFileLocator { spcOid: spc, dbOid: dbid, relNumber: relfilenumber };
     rel.rd_lockInfo = LockInfoData { lockRelId: LockRelId { relId: relid, dbId: dbid } };
 
-    Box::into_raw(rel)
+    Arc::new(rel)
 }
 
-/// Free a leaked local relation (its boxed `rd_rel`, smgr handle, and the box
-/// itself). The tuple descriptor Arc drops with the box.
-fn free_local_relation(rel: Relation) {
-    if rel.is_null() {
-        return;
-    }
-    // SAFETY: `rel` was produced by build_local_relation (Box::into_raw).
-    unsafe {
-        let owned = Box::from_raw(rel);
-        if !owned.rd_rel.is_null() {
-            drop(Box::from_raw(owned.rd_rel));
-        }
-        if !owned.rd_smgr.is_null() {
-            drop(Box::from_raw(owned.rd_smgr));
-        }
-    }
+/// Drop a leaked local relation when the `Arc` is unshared (the last holder); the
+/// `RelationData` -- with its owned `rd_rel`/`Vec`/`Box<SmgrRelation>` fields --
+/// drops with the `Arc`. A still-shared entry is left for the other holders.
+fn free_local_relation(rel: Arc<RelationData>) {
+    drop(Arc::into_inner(rel));
 }
 
 /// `heap_create`: create the storage-level relation. Builds the local
@@ -174,7 +154,7 @@ pub async fn heap_create(
     relpersistence: i8,
     shared_relation: bool,
     create_storage: bool,
-) -> Relation {
+) -> Arc<RelationData> {
     debug_assert!(relid.0 != 0, "heap_create requires a valid relid");
 
     let rel = build_local_relation(
@@ -194,8 +174,7 @@ pub async fn heap_create(
     // table_relation_set_new_filelocator; for M2 the heap/index storage create is a
     // direct smgr create of the main fork at the relation's locator.
     if create_storage && c::RELKIND_HAS_STORAGE(relkind) {
-        // SAFETY: live local relation.
-        let locator = unsafe { (*rel).rd_locator };
+        let locator = rel.rd_locator;
         let mut smgr = SmgrRelation::open(locator, crate::storage::procnumber::INVALID_PROC_NUMBER);
         smgr.create(shared, ForkNumber::MAIN_FORKNUM, false).await;
     }
@@ -207,8 +186,8 @@ pub async fn heap_create(
 /// relation's `rd_rel` and insert it via `CatalogTupleInsert`.
 pub async fn insert_pg_class_tuple_pub(
     shared: &Arc<SharedState>,
-    pg_class_desc: Relation,
-    new_rel_desc: Relation,
+    pg_class_desc: &RelationData,
+    new_rel_desc: &RelationData,
     new_rel_oid: Oid,
     relacl: Option<Datum>,
     reloptions: Option<Datum>,
@@ -221,18 +200,16 @@ pub async fn insert_pg_class_tuple_pub(
 /// insert it via `CatalogTupleInsert`.
 async fn insert_pg_class_tuple(
     shared: &Arc<SharedState>,
-    pg_class_desc: Relation,
-    new_rel_desc: Relation,
+    pg_class_desc: &RelationData,
+    new_rel_desc: &RelationData,
     new_rel_oid: Oid,
     relacl: Option<Datum>,
     reloptions: Option<Datum>,
 ) {
-    // SAFETY: live pg_class relation with a descriptor.
-    let desc = unsafe { (*pg_class_desc).rd_att.clone() }
+    let desc = pg_class_desc.rd_att.clone()
         .unwrap_or_else(|| unreachable!("pg_class has a descriptor"));
     let natts = desc.natts as usize;
-    // SAFETY: live new relation's rd_rel.
-    let rd_rel: &FormData_pg_class = unsafe { &*(*new_rel_desc).rd_rel };
+    let rd_rel: &FormData_pg_class = new_rel_desc.form();
 
     let mut values = vec![Datum(0); natts];
     let mut isnull = vec![false; natts];
@@ -301,15 +278,15 @@ async fn insert_pg_class_tuple(
 /// then insert its pg_class row.
 async fn add_new_relation_tuple(
     shared: &Arc<SharedState>,
-    pg_class_desc: Relation,
-    new_rel_desc: Relation,
+    pg_class_desc: &RelationData,
+    new_rel_desc: &mut RelationData,
     new_rel_oid: Oid,
     new_type_oid: Oid,
     relowner: Oid,
     relkind: i8,
 ) {
-    // SAFETY: live new relation's rd_rel.
-    let rd_rel: &mut FormData_pg_class = unsafe { &mut *(*new_rel_desc).rd_rel };
+    let rd_rel: &mut FormData_pg_class = new_rel_desc.rd_rel.as_deref_mut()
+        .unwrap_or_else(|| unreachable!("new relation has a pg_class form"));
     rd_rel.relpages = 0;
     rd_rel.reltuples = -1.0;
     rd_rel.relallvisible = 0;
@@ -324,7 +301,7 @@ async fn add_new_relation_tuple(
 
     // The tuple descriptor's composite type id mirrors the rowtype (PG sets it
     // here on rd_att); the relcache rebuild reads it from pg_type on next open.
-    if let Some(att) = unsafe { (*new_rel_desc).rd_att.as_ref() } {
+    if let Some(att) = new_rel_desc.rd_att.as_ref() {
         // rd_att is an Arc; only the next relcache build sets tdtypeid. Recording
         // it here on the shared Arc would need make_mut; M2 reads it back from disk.
         let _ = att;
@@ -346,8 +323,7 @@ async fn add_new_attribute_tuples(
 
     let pg_attribute = relation_id_get_relation(AttributeRelationId)
         .unwrap_or_else(|| unreachable!("pg_attribute is nailed/open"));
-    // SAFETY: nailed relation has a descriptor.
-    let desc = unsafe { (*pg_attribute).rd_att.clone() }
+    let desc = pg_attribute.rd_att.clone()
         .unwrap_or_else(|| unreachable!("pg_attribute has a descriptor"));
     let natts = desc.natts as usize;
 
@@ -389,7 +365,7 @@ async fn add_new_attribute_tuples(
         isnull[(a::Anum_pg_attribute_attmissingval - 1) as usize] = true;
 
         let mut tup = heap_form_tuple(&desc, &values, &isnull);
-        catalog_tuple_insert(shared, pg_attribute, &mut tup).await;
+        catalog_tuple_insert(shared, &pg_attribute, &mut tup).await;
         heap_freetuple(tup);
     }
 
@@ -472,12 +448,12 @@ pub async fn heap_create_with_catalog(
     let relid = if relid.0 != 0 {
         relid
     } else {
-        get_new_rel_file_number(shared, reltablespace, Some(pg_class_desc), relpersistence).await
+        get_new_rel_file_number(shared, reltablespace, Some(Arc::clone(&pg_class_desc)), relpersistence).await
     };
     let relfilenumber: RelFileNumber = relid; // bootstrap/M2: filenode == oid
 
     // 1. Storage-level create.
-    let new_rel_desc = heap_create(
+    let mut new_rel_desc = heap_create(
         shared,
         relname,
         relnamespace,
@@ -509,7 +485,7 @@ pub async fn heap_create_with_catalog(
         let row_type_oid = if reltypeid.0 != 0 {
             reltypeid
         } else {
-            get_new_rel_file_number(shared, reltablespace, Some(pg_class_desc), relpersistence).await
+            get_new_rel_file_number(shared, reltablespace, Some(Arc::clone(&pg_class_desc)), relpersistence).await
         };
         let addr = add_new_relation_type(
             shared,
@@ -525,11 +501,14 @@ pub async fn heap_create_with_catalog(
         addr.objectId
     };
 
-    // 3. pg_class row.
+    // 3. pg_class row. The new relation is unshared here (just built), so mutate
+    // its rd_rel in place via Arc::get_mut.
+    let new_rel_mut = Arc::get_mut(&mut new_rel_desc)
+        .unwrap_or_else(|| unreachable!("freshly built relation is unshared"));
     add_new_relation_tuple(
         shared,
-        pg_class_desc,
-        new_rel_desc,
+        &pg_class_desc,
+        new_rel_mut,
         relid,
         new_type_oid,
         ownerid,

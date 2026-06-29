@@ -17,13 +17,13 @@ use crate::executor::tuptable::TupleTableSlot;
 use crate::postgres::Datum;
 use crate::postgres_ext::Oid;
 use crate::storage::block::BlockNumber;
-use crate::utils::rel::Relation;
 use crate::c::Index;
+use crate::utils::rel::RelationData;
 
 /// AcquireSampleRowsFunc: fills `rows`; returns count + totalrows/totaldeadrows
 /// out-params (folded into the return tuple).
 pub type AcquireSampleRowsFunc =
-    fn(relation: Relation, elevel: i32, rows: &mut [HeapTuple], targrows: i32) -> (i32, f64, f64);
+    fn(relation: &RelationData, elevel: i32, rows: &mut [HeapTuple], targrows: i32) -> (i32, f64, f64);
 
 /// FdwRoutine: the struct of callbacks a foreign-data wrapper's handler returns.
 /// Per routine-struct.md appendix B: a base trait, required scan callbacks as
@@ -101,7 +101,7 @@ pub trait FdwRoutine {
         _root: &mut PlannerInfo,
         _rtindex: Index,
         _target_rte: &mut RangeTblEntry,
-        _target_relation: Relation,
+        _target_relation: &RelationData,
     ) {
     }
 
@@ -127,7 +127,7 @@ pub trait FdwRoutine {
 
     fn exec_foreign_insert(
         &self,
-        _estate: &mut EState,
+        _estate: &mut EState<'_>,
         _rinfo: &mut ResultRelInfo,
         _slot: &mut TupleTableSlot,
         _plan_slot: &mut TupleTableSlot,
@@ -138,7 +138,7 @@ pub trait FdwRoutine {
     /// ExecForeignBatchInsert: `numSlots` in/out -> returns the written slots.
     fn exec_foreign_batch_insert(
         &self,
-        _estate: &mut EState,
+        _estate: &mut EState<'_>,
         _rinfo: &mut ResultRelInfo,
         _slots: &mut [*mut TupleTableSlot],
         _plan_slots: &mut [*mut TupleTableSlot],
@@ -153,7 +153,7 @@ pub trait FdwRoutine {
 
     fn exec_foreign_update(
         &self,
-        _estate: &mut EState,
+        _estate: &mut EState<'_>,
         _rinfo: &mut ResultRelInfo,
         _slot: &mut TupleTableSlot,
         _plan_slot: &mut TupleTableSlot,
@@ -163,7 +163,7 @@ pub trait FdwRoutine {
 
     fn exec_foreign_delete(
         &self,
-        _estate: &mut EState,
+        _estate: &mut EState<'_>,
         _rinfo: &mut ResultRelInfo,
         _slot: &mut TupleTableSlot,
         _plan_slot: &mut TupleTableSlot,
@@ -171,13 +171,13 @@ pub trait FdwRoutine {
         None
     }
 
-    fn end_foreign_modify(&self, _estate: &mut EState, _rinfo: &mut ResultRelInfo) {}
+    fn end_foreign_modify(&self, _estate: &mut EState<'_>, _rinfo: &mut ResultRelInfo) {}
 
     fn begin_foreign_insert(&self, _mtstate: &mut ModifyTableState, _rinfo: &mut ResultRelInfo) {}
 
-    fn end_foreign_insert(&self, _estate: &mut EState, _rinfo: &mut ResultRelInfo) {}
+    fn end_foreign_insert(&self, _estate: &mut EState<'_>, _rinfo: &mut ResultRelInfo) {}
 
-    fn is_foreign_rel_updatable(&self, _rel: Relation) -> i32 {
+    fn is_foreign_rel_updatable(&self, _rel: &RelationData) -> i32 {
         0
     }
 
@@ -212,7 +212,7 @@ pub trait FdwRoutine {
     /// RefetchForeignRow: `updated` out-param -> folded into the return.
     fn refetch_foreign_row(
         &self,
-        _estate: &mut EState,
+        _estate: &mut EState<'_>,
         _erm: &mut ExecRowMark,
         _rowid: Datum,
         _slot: &mut TupleTableSlot,
@@ -246,7 +246,7 @@ pub trait FdwRoutine {
     /// when the table can be analyzed, None otherwise.
     fn analyze_foreign_table(
         &self,
-        _relation: Relation,
+        _relation: &RelationData,
     ) -> Option<(AcquireSampleRowsFunc, BlockNumber)> {
         None
     }
@@ -358,7 +358,7 @@ pub fn GetFdwRoutineByRelId(_relid: Oid) -> Box<dyn FdwRoutine> {
     unimplemented!()
 }
 
-pub fn GetFdwRoutineForRelation(_relation: Relation, _makecopy: bool) -> Box<dyn FdwRoutine> {
+pub fn GetFdwRoutineForRelation(_relation: &RelationData, _makecopy: bool) -> Box<dyn FdwRoutine> {
     unimplemented!()
 }
 

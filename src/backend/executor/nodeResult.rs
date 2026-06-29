@@ -23,7 +23,7 @@ use crate::backend::executor::execUtils::{
 /// Childless + no resconstantqual on the M1 path: `rs_done = false`,
 /// `rs_checkqual = false`. Builds the result tupdesc + a virtual result slot from
 /// the targetlist, then the projection. Holds the per-node exprcontext.
-pub fn exec_init_result(node: &ResultPlan, estate: &mut EState, eflags: i32) -> Box<ResultState> {
+pub fn exec_init_result(node: &ResultPlan, estate: &mut EState<'_>, eflags: i32) -> Box<ResultState> {
     let _ = eflags;
     // outer/inner plans must be absent on the M1 const path.
     if node.plan.lefttree.is_some() || node.plan.righttree.is_some() {

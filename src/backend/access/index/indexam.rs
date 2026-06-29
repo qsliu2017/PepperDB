@@ -13,15 +13,6 @@
 //! on this path by an owned [`IndexScanState`] box; the descent never holds a
 //! content lock across an `.await` (the btree scan copies each leaf page out).
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the index scan holds per-backend raw Relation handles (task-confined for the scan's lifetime); the futures never migrate the pointee between tasks. await_holding_lock is clean (enforced)."
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "index-access routines take raw Relation/FmgrInfo pointers per the C API; the deref is faithful to C (callers pass live handles)"
-)]
-
 use std::sync::Arc;
 
 use crate::access::sdir::ScanDirection;
@@ -30,8 +21,8 @@ use crate::backend::utils::fmgr::fmgr::fmgr_info;
 use crate::fmgr::FmgrInfo;
 use crate::shared_state::SharedState;
 use crate::storage::itemptr::ItemPointerData;
-use crate::utils::relcache::Relation;
-use crate::utils::snapshot::Snapshot;
+use crate::utils::rel::RelationData;
+use crate::utils::snapshot::SnapshotData;
 
 /// `index_getprocinfo`: return the cached `FmgrInfo` for support procedure
 /// `procnum` of key column `attnum` (1-based) of index `irel`. The lookup info is
@@ -40,86 +31,76 @@ use crate::utils::snapshot::Snapshot;
 /// `rd_supportinfo[procindex]`.
 ///
 /// `amsupport` (BTNProcs for btree) is taken from the relcache array layout
-/// (sized `indnatts * BT_AMSUPPORT`). Returns a raw `&mut FmgrInfo` into the
-/// relcache-owned array (valid while the index relation is open), matching the C
-/// `FmgrInfo *` return.
+/// (sized `indnatts * BT_AMSUPPORT`). Returns an owned `FmgrInfo` resolved from
+/// `rd_support[procindex]` (the C `FmgrInfo *` aliases a relcache-cached slot;
+/// here every caller copies the result, so we resolve a fresh owned value -- the
+/// `fmgr_info` lookup is a cheap builtin-table hit).
 #[must_use]
-pub fn index_getprocinfo(irel: Relation, attnum: i32, procnum: u16) -> *mut FmgrInfo {
+pub fn index_getprocinfo(irel: &RelationData, attnum: i32, procnum: u16) -> FmgrInfo {
     use crate::access::nbtree::BTNProcs;
     let nproc = i32::from(BTNProcs); // btree amsupport
     debug_assert!(procnum > 0 && i32::from(procnum) <= nproc);
 
-    let procindex = (nproc * (attnum - 1)) + (i32::from(procnum) - 1);
+    let procindex = ((nproc * (attnum - 1)) + (i32::from(procnum) - 1)) as usize;
 
-    // SAFETY: live index relation; the support arrays were allocated by
-    // relation_init_index_access_info sized indnatts*BT_AMSUPPORT.
-    let rel = unsafe { &*irel };
-    debug_assert!(!rel.rd_supportinfo.is_null(), "index support arrays not initialized");
-    // SAFETY: procindex < indnatts*BT_AMSUPPORT (asserted by the contract).
-    let locinfo: *mut FmgrInfo = unsafe { rel.rd_supportinfo.add(procindex as usize) };
-
-    // Initialize the lookup info the first time through.
-    // SAFETY: locinfo points into the relcache support-info array.
-    if unsafe { (*locinfo).oid } == crate::postgres_ext::InvalidOid {
-        // SAFETY: rd_support parallels rd_supportinfo.
-        let proc_id = unsafe { *rel.rd_support.add(procindex as usize) };
-        if proc_id == crate::postgres_ext::InvalidOid {
-            crate::elog!(
-                crate::utils::elog::ERROR,
-                format!("missing support function {procnum} for attribute {attnum} of index")
-            );
-        }
-        // SAFETY: locinfo is a valid FmgrInfo slot.
-        fmgr_info(proc_id, unsafe { &mut *locinfo });
+    // The support arrays were allocated by relation_init_index_access_info sized
+    // indnatts*BT_AMSUPPORT.
+    debug_assert!(!irel.rd_supportinfo.is_empty(), "index support arrays not initialized");
+    let proc_id = irel.rd_support[procindex];
+    if proc_id == crate::postgres_ext::InvalidOid {
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("missing support function {procnum} for attribute {attnum} of index")
+        );
     }
-
-    locinfo
+    let mut finfo = crate::backend::utils::fmgr::fmgr::empty_flinfo();
+    fmgr_info(proc_id, &mut finfo);
+    finfo
 }
 
 /// An owned index-scan handle for the M2 async path. Wraps the per-AM btree scan
 /// state plus the heap relation and snapshot needed for `index_fetch_heap`. The C
 /// `IndexScanDescData` raw struct is replaced by this box on the async path.
-pub struct IndexScanState {
-    pub heap_rel: Relation,
-    pub index_rel: Relation,
-    pub snapshot: Snapshot,
-    /// The btree scan position (the AM's `so` opaque, owned).
-    pub bt: BtScan,
+///
+/// Borrow-based ownership (relation-ownership-plan step 2): the heap relation, the
+/// index relation, and the snapshot are BORROWS (`&'rel`/`&'irel`/`&'snap`); the
+/// owner (the caller's statement/build frame) holds the `Arc`s above and outlives
+/// the scan. The btree (`bt`) walks the INDEX relation, hence the distinct `'irel`.
+pub struct IndexScanState<'rel, 'irel, 'snap> {
+    pub heap_rel: &'rel RelationData,
+    pub index_rel: &'irel RelationData,
+    pub snapshot: &'snap SnapshotData,
+    /// The btree scan position (the AM's `so` opaque, borrowing the index rel).
+    pub bt: BtScan<'irel>,
     /// The most recent TID returned by `index_getnext_tid`.
     pub xs_heaptid: Option<ItemPointerData>,
 }
 
-// SAFETY: the raw Relation handles are task-confined for the scan's lifetime
-// (same contract as HeapScanDescData / SysScanState).
-#[allow(
-    clippy::non_send_fields_in_send_ty,
-    reason = "deliberate: raw Relation pointers are task-confined for the scan's lifetime (matches HeapScanDescData's Send impl)"
-)]
-unsafe impl Send for IndexScanState {}
-
 /// `index_beginscan`: prepare an index scan over `index_rel` (looking up tuples in
 /// `heap_rel`). The scan keys are supplied later by `index_rescan` (PG separates
-/// begin from key setup). Returns an owned [`IndexScanState`].
+/// begin from key setup). Returns an owned [`IndexScanState`] borrowing the
+/// relations/snapshot from the caller's frame.
 #[must_use]
-pub fn index_beginscan(
-    heap_rel: Relation,
-    index_rel: Relation,
-    snapshot: Snapshot,
-) -> Box<IndexScanState> {
-    Box::new(IndexScanState {
+pub fn index_beginscan<'rel, 'irel, 'snap>(
+    heap_rel: &'rel RelationData,
+    index_rel: &'irel RelationData,
+    snapshot: &'snap SnapshotData,
+) -> IndexScanState<'rel, 'irel, 'snap> {
+    let bt = BtScan::new(index_rel);
+    IndexScanState {
         heap_rel,
         index_rel,
         snapshot,
-        bt: BtScan::new(index_rel),
+        bt,
         xs_heaptid: None,
-    })
+    }
 }
 
 /// `index_rescan`: (re)start the scan with new equality scan keys. The keys are
 /// `(attno, argument)` pairs against the index's key columns (M2 supports the
 /// equality search the executor + systable path needs). An empty key set is a
 /// full forward scan.
-pub fn index_rescan(scan: &mut IndexScanState, keys: Vec<(i32, crate::postgres::Datum)>) {
+pub fn index_rescan(scan: &mut IndexScanState<'_, '_, '_>, keys: Vec<(i32, crate::postgres::Datum)>) {
     scan.bt.set_search_keys(keys);
     scan.xs_heaptid = None;
 }
@@ -128,7 +109,7 @@ pub fn index_rescan(scan: &mut IndexScanState, keys: Vec<(i32, crate::postgres::
 /// `None` at end of scan. Drives the btree `_bt_first`/`_bt_next`.
 pub async fn index_getnext_tid(
     shared: &Arc<SharedState>,
-    scan: &mut IndexScanState,
+    scan: &mut IndexScanState<'_, '_, '_>,
     direction: ScanDirection,
 ) -> Option<ItemPointerData> {
     let tid = if scan.bt.started {
@@ -150,28 +131,28 @@ pub async fn index_getnext_tid(
 /// path uses the catalog snapshot.
 pub async fn index_fetch_heap(
     shared: &Arc<SharedState>,
-    scan: &mut IndexScanState,
+    scan: &mut IndexScanState<'_, '_, '_>,
 ) -> Option<Box<crate::access::htup::HeapTupleData>> {
     let tid = scan.xs_heaptid?;
     crate::backend::access::heap::heapam::heap_fetch_tid(
         shared,
         scan.heap_rel,
         &tid,
-        scan.snapshot.clone(),
+        scan.snapshot,
     )
     .await
 }
 
-/// `index_endscan`: release the scan. Owned state drops here. Takes the boxed
-/// handle by value (the C API frees a heap-allocated `IndexScanDesc`).
-#[allow(clippy::boxed_local, reason = "mirrors the C index_endscan(IndexScanDesc): consumes a heap handle")]
-pub fn index_endscan(_scan: Box<IndexScanState>) {}
+/// `index_endscan`: release the scan. Owned state drops here (the borrowed
+/// relations/snapshot are released by their owner's frame). Takes the value by
+/// move, mirroring the C API that frees a heap-allocated `IndexScanDesc`.
+pub fn index_endscan(_scan: IndexScanState<'_, '_, '_>) {}
 
 /// `index_insert`: insert one index entry for the heap tuple at `heap_tid` into
 /// `index_rel` (M2: drives the btree `btinsert`). Returns the AM's bool.
 pub async fn index_insert(
     shared: &Arc<SharedState>,
-    index_rel: Relation,
+    index_rel: &RelationData,
     values: &[crate::postgres::Datum],
     isnull: &[bool],
     heap_tid: &ItemPointerData,
@@ -185,7 +166,7 @@ pub async fn index_insert(
 /// in the loop PG does (skip TIDs whose heap tuple is invisible).
 pub async fn index_getnext_heaptuple(
     shared: &Arc<SharedState>,
-    scan: &mut IndexScanState,
+    scan: &mut IndexScanState<'_, '_, '_>,
     direction: ScanDirection,
 ) -> Option<Box<crate::access::htup::HeapTupleData>> {
     while index_getnext_tid(shared, scan, direction).await.is_some() {

@@ -18,10 +18,6 @@
 //! portalmem lands. `ActivePortal`/`PortalContext` globals are likewise deferred
 //! (no internal-transaction-restarting utility runs on the M1 path).
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the async utility portal path (PortalRunUtility/Multi) holds the per-backend &mut DestReceiver task-confined across the catalog-create await; single-backend state, never sent across tasks"
-)]
 
 use std::sync::Arc;
 
@@ -66,7 +62,7 @@ pub fn create_query_desc(
     plannedstmt: Box<PlannedStmt>,
     source_text: &str,
     dest: Box<dyn DestReceiver>,
-) -> QueryDesc {
+) -> QueryDesc<'static> {
     QueryDesc {
         operation: plannedstmt.command_type,
         plannedstmt: Some(plannedstmt),
@@ -149,7 +145,7 @@ pub fn portal_start(portal: &mut PortalData) {
             let pstmt = portal.stmts.first().cloned().unwrap_or_else(|| {
                 unreachable!("PortalDefineQuery installed exactly one PlannedStmt")
             });
-            let mut query_desc =
+            let mut query_desc: QueryDesc<'static> =
                 create_query_desc(Box::new(pstmt), &portal.source_text, Box::new(NoneReceiver));
 
             ExecutorStart(&mut query_desc, 0);
@@ -365,7 +361,7 @@ fn empty_portal(name: &str) -> PortalData {
     PortalData {
         name: name.to_string(),
         prep_stmt_name: None,
-        portal_context: core::ptr::null_mut(),
+        portal_context: (),
         resowner: None,
         cleanup: None,
         create_subid: crate::c::InvalidSubTransactionId,
@@ -388,7 +384,7 @@ fn empty_portal(name: &str) -> PortalData {
         formats: Vec::new(),
         portal_snapshot: None,
         hold_store: None,
-        hold_context: core::ptr::null_mut(),
+        hold_context: (),
         hold_snapshot: None,
         at_start: true,
         at_end: false,
@@ -413,8 +409,7 @@ fn empty_param_list() -> ParamListInfoData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::sync::Mutex;
 
     use crate::access::tupdesc::TupleDesc;
     use crate::catalog::genbki::INT4OID;
@@ -445,7 +440,7 @@ mod tests {
         shutdowns: u32,
     }
     struct CollectingDest {
-        sink: Rc<RefCell<Collected>>,
+        sink: Arc<Mutex<Collected>>,
     }
     impl DestReceiver for CollectingDest {
         fn receive_slot(&mut self, slot: &mut TupleTableSlot) -> bool {
@@ -453,14 +448,14 @@ mod tests {
             let row = (1..=natts)
                 .map(|a| DatumGetInt32(slot_getattr(slot, a).unwrap_or(Datum(0))))
                 .collect();
-            self.sink.borrow_mut().rows.push(row);
+            self.sink.lock().unwrap().rows.push(row);
             true
         }
         fn r_startup(&mut self, _op: CmdType, _ti: TupleDesc) {
-            self.sink.borrow_mut().startups += 1;
+            self.sink.lock().unwrap().startups += 1;
         }
         fn r_shutdown(&mut self) {
-            self.sink.borrow_mut().shutdowns += 1;
+            self.sink.lock().unwrap().shutdowns += 1;
         }
         fn mydest(&self) -> CommandDest {
             CommandDest::DestNone
@@ -469,8 +464,8 @@ mod tests {
 
     #[test]
     fn portal_one_select_drives_executor() {
-        let sink = Rc::new(RefCell::new(Collected::default()));
-        let dest = Box::new(CollectingDest { sink: Rc::clone(&sink) });
+        let sink = Arc::new(Mutex::new(Collected::default()));
+        let dest = Box::new(CollectingDest { sink: Arc::clone(&sink) });
 
         let mut portal = create_portal("");
         portal_define_query(&mut portal, "SELECT 1", CommandTag::Select, vec![plan("SELECT 1")]);
@@ -494,7 +489,7 @@ mod tests {
         }
         portal_drop(&mut portal);
 
-        let s = sink.borrow();
+        let s = sink.lock().unwrap();
         assert_eq!(s.startups, 1);
         assert_eq!(s.shutdowns, 1);
         assert_eq!(s.rows, vec![vec![1]]);
@@ -502,8 +497,8 @@ mod tests {
 
     #[test]
     fn portal_select_two_cols() {
-        let sink = Rc::new(RefCell::new(Collected::default()));
-        let dest = Box::new(CollectingDest { sink: Rc::clone(&sink) });
+        let sink = Arc::new(Mutex::new(Collected::default()));
+        let dest = Box::new(CollectingDest { sink: Arc::clone(&sink) });
         let mut portal = create_portal("");
         portal_define_query(&mut portal, "SELECT 1, 2", CommandTag::Select, vec![plan("SELECT 1, 2")]);
         portal_set_result_format(&mut portal, &[]);
@@ -514,6 +509,6 @@ mod tests {
             ExecutorFinish(query_desc);
         }
         portal_drop(&mut portal);
-        assert_eq!(sink.borrow().rows, vec![vec![1, 2]]);
+        assert_eq!(sink.lock().unwrap().rows, vec![vec![1, 2]]);
     }
 }

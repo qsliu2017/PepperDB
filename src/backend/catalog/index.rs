@@ -17,14 +17,6 @@
 //! scans via the catalog-index registry + the built btree.
 
 #![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: holds per-backend raw Relation handles task-confined for the operation; same contract as relcache/genam"
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "index AM routines take raw Relation pointers per the C API; faithful to C"
-)]
-#![allow(
     clippy::too_many_arguments,
     reason = "index_create mirrors the C signature 1:1 (port-inherent)"
 )]
@@ -44,7 +36,7 @@ use crate::catalog::pg_class::{RelationRelationId, RELKIND_INDEX};
 use crate::nodes::execnodes::IndexInfo;
 use crate::postgres_ext::{InvalidOid, Oid};
 use crate::shared_state::SharedState;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 const BTREE_AM_OID: Oid = Oid(403);
 
@@ -87,12 +79,11 @@ pub fn make_index_info(key_attnums: &[i16], unique: bool) -> IndexInfo {
 /// descriptor by copying each key column's fixed part from the heap descriptor.
 /// Index expressions + opclass keytype overrides are later scope.
 fn construct_tuple_descriptor(
-    heap_relation: Relation,
+    heap_relation: &RelationData,
     index_info: &IndexInfo,
     index_col_names: &[String],
 ) -> TupleDesc {
-    // SAFETY: live heap relation with a descriptor.
-    let heap_td = unsafe { (*heap_relation).rd_att.clone() }
+    let heap_td = heap_relation.rd_att.clone()
         .unwrap_or_else(|| unreachable!("heap relation has a descriptor"));
 
     let numatts = index_info.num_index_attrs;
@@ -148,7 +139,7 @@ fn construct_tuple_descriptor(
 /// fully usable for inserts/scans via the registry + the built btree.
 pub async fn index_create(
     shared: &Arc<SharedState>,
-    heap_relation: Relation,
+    heap_relation: &RelationData,
     index_relation_name: &str,
     index_relation_id: Oid,
     rel_file_number: Oid,
@@ -161,15 +152,10 @@ pub async fn index_create(
     coloptions: &[i16],
     skip_build: bool,
 ) -> Oid {
-    // SAFETY: live, open heap relation.
-    let (heap_relid, namespace_id, relpersistence, shared_relation) = unsafe {
-        let h = &*heap_relation;
-        (
-            h.rd_id,
-            (*h.rd_rel).relnamespace,
-            (*h.rd_rel).relpersistence,
-            (*h.rd_rel).relisshared,
-        )
+    let (heap_relid, namespace_id, relpersistence, shared_relation) = {
+        let h: &RelationData = heap_relation;
+        let form = h.form();
+        (h.rd_id, form.relnamespace, form.relpersistence, form.relisshared)
     };
 
     assert!(index_info.num_index_attrs >= 1, "index must have at least one column");
@@ -184,7 +170,7 @@ pub async fn index_create(
     let index_relation_id = if index_relation_id.0 != 0 {
         index_relation_id
     } else {
-        get_new_rel_file_number(shared, table_space_id, Some(pg_class), relpersistence).await
+        get_new_rel_file_number(shared, table_space_id, Some(Arc::clone(&pg_class)), relpersistence).await
     };
     let rel_file_number = if rel_file_number.0 != 0 { rel_file_number } else { index_relation_id };
 
@@ -204,26 +190,31 @@ pub async fn index_create(
         true,
     )
     .await;
+    let mut index_relation = index_relation;
 
     // Attach a fabricated pg_index Form (rd_index) so the btree AM can read the
     // index's key-attribute counts; then wire the access-method arrays from the
-    // opclasses so the comparator resolves.
-    attach_rd_index(index_relation, index_info);
-    relation_init_index_access_info(index_relation);
-    alloc_and_fill_index_support(index_relation, index_info, opclass_ids, collation_ids, coloptions);
+    // opclasses so the comparator resolves. The index relation is unshared here
+    // (just built; refcount 1), so mutate it in place via `Arc::get_mut`.
+    {
+        let idx = Arc::get_mut(&mut index_relation)
+            .unwrap_or_else(|| unreachable!("freshly built index relation is unshared"));
+        attach_rd_index(idx, index_info);
+        relation_init_index_access_info(idx);
+        alloc_and_fill_index_support(idx, index_info, opclass_ids, collation_ids, coloptions);
 
-    // Set the index relation's owner/am to match the heap, then write its pg_class
-    // row (pg_class is nailed and writable).
-    // SAFETY: live index relation rd_rel.
-    unsafe {
-        let owner = (*(*heap_relation).rd_rel).relowner;
-        (*(*index_relation).rd_rel).relowner = owner;
-        (*(*index_relation).rd_rel).relam = access_method_id;
+        // Set the index relation's owner/am to match the heap, then write its
+        // pg_class row (pg_class is nailed and writable).
+        let owner = heap_relation.form().relowner;
+        let idx_form = idx.rd_rel.as_deref_mut()
+            .unwrap_or_else(|| unreachable!("freshly built index relation has a pg_class form"));
+        idx_form.relowner = owner;
+        idx_form.relam = access_method_id;
     }
     crate::backend::catalog::heap::insert_pg_class_tuple_pub(
         shared,
-        pg_class,
-        index_relation,
+        &pg_class,
+        &index_relation,
         index_relation_id,
         None,
         None,
@@ -235,13 +226,14 @@ pub async fn index_create(
     // columns + dependency recording. pg_index is not nailed in M2.
 
     // Register the index with its heap so CatalogTupleInsert maintains it.
-    register_catalog_index(heap_relid, index_relation, clone_index_info(index_info));
+    register_catalog_index(heap_relid, Arc::clone(&index_relation), clone_index_info(index_info));
 
     relation_close(pg_class);
 
-    // Build (populate) the index unless asked to skip.
+    // Build (populate) the index unless asked to skip. The heap + index `Arc`s are
+    // owned here (this frame); the build borrows them.
     if !skip_build {
-        index_build(shared, heap_relation, index_relation, index_info).await;
+        index_build(shared, heap_relation, &index_relation, index_info).await;
     }
 
     index_relation_id
@@ -254,8 +246,8 @@ pub async fn index_create(
 /// otherwise unused on the M2 path.
 pub async fn index_build(
     shared: &Arc<SharedState>,
-    heap_relation: Relation,
-    index_relation: Relation,
+    heap_relation: &RelationData,
+    index_relation: &RelationData,
     index_info: &IndexInfo,
 ) {
     let _stats = btbuild(shared, heap_relation, index_relation, index_info).await;
@@ -267,7 +259,7 @@ pub async fn index_build(
 /// AM can read its key-attribute counts. M2 fills only the fields the build/scan
 /// read (indnatts/indnkeyatts/indisunique/indkey-equivalent); the on-disk pg_index
 /// row is staged.
-fn attach_rd_index(index_relation: Relation, index_info: &IndexInfo) {
+fn attach_rd_index(index_relation: &mut RelationData, index_info: &IndexInfo) {
     use crate::catalog::pg_index::FormData_pg_index;
     // SAFETY: FormData_pg_index is repr(C) POD; zero then patch the fixed fields.
     let mut idx: Box<FormData_pg_index> = Box::new(unsafe { core::mem::zeroed() });
@@ -278,16 +270,13 @@ fn attach_rd_index(index_relation: Relation, index_info: &IndexInfo) {
     idx.indisvalid = true;
     idx.indislive = true;
     idx.indimmediate = true;
-    // SAFETY: live index relation.
-    unsafe {
-        (*index_relation).rd_index = Box::into_raw(idx);
-    }
+    index_relation.rd_index = Some(idx);
 }
 
 /// Fill the index relation's opclass support (the arrays were allocated by
 /// `relation_init_index_access_info` from `rd_index`).
 fn alloc_and_fill_index_support(
-    index_relation: Relation,
+    index_relation: &mut RelationData,
     _index_info: &IndexInfo,
     opclass_ids: &[Oid],
     collation_ids: &[Oid],

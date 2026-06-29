@@ -9,7 +9,7 @@ use crate::storage::block::BlockNumber;
 use crate::storage::buf::Buffer;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// Opaque handle; definition lives in brin_revmap.c (C: incomplete struct).
 pub struct BrinRevmap {
@@ -18,7 +18,7 @@ pub struct BrinRevmap {
 
 /// C fills `*pagesPerRange` out-param -> return it alongside the revmap.
 pub fn brinRevmapInitialize(
-    _idxrel: Relation,
+    _idxrel: &RelationData,
 ) -> (*mut BrinRevmap, BlockNumber) {
     unimplemented!()
 }
@@ -49,6 +49,6 @@ pub fn brinGetTupleForHeapBlock(
 ) -> Option<(*mut BrinTuple, Buffer, OffsetNumber, usize)> {
     unimplemented!()
 }
-pub fn brinRevmapDesummarizeRange(_idxrel: Relation, _heap_blk: BlockNumber) -> bool {
+pub fn brinRevmapDesummarizeRange(_idxrel: &RelationData, _heap_blk: BlockNumber) -> bool {
     unimplemented!()
 }

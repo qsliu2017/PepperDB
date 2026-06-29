@@ -38,23 +38,27 @@ use std::sync::Arc;
 /// `ModifyTableRun`) that pair the PG node state with the AM scan handle / child
 /// plan-state -- state the C node struct holds by pointer but the Rust node
 /// struct (in `nodes/execnodes.rs`, outside this island) has no field for.
-pub enum PlanStateNode {
+///
+/// `'rel` is the lifetime of the open range-table relations borrowed from the
+/// command frame (relation-ownership-plan §1.3): the scan/modify nodes hold
+/// `&'rel RelationData` (and the snapshot borrow shares it), never an owned `Arc`.
+pub enum PlanStateNode<'rel> {
     /// T_ResultState.
     Result(Box<ResultState>),
-    /// T_SeqScanState (+ its open heap scan descriptor).
-    SeqScan(Box<SeqScanRun>),
+    /// T_SeqScanState (+ its open heap scan descriptor borrowing from EState).
+    SeqScan(Box<SeqScanRun<'rel>>),
     /// T_ModifyTableState (+ its child plan-state).
-    ModifyTable(Box<ModifyTableRun>),
+    ModifyTable(Box<ModifyTableRun<'rel>>),
 }
 
 /// PG `ExecInitNode`: build the plan-state subtree for `node`. The nodeTag switch
 /// lives the `T_Result`/`T_SeqScan`/`T_ModifyTable` arms; other tags grow per
 /// milestone.
-pub fn exec_init_node(
+pub fn exec_init_node<'rel>(
     node: Option<&Node>,
-    estate: &mut EState,
+    estate: &mut EState<'rel>,
     eflags: i32,
-) -> Option<PlanStateNode> {
+) -> Option<PlanStateNode<'rel>> {
     let node = node?;
     match node {
         Node::Result(r) => Some(PlanStateNode::Result(exec_init_result(r, estate, eflags))),
@@ -75,13 +79,9 @@ pub fn exec_init_node(
 /// drives the executor without an `Arc<SharedState>` (it reaches no I/O leaf); the
 /// scan/insert arms require it (`expect`). The full wire wiring that always
 /// supplies a SharedState is step 18B.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the plan-state tree + slots are !Send and task-confined (one backend task drives the plan); same contract as the table AM/executor futures."
-)]
 pub async fn exec_proc_node<'n>(
     shared: Option<&Arc<SharedState>>,
-    node: &'n mut PlanStateNode,
+    node: &'n mut PlanStateNode<'_>,
 ) -> Option<&'n mut TupleTableSlot> {
     match node {
         PlanStateNode::Result(rs) => exec_result(rs),
@@ -99,7 +99,7 @@ fn expect_shared(shared: Option<&Arc<SharedState>>) -> &Arc<SharedState> {
 
 /// PG `ExecEndNode`: recursively tear down a node subtree. `shared` is `Option`
 /// (the const path needs none); scan/modify teardown require it.
-pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode) {
+pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode<'_>) {
     match node {
         PlanStateNode::Result(rs) => exec_end_result(rs),
         PlanStateNode::SeqScan(ss) => exec_end_seq_scan(expect_shared(shared), ss),

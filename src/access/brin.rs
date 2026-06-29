@@ -1,7 +1,8 @@
 //! Translated from PostgreSQL src/include/access/brin.h
 
 use crate::storage::block::BlockNumber;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 /// Storage type for BRIN's reloptions. On-disk (varlena-prefixed reloptions).
 #[repr(C)]
@@ -20,18 +21,18 @@ pub struct BrinStatsData {
 pub const BRIN_DEFAULT_PAGES_PER_RANGE: BlockNumber = 128;
 
 /// BrinGetPagesPerRange: rd_options ? options->pagesPerRange : default.
-pub fn brin_get_pages_per_range(relation: &Relation) -> BlockNumber {
+pub fn brin_get_pages_per_range(relation: &Arc<RelationData>) -> BlockNumber {
     let _ = relation;
     unimplemented!()
 }
 
 /// BrinGetAutoSummarize: rd_options ? options->autosummarize : false.
-pub fn brin_get_auto_summarize(relation: &Relation) -> bool {
+pub fn brin_get_auto_summarize(relation: &Arc<RelationData>) -> bool {
     let _ = relation;
     unimplemented!()
 }
 
-pub fn brinGetStats(index: &Relation) -> BrinStatsData {
+pub fn brinGetStats(index: &Arc<RelationData>) -> BrinStatsData {
     let _ = index;
     unimplemented!()
 }

@@ -4,7 +4,6 @@ use crate::catalog::objectaddress::ObjectAddress;
 use crate::nodes::parsenodes::{AlterPublicationStmt, CreatePublicationStmt};
 use crate::parser::parse_node::ParseState;
 use crate::postgres_ext::Oid;
-use crate::utils::relcache::Relation;
 
 /// Same as MAXNUMMESSAGES in sinvaladt.c.
 pub const MAX_RELCACHE_INVAL_MSGS: i32 = 4096;
@@ -44,7 +43,7 @@ pub fn InvalidatePublicationRels(relids: &[Oid]) {
 
 pub fn pub_rf_contains_invalid_column(
     pubid: Oid,
-    relation: Relation,
+    relation: &crate::utils::rel::RelationData,
     ancestors: &[Oid],
     pubviaroot: bool,
 ) -> bool {
@@ -60,7 +59,7 @@ pub struct PubInvalidColumns {
 
 pub fn pub_contains_invalid_column(
     pubid: Oid,
-    relation: Relation,
+    relation: &crate::utils::rel::RelationData,
     ancestors: &[Oid],
     pubviaroot: bool,
     pubgencols_type: i8,

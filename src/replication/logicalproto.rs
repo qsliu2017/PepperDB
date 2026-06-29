@@ -12,10 +12,11 @@ use crate::executor::tuptable::TupleTableSlot;
 use crate::nodes::bitmapset::Bitmapset;
 use crate::postgres_ext::Oid;
 use crate::replication::reorderbuffer::ReorderBufferTXN;
-use crate::utils::rel::Relation;
 
 // GIDSIZE for two-phase commit identifiers (from access/xact.h).
 use crate::access::xact::GIDSIZE;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // Protocol capabilities.
 pub const LOGICALREP_PROTO_MIN_VERSION_NUM: u32 = 1;
@@ -65,7 +66,7 @@ pub struct LogicalRepTupleData {
     // ncols folds into the Vec lengths.
 }
 
-// Relation information.
+// Arc<RelationData> information.
 pub struct LogicalRepRelation {
     pub remoteid: LogicalRepRelId, // unique id of the relation
     pub nspname: Option<String>,   // schema name
@@ -217,7 +218,7 @@ pub fn logicalrep_read_origin(_input: &[u8]) -> (String, XLogRecPtr) {
 pub fn logicalrep_write_insert(
     _out: &mut Vec<u8>,
     _xid: TransactionId,
-    _rel: &Relation,
+    _rel: &Arc<RelationData>,
     _newslot: &TupleTableSlot,
     _binary: bool,
     _columns: &Bitmapset,
@@ -233,7 +234,7 @@ pub fn logicalrep_read_insert(_input: &[u8], _newtup: &mut LogicalRepTupleData) 
 pub fn logicalrep_write_update(
     _out: &mut Vec<u8>,
     _xid: TransactionId,
-    _rel: &Relation,
+    _rel: &Arc<RelationData>,
     _oldslot: &TupleTableSlot,
     _newslot: &TupleTableSlot,
     _binary: bool,
@@ -255,7 +256,7 @@ pub fn logicalrep_read_update(
 pub fn logicalrep_write_delete(
     _out: &mut Vec<u8>,
     _xid: TransactionId,
-    _rel: &Relation,
+    _rel: &Arc<RelationData>,
     _oldslot: &TupleTableSlot,
     _binary: bool,
     _columns: &Bitmapset,
@@ -297,7 +298,7 @@ pub fn logicalrep_write_message(
 pub fn logicalrep_write_rel(
     _out: &mut Vec<u8>,
     _xid: TransactionId,
-    _rel: &Relation,
+    _rel: &Arc<RelationData>,
     _columns: &Bitmapset,
     _include_gencols_type: PublishGencolsType,
 ) {

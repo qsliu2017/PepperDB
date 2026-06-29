@@ -7,7 +7,7 @@ use crate::nodes::plannodes::CustomScan;
 // TODO(ptr)
 pub fn ExecInitCustomScan(
     _cscan: &CustomScan,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut CustomScanState {
     unimplemented!()

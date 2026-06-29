@@ -11,14 +11,16 @@
 //! ...), reached via `shared.buffers()`.
 //!
 //! The C-named free functions below take only a `Buffer` (the C global
-//! `BufferDescriptors`) or a `Relation` (the catalog), neither of which carries
+//! `BufferDescriptors`) or a `Arc<RelationData>` (the catalog), neither of which carries
 //! the `Arc<SharedState>` that owns the pool in the single-process port. They
-//! therefore remain shims/TODOs: a `Relation`-level `ReadBuffer` needs
+//! therefore remain shims/TODOs: a `Arc<RelationData>`-level `ReadBuffer` needs
 //! `RelationGetSmgr` (catalog, deferred) and a `&SharedState` to call
 //! `read_buffer_common`; the `Buffer`-only ops need the pool handle. New code
 //! calls the real `BufferPool` methods directly. The smgr-level read path
 //! (`read_buffer_common`) is the real, tested entry point.
-// TODO(catalog): wire Relation-level shims once RelationGetSmgr + a reachable
+use crate::utils::rel::RelationData;
+
+// TODO(catalog): wire Arc<RelationData>-level shims once RelationGetSmgr + a reachable
 // SharedState handle exist.
 
 use crate::common::relpath::ForkNumber;
@@ -29,7 +31,6 @@ use crate::storage::buf::{Buffer, INVALID_BUFFER};
 use crate::storage::bufpage::Page;
 use crate::storage::relfilelocator::RelFileLocator;
 use crate::storage::smgr::SmgrRelation;
-use crate::utils::relcache::Relation;
 
 #[allow(deprecated)]
 use crate::storage::buf::BufferAccessStrategy;
@@ -37,6 +38,7 @@ use crate::storage::buf::BufferAccessStrategy;
 use crate::access::xlogdefs::XLogRecPtr;
 
 use bitflags::bitflags;
+use std::sync::Arc;
 
 /// C: `typedef void *Block`. A reference to a disk page image; modeled as a
 /// reference to the page newtype rather than a raw pointer.
@@ -104,13 +106,13 @@ bitflags! {
 /// constructed via `bmr_rel()` / `bmr_smgr()`. Used so one function serves both
 /// recovery and normal operation.
 pub struct BufferManagerRelation<'a> {
-    pub rel: Option<Relation>,
+    pub rel: Option<&'a RelationData>,
     pub smgr: Option<&'a mut SmgrRelation>,
     pub relpersistence: u8,
 }
 
 /// C macro `BMR_REL(p_rel)`.
-pub fn bmr_rel(rel: Relation) -> BufferManagerRelation<'static> {
+pub fn bmr_rel(rel: &RelationData) -> BufferManagerRelation<'_> {
     BufferManagerRelation { rel: Some(rel), smgr: None, relpersistence: 0 }
 }
 
@@ -138,7 +140,7 @@ bitflags! {
 /// WaitReadBuffers(). The aio handle/return fields are deferred to the async I/O
 /// backend; only the caller-set members are modeled here.
 pub struct ReadBuffersOperation<'a> {
-    pub rel: Option<Relation>,
+    pub rel: Option<&'a RelationData>,
     pub smgr: Option<&'a mut SmgrRelation>,
     pub persistence: u8,
     pub forknum: ForkNumber,
@@ -191,7 +193,7 @@ pub const InvalidBuffer: Buffer = INVALID_BUFFER;
 
 /// The real shared-buffer read core (C `ReadBuffer_common`), collapsed to a
 /// direct async read. New code calls this with an owned `SmgrRelation`; the
-/// `Relation`-taking `ReadBuffer`/`ReadBufferExtended` shims below are TODOs
+/// `Arc<RelationData>`-taking `ReadBuffer`/`ReadBufferExtended` shims below are TODOs
 /// pending the catalog (`RelationGetSmgr`).
 pub use crate::backend::storage::buffer::bufmgr::read_buffer_common;
 
@@ -206,7 +208,7 @@ pub fn PrefetchSharedBuffer(
 }
 
 pub fn PrefetchBuffer(
-    _reln: Relation,
+    _reln: &RelationData,
     _fork_num: ForkNumber,
     _block_num: BlockNumber,
 ) -> PrefetchBufferResult {
@@ -226,20 +228,20 @@ pub fn ReadRecentBuffer(
 /// TODO(catalog): thin shim over `read_buffer_common` once `RelationGetSmgr`
 /// (catalog) and a reachable `&SharedState` exist; for now the real, tested
 /// entry is `read_buffer_common(shared, smgr, ...)`.
-pub fn ReadBuffer(_reln: Relation, _block_num: BlockNumber) -> Buffer {
-    unimplemented!("use read_buffer_common(shared, smgr, ...) -- Relation shim needs RelationGetSmgr")
+pub fn ReadBuffer(_reln: &RelationData, _block_num: BlockNumber) -> Buffer {
+    unimplemented!("use read_buffer_common(shared, smgr, ...) -- Arc<RelationData> shim needs RelationGetSmgr")
 }
 
 /// TODO(catalog): as [`ReadBuffer`]; the smgr-level real path is
 /// `read_buffer_common`.
 pub fn ReadBufferExtended(
-    _reln: Relation,
+    _reln: &RelationData,
     _fork_num: ForkNumber,
     _block_num: BlockNumber,
     _mode: ReadBufferMode,
     _strategy: Option<BufferAccessStrategy>,
 ) -> Buffer {
-    unimplemented!("use read_buffer_common(shared, smgr, ...) -- Relation shim needs RelationGetSmgr")
+    unimplemented!("use read_buffer_common(shared, smgr, ...) -- Arc<RelationData> shim needs RelationGetSmgr")
 }
 
 pub fn ReadBufferWithoutRelcache(
@@ -310,7 +312,7 @@ pub fn CheckBufferIsPinnedOnce(_buffer: Buffer) {
 
 pub fn ReleaseAndReadBuffer(
     _buffer: Buffer,
-    _relation: Relation,
+    _relation: &RelationData,
     _block_num: BlockNumber,
 ) -> Buffer {
     unimplemented!()
@@ -377,7 +379,7 @@ pub fn BufferGetBlockNumber(_buffer: Buffer) -> BlockNumber {
 }
 
 pub fn RelationGetNumberOfBlocksInFork(
-    _relation: Relation,
+    _relation: &RelationData,
     _fork_num: ForkNumber,
 ) -> BlockNumber {
     unimplemented!()
@@ -388,7 +390,7 @@ pub fn FlushOneBuffer(_buffer: Buffer) {
     unimplemented!("use BufferPool::flush_buffer via shared.buffers()")
 }
 
-pub fn FlushRelationBuffers(_rel: Relation) {
+pub fn FlushRelationBuffers(_rel: &RelationData) {
     unimplemented!()
 }
 
@@ -447,7 +449,7 @@ pub fn DropDatabaseBuffers(_dbid: Oid) {
 }
 
 /// C macro `RelationGetNumberOfBlocks(reln)`.
-pub fn RelationGetNumberOfBlocks(reln: Relation) -> BlockNumber {
+pub fn RelationGetNumberOfBlocks(reln: &RelationData) -> BlockNumber {
     RelationGetNumberOfBlocksInFork(reln, MAIN_FORKNUM)
 }
 
@@ -547,7 +549,7 @@ pub fn EvictAllUnpinnedBuffers() -> (i32, i32, i32) {
 }
 
 /// Returns (buffers_evicted, buffers_flushed, buffers_skipped).
-pub fn EvictRelUnpinnedBuffers(_rel: Relation) -> (i32, i32, i32) {
+pub fn EvictRelUnpinnedBuffers(_rel: &RelationData) -> (i32, i32, i32) {
     unimplemented!()
 }
 

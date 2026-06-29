@@ -29,7 +29,7 @@ pub struct ParallelExecutorInfo {
 
 pub fn ExecInitParallelPlan(
     _planstate: &mut PlanState,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _sendParams: &Bitmapset,
     _nworkers: i32,
     _tuples_needed: i64,

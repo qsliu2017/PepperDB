@@ -43,10 +43,9 @@ pub fn get_relation_info(
     let relation = crate::backend::utils::cache::relcache::relation_id_get_relation(relation_object_id)
         .unwrap_or_else(|| not_yet_reachable("get_relation_info: relation not in relcache"));
 
-    // SAFETY: live relcache entry held for the duration of this function.
-    let rel_data: &RelationData = unsafe { &*relation };
-    let relkind = unsafe { (*rel_data.rd_rel).relkind };
-    let reltablespace = unsafe { (*rel_data.rd_rel).reltablespace };
+    let rel_data: &RelationData = &relation;
+    let relkind = rel_data.form().relkind;
+    let reltablespace = rel_data.form().reltablespace;
 
     if !is_scannable_relkind(relkind) {
         not_yet_reachable("get_relation_info: non-heap relation kind");
@@ -92,11 +91,10 @@ pub struct RelSizeEstimate {
 /// CREATE/ANALYZE). PG additionally combines `relpages` with the live block count
 /// to scale `reltuples`; that live-count adjustment grows when stale stats matter.
 pub fn estimate_rel_size(rel: &RelationData, cur_attr_widths: &[i32]) -> RelSizeEstimate {
-    let form = rel.rd_rel;
-    // SAFETY: live pg_class form on the relcache entry.
-    let relpages = unsafe { (*form).relpages };
-    let reltuples = unsafe { (*form).reltuples };
-    let relallvisible = unsafe { (*form).relallvisible };
+    let form = rel.form();
+    let relpages = form.relpages;
+    let reltuples = form.reltuples;
+    let relallvisible = form.relallvisible;
 
     let pages = if relpages <= 0 { 0 } else { relpages as BlockNumber };
     let tuples = if reltuples < 0.0 { 0.0 } else { f64::from(reltuples) };

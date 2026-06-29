@@ -27,6 +27,8 @@
 //! the loop is faithful to the C control flow and runs up to the point where it
 //! calls into one of those subsystems.
 
+use crate::utils::rel::RelationData;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -83,10 +85,6 @@ const WHERE_TO_SEND_OUTPUT: CommandDest = CommandDest::DestRemote;
 /// on the Session for diagnostics but every backend attaches here.
 pub const DEFAULT_DATABASE_OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(90000);
 
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the connect-to-database pipeline is task-confined !Send; the backend runs on its own dedicated current-thread runtime (postmaster run_backend_confined)."
-)]
 pub async fn postgres_main(
     stream: TcpStream,
     shared: Arc<SharedState>,
@@ -122,17 +120,13 @@ pub async fn postgres_main(
 
 /// PG `InitPostgres` (the connect-to-database phase). Establish the full per-task
 /// scope stack a backend needs to read on-disk catalogs and run the executor, then
-/// drive `inner` inside it. Models `catalog/tests.rs::in_scopes` + the step-18A
-/// exec-relations registry; the exec-relations scope is opened EMPTY here and
-/// re-populated per query in `exec_simple_query` (the open range-table relations of
-/// the plan being run).
+/// drive `inner` inside it. Models `catalog/tests.rs::in_scopes`. The executor's
+/// open range-table relations are no longer a task-local registry: each query's
+/// command frame (`run_plan_over_wire`) opens them into owned `Arc`s and passes a
+/// borrow into the executor (relation-ownership-plan step 5).
 ///
 /// Each nested scope future is `Box::pin`-ed so the combined future lives on the
 /// heap rather than one giant stack frame (the stack is shallow at each layer).
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: establishes !Send per-task scopes (relcache/exec-relations) holding raw handles across awaits; the backend task runs on its own current-thread runtime."
-)]
 async fn init_postgres<F>(shared: Arc<SharedState>, inner: F)
 where
     F: std::future::Future<Output = ()>,
@@ -140,7 +134,6 @@ where
     use crate::backend::access::transam::xact::xact_scope;
     use crate::backend::access::transam::xloginsert::with_insertion;
     use crate::backend::catalog::indexing::scope_async as catalog_index_scope;
-    use crate::backend::executor::execMain::with_exec_relations;
     use crate::backend::utils::cache::catcache::scope_async as catcache_scope;
     use crate::backend::utils::cache::relcache::scope_async as relcache_scope;
     use crate::backend::utils::resowner::resowner;
@@ -159,8 +152,7 @@ where
         inner.await;
     };
 
-    let body = Box::pin(with_exec_relations(Vec::new(), Box::pin(inner)));
-    let body = Box::pin(catalog_index_scope(body));
+    let body = Box::pin(catalog_index_scope(Box::pin(inner)));
     let body = Box::pin(relcache_scope(body));
     let body = Box::pin(catcache_scope(body));
     let body = Box::pin(with_insertion(body));
@@ -178,10 +170,6 @@ where
 ///
 /// The supervisor calls this exactly once at startup. Boxed/pinned for the deep
 /// scope stack, like the backend path.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: bootstrap holds !Send catalog state across awaits; it runs on its own dedicated current-thread runtime (postmaster boot) before any backend connects."
-)]
 pub async fn bootstrap_cluster(shared: Arc<SharedState>) {
     let sess = Arc::new(crate::session::Session::new(crate::miscadmin::BackendType::BACKEND));
     sess.set_database_id(DEFAULT_DATABASE_OID);
@@ -194,10 +182,6 @@ pub async fn bootstrap_cluster(shared: Arc<SharedState>) {
 /// The initdb body, run inside the boot session + connect-to-database scopes:
 /// open a transaction, push the active snapshot the index build reads, seed the
 /// catalogs, then commit so the rows are durable + committed for later backends.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: bootstrap holds task-confined !Send catalog state across awaits; the boot task runs alone before any backend connects."
-)]
 async fn do_initdb(shared: Arc<SharedState>) {
     use crate::backend::access::transam::xact::{
         CommandCounterIncrement, CommitTransactionCommand, GetCurrentCommandId,
@@ -230,10 +214,6 @@ async fn do_initdb(shared: Arc<SharedState>) {
 /// The backend message loop proper (PG `PostgresMain`'s `for (;;)`), run inside
 /// the pqcomm + connect-to-database scopes. Async (awaits the wire read + flush,
 /// and the per-command pipeline reaches the buffer pool / WAL).
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: dispatches the !Send simple-query pipeline; the backend runs on its own current-thread runtime."
-)]
 async fn command_loop(shared: Arc<SharedState>) {
     use futures_util::FutureExt;
     // Send this backend's cancellation key to the frontend (BackendKeyData).
@@ -317,10 +297,6 @@ enum CommandResult {
 /// returned future). An `elog(ERROR/FATAL)` raised here unwinds as a panic. The
 /// simple-Query / DestRemote path is COMPLETE; the extended-protocol arms are grow
 /// guards (rules.md s4).
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the simple-query pipeline holds task-confined !Send state (raw Relation handles, TupleTableSlot value arrays) across awaits; a backend runs on one task, never sent across tasks."
-)]
 async fn dispatch_command(shared: &Arc<SharedState>, firstchar: u8, body: &[u8]) -> CommandResult {
     match firstchar {
         PQMSG_QUERY => {
@@ -375,10 +351,6 @@ async fn dispatch_command(shared: &Arc<SharedState>, firstchar: u8, body: &[u8])
 ///
 /// STAGED (rules.md s4): empty query string -> NullCommand; multi-statement strings,
 /// RETURNING, ON CONFLICT, extended protocol. An empty query is handled below.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the executor/utility path holds task-confined !Send state (raw Relation handles, TupleTableSlot value arrays) across awaits; a backend runs on one task."
-)]
 async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
     use crate::backend::parser::analyze::parse_analyze_fixedparams_async;
     use crate::backend::parser::parser::raw_parser;
@@ -518,10 +490,6 @@ fn publish_committed_xid(shared: &Arc<SharedState>, committed: Option<crate::c::
 /// range-table relations, register them in the per-task exec-relations registry
 /// (the es_relations equivalent), then run ExecutorStart/Run/Finish/End against a
 /// DestRemote printtup receiver. Relations opened here are closed before returning.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: raw Relation handles + the executor's per-query slots are !Send and task-confined to this backend."
-)]
 async fn run_plan_over_wire(
     shared: &Arc<SharedState>,
     plan: &crate::nodes::plannodes::PlannedStmt,
@@ -533,15 +501,22 @@ async fn run_plan_over_wire(
     use crate::access::sdir::ScanDirection;
     use crate::backend::executor::execMain::{
         standard_executor_end, standard_executor_finish, standard_executor_run,
-        standard_executor_start, with_exec_relations,
+        standard_executor_start,
     };
 
     // Open every RTE_RELATION in the range table (PG opens them before InitPlan,
-    // under the right locks). The handle for RTI i (1-based) is registered so
-    // ExecGetRangeTableRelation resolves it.
+    // under the right locks). `opened` OWNS the `Arc<RelationData>`s -- it is the
+    // `'rel` ownership root, a stack binding that strictly encloses the executor run
+    // below (relation-ownership-plan §1.2). The executor BORROWS from it.
     let opened = open_range_table_relations(shared, plan).await;
-    let registry: Vec<(usize, *mut crate::utils::relcache::RelationData)> =
-        opened.iter().map(|(rti, rel)| (*rti, *rel)).collect();
+
+    // Build the borrowed range-table indexed by RT index (PG `es_relations`): slot
+    // `rti - 1` is `Some(&*arc)` for an opened RELATION RTE, `None` otherwise.
+    let max_rti = opened.iter().map(|(rti, _)| *rti).max().unwrap_or(0);
+    let mut range_table_rels: Vec<Option<&crate::utils::rel::RelationData>> = vec![None; max_rti];
+    for (rti, rel) in &opened {
+        range_table_rels[*rti - 1] = Some(&**rel);
+    }
 
     // Build the QueryDesc with the active snapshot + a DestRemote printtup receiver
     // (text format for every column in simple Query mode).
@@ -553,21 +528,22 @@ async fn run_plan_over_wire(
         );
     }
     let snap = crate::backend::utils::time::snapmgr::GetActiveSnapshot();
-    let mut query_desc = make_query_desc(plan, query_string, snap, receiver);
+    // The snapshot `Arc` is owned here (the command frame), so the scan can borrow
+    // `&*snap` across its `.await`s.
+    let snapshot_ref = snap.as_deref();
+    let mut query_desc = make_query_desc(plan, query_string, snap.clone(), receiver);
 
-    with_exec_relations(
-        registry,
-        Box::pin(async {
-            standard_executor_start(&mut query_desc, 0);
-            standard_executor_run(Some(shared), &mut query_desc, ScanDirection::Forward, 0).await;
-            standard_executor_finish(&mut query_desc);
-            let processed = query_desc.estate.as_ref().map_or(0, |e| e.processed);
-            qc.command_tag = command_tag;
-            qc.nprocessed = processed;
-            standard_executor_end(Some(shared), &mut query_desc);
-        }),
-    )
-    .await;
+    standard_executor_start(&mut query_desc, &range_table_rels, snapshot_ref, 0);
+    standard_executor_run(Some(shared), &mut query_desc, ScanDirection::Forward, 0).await;
+    standard_executor_finish(&mut query_desc);
+    let processed = query_desc.estate.as_ref().map_or(0, |e| e.processed);
+    qc.command_tag = command_tag;
+    qc.nprocessed = processed;
+    standard_executor_end(Some(shared), &mut query_desc);
+
+    // Drop the borrows before closing the owners.
+    drop(query_desc);
+    drop(range_table_rels);
 
     // Close the relations we opened (drop the relcache refcount).
     for (_rti, rel) in opened {
@@ -580,14 +556,10 @@ async fn run_plan_over_wire(
 /// for a user table), sets the physical address (the relcache build leaves
 /// rd_locator zeroed -- PG's RelationInitPhysicalAddr fills it from
 /// reltablespace/relfilenode), and takes a refcount via RelationIdGetRelation.
-#[allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: returns raw Relation handles, task-confined to this backend."
-)]
 async fn open_range_table_relations(
     shared: &Arc<SharedState>,
     plan: &crate::nodes::plannodes::PlannedStmt,
-) -> Vec<(usize, *mut crate::utils::relcache::RelationData)> {
+) -> Vec<(usize, Arc<crate::utils::rel::RelationData>)> {
     use crate::nodes::nodes::Node;
     use crate::nodes::parsenodes::RTEKind;
 
@@ -602,46 +574,25 @@ async fn open_range_table_relations(
         let rti = i + 1;
         let relid = rte.relid;
 
-        // Warm the relcache (async heap scan of pg_class/pg_attribute), then take an
-        // open handle. The build leaves rd_locator zeroed; fill the physical address.
+        // Warm the relcache (async heap scan of pg_class/pg_attribute; it fills the
+        // physical address at build time), then take an open handle (an Arc clone).
         crate::backend::utils::cache::relcache::relation_build_desc(shared, relid).await;
         let rel = crate::backend::utils::cache::relcache::relation_id_get_relation(relid)
             .unwrap_or_else(|| unreachable!("relation {relid:?} just built into the relcache"));
-        init_relation_physical_addr(rel, relid);
         opened.push((rti, rel));
     }
     opened
 }
 
-/// Fill a freshly-built relation's physical address (PG `RelationInitPhysicalAddr`).
-/// `relation_build_desc` leaves `rd_locator` zeroed; a user table's storage lives at
-/// {default tablespace, current db, relfilenode == relid} (M2: filenode == oid).
-fn init_relation_physical_addr(rel: *mut crate::utils::relcache::RelationData, relid: crate::postgres_ext::Oid) {
-    let dbid = crate::session::current().database_id();
-    // SAFETY: `rel` is a live relcache handle just returned by RelationIdGetRelation.
-    unsafe {
-        if (*rel).rd_locator.relNumber.0 == 0 {
-            (*rel).rd_locator = crate::storage::relfilelocator::RelFileLocator {
-                spcOid: crate::common::relpath::DEFAULTTABLESPACE_OID,
-                dbOid: dbid,
-                relNumber: relid,
-            };
-        }
-        (*rel).rd_lockInfo = crate::utils::rel::LockInfoData {
-            lockRelId: crate::utils::rel::LockRelId { relId: relid, dbId: dbid },
-        };
-    }
-}
-
 /// Build a QueryDesc for the wire path: carries the active snapshot + the DestRemote
 /// printtup receiver. (PG `CreateQueryDesc`.)
 #[allow(deprecated)]
-fn make_query_desc(
+fn make_query_desc<'rel>(
     plan: &crate::nodes::plannodes::PlannedStmt,
     query_string: &str,
     snapshot: crate::utils::snapshot::Snapshot,
     dest: Box<dyn crate::tcop::dest::DestReceiver>,
-) -> crate::executor::execdesc::QueryDesc {
+) -> crate::executor::execdesc::QueryDesc<'rel> {
     crate::executor::execdesc::QueryDesc {
         operation: plan.command_type,
         plannedstmt: Some(Box::new(plan.clone())),

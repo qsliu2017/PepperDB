@@ -22,14 +22,6 @@
 //! `.await`: each page is built in an owned `Box<Page>` and copied into its buffer
 //! in one lock window.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: holds per-backend raw Relation handles task-confined for the operation; futures never migrate the pointee between tasks"
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "btree build takes raw Relation/IndexTuple pointers per the C API; faithful to C"
-)]
 
 use std::sync::Arc;
 
@@ -42,20 +34,15 @@ use crate::backend::access::common::indextuple::index_form_tuple;
 use crate::backend::access::nbtree::nbtpage::{
     bt_allocbuf, bt_initmetapage, bt_pageinit, bt_read_buffer, bt_relbuf, bt_write_page,
 };
-use crate::backend::access::heap::heapam::SendPtr;
 use crate::common::relpath::ForkNumber;
 use crate::pg_config::BLCKSZ;
 use crate::utils::rel::RelationData;
-
-/// A `Send` index-relation handle for build helpers that hold it across `.await`.
-type SendRelation = SendPtr<RelationData>;
 use crate::postgres::Datum;
 use crate::shared_state::SharedState;
 use crate::storage::block::BlockNumber;
 use crate::storage::bufpage::{Page, SizeOfPageHeaderData};
 use crate::storage::itemid::ItemIdData;
 use crate::storage::off::OffsetNumber;
-use crate::utils::relcache::Relation;
 
 const fn maxalign(n: usize) -> usize {
     (n + 7) & !7
@@ -75,25 +62,15 @@ struct BtPageState {
     next: Option<Box<Self>>,
 }
 
-/// Build write-state: the index relation + the running block allocator (block 0 is
-/// reserved for the meta page, data starts at block 1) + the index-tuple count.
-struct BtWriteState {
-    index: Relation,
+/// Build write-state: the borrowed index relation + the running block allocator
+/// (block 0 is reserved for the meta page, data starts at block 1) + the
+/// index-tuple count. The index `Arc` is owned by the caller's frame (`index_build`
+/// / the build test); the write-state borrows it for the build's duration.
+struct BtWriteState<'irel> {
+    index: &'irel RelationData,
     pages_alloced: BlockNumber,
     index_tuples: f64,
 }
-
-// SAFETY: the raw Relation handle is task-confined for the build's lifetime
-// (the build runs in one task; the pointee is not shared concurrently).
-#[allow(
-    clippy::non_send_fields_in_send_ty,
-    reason = "deliberate: the raw Relation pointer is task-confined for the build's lifetime"
-)]
-unsafe impl Send for BtWriteState {}
-// SAFETY: BtPageState's only !Send content is the page (Box<Page>, Send) and the
-// owned key Vecs (Send); no raw pointers. The marker is defensive for the boxed
-// future's Send bound.
-unsafe impl Send for BtPageState {}
 
 /// Mutable view of a page's btree opaque area.
 #[allow(
@@ -151,7 +128,7 @@ fn bt_sortaddtup(page: &mut Page, itup_bytes: &[u8], itup_off: OffsetNumber, new
 }
 
 /// `_bt_pagestate`: a fresh page-building state for `level` (allocating its block).
-fn bt_pagestate(wstate: &mut BtWriteState, level: u32) -> BtPageState {
+fn bt_pagestate(wstate: &mut BtWriteState<'_>, level: u32) -> BtPageState {
     let blkno = wstate.pages_alloced;
     wstate.pages_alloced += 1;
     let fillfactor = if level > 0 { 70 } else { 90 };
@@ -189,7 +166,7 @@ fn make_downlink_pivot(key_bytes: &[u8], child: BlockNumber) -> Vec<u8> {
 /// Recursive across levels via a boxed future.
 fn bt_buildadd<'a>(
     shared: &'a Arc<SharedState>,
-    wstate: &'a mut BtWriteState,
+    wstate: &'a mut BtWriteState<'_>,
     state: &'a mut BtPageState,
     itup_bytes: Vec<u8>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
@@ -233,7 +210,7 @@ fn bt_buildadd<'a>(
 
             // Write the finished old page.
             let opage_img = std::mem::replace(&mut state.page, npage);
-            write_build_page(shared, SendPtr(wstate.index), oblkno, &opage_img).await;
+            write_build_page(shared, wstate.index, oblkno, &opage_img).await;
 
             // Link the old page into its parent via its low key (downlink). The
             // leftmost page's downlink is minus-infinity: bt_buildadd truncates the
@@ -304,7 +281,7 @@ fn id_to_bytes(id: ItemIdData) -> [u8; 4] {
 }
 
 /// Copy a finished build page into its (pre-extended) block.
-async fn write_build_page(shared: &Arc<SharedState>, index: SendRelation, blkno: BlockNumber, page: &Page) {
+async fn write_build_page(shared: &Arc<SharedState>, index: &RelationData, blkno: BlockNumber, page: &Page) {
     reserve_block(shared, index, blkno).await;
     let buf = bt_read_buffer(shared, index, blkno).await;
     bt_write_page(shared, buf, page, crate::access::xlogdefs::INVALID_XLOG_REC_PTR);
@@ -312,14 +289,11 @@ async fn write_build_page(shared: &Arc<SharedState>, index: SendRelation, blkno:
 }
 
 /// Ensure the index has a block at `blkno` by extending with zeroed pages.
-async fn reserve_block(shared: &Arc<SharedState>, index: SendRelation, blkno: BlockNumber) {
+async fn reserve_block(shared: &Arc<SharedState>, index: &RelationData, blkno: BlockNumber) {
     loop {
         let nblocks = {
-            // SAFETY: live index relation.
-            let rel = unsafe { &mut *index.0 };
-            // SAFETY: relcache-owned smgr handle, valid while the rel is open; the
-            // SmgrRelation is Send so this borrow may cross the `.await`.
-            let smgr = unsafe { &mut *rel.smgr() };
+            // SAFETY: relcache-owned smgr handle, valid while the rel is open.
+            let smgr = unsafe { &mut *index.smgr() };
             smgr.nblocks(shared, ForkNumber::MAIN_FORKNUM).await
         };
         if nblocks > blkno {
@@ -334,7 +308,7 @@ async fn reserve_block(shared: &Arc<SharedState>, index: SendRelation, blkno: Bl
 /// then write the meta page pointing at the root.
 async fn bt_uppershutdown(
     shared: &Arc<SharedState>,
-    wstate: &mut BtWriteState,
+    wstate: &mut BtWriteState<'_>,
     mut state: Box<BtPageState>,
     allequalimage: bool,
 ) {
@@ -360,7 +334,7 @@ async fn bt_uppershutdown(
 
         bt_slideleft(&mut state.page);
         let page_img = std::mem::replace(&mut state.page, Page::boxed_zeroed());
-        write_build_page(shared, SendPtr(wstate.index), blkno, &page_img).await;
+        write_build_page(shared, wstate.index, blkno, &page_img).await;
 
         match state.next.take() {
             Some(parent) => state = parent,
@@ -370,7 +344,7 @@ async fn bt_uppershutdown(
 
     let mut metapage = Page::boxed_zeroed();
     bt_initmetapage(&mut metapage, rootblkno, rootlevel, allequalimage);
-    write_build_page(shared, SendPtr(wstate.index), crate::access::nbtree::BTREE_METAPAGE, &metapage).await;
+    write_build_page(shared, wstate.index, crate::access::nbtree::BTREE_METAPAGE, &metapage).await;
 }
 
 /// One sorted index tuple for the build: key datums + null flags + heap TID.
@@ -385,15 +359,13 @@ pub struct BuildTuple {
 /// caller sorts before calling).
 pub async fn bt_load(
     shared: &Arc<SharedState>,
-    index: Relation,
+    index: &RelationData,
     sorted: &[BuildTuple],
     allequalimage: bool,
 ) -> f64 {
-    let mut wstate = BtWriteState { index, pages_alloced: 1, index_tuples: 0.0 };
-
-    // SAFETY: live index relation with a tuple descriptor.
-    let itupdesc = unsafe { (*index).rd_att.clone() }
+    let itupdesc = index.rd_att.clone()
         .unwrap_or_else(|| unreachable!("index relation has a tuple descriptor"));
+    let mut wstate = BtWriteState { index, pages_alloced: 1, index_tuples: 0.0 };
 
     let mut leaf_state: Option<Box<BtPageState>> = None;
 
@@ -421,7 +393,7 @@ pub async fn bt_load(
         // Empty index: a meta page with no root.
         let mut metapage = Page::boxed_zeroed();
         bt_initmetapage(&mut metapage, P_NONE, 0, allequalimage);
-        write_build_page(shared, SendPtr(index), crate::access::nbtree::BTREE_METAPAGE, &metapage).await;
+        write_build_page(shared, wstate.index, crate::access::nbtree::BTREE_METAPAGE, &metapage).await;
     }
 
     index_tuples

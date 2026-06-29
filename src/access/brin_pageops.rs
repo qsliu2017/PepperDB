@@ -7,11 +7,11 @@ use crate::storage::block::BlockNumber;
 use crate::storage::buf::Buffer;
 use crate::storage::bufpage::Page;
 use crate::storage::off::OffsetNumber;
-use crate::utils::rel::Relation;
+use crate::utils::rel::RelationData;
 
 /// Update a BRIN tuple, in-place or by moving it; returns whether it succeeded.
 pub fn brin_doupdate(
-    _idxrel: Relation,
+    _idxrel: &RelationData,
     _pages_per_range: BlockNumber,
     _revmap: &mut BrinRevmap,
     _heap_blk: BlockNumber,
@@ -34,7 +34,7 @@ pub fn brin_can_do_samepage_update(_buffer: Buffer, _origsz: usize, _newsz: usiz
 /// Insert a BRIN tuple; `buffer` is an in/out param updated to the target page,
 /// so it is taken `&mut` and the placed offset is returned.
 pub fn brin_doinsert(
-    _idxrel: Relation,
+    _idxrel: &RelationData,
     _pages_per_range: BlockNumber,
     _revmap: &mut BrinRevmap,
     _buffer: &mut Buffer,
@@ -56,13 +56,13 @@ pub fn brin_metapage_init(_page: &mut Page, _pages_per_range: BlockNumber, _vers
 }
 
 /// Mark a page as being evacuated; returns whether evacuation was started.
-pub fn brin_start_evacuating_page(_idx_rel: Relation, _buf: Buffer) -> bool {
+pub fn brin_start_evacuating_page(_idx_rel: &RelationData, _buf: Buffer) -> bool {
     unimplemented!()
 }
 
 /// Move all tuples off a page being evacuated.
 pub fn brin_evacuate_page(
-    _idx_rel: Relation,
+    _idx_rel: &RelationData,
     _pages_per_range: BlockNumber,
     _revmap: &mut BrinRevmap,
     _buf: Buffer,
@@ -71,6 +71,6 @@ pub fn brin_evacuate_page(
 }
 
 /// Clean up a BRIN page (recycle if empty, mark free space).
-pub fn brin_page_cleanup(_idxrel: Relation, _buf: Buffer) {
+pub fn brin_page_cleanup(_idxrel: &RelationData, _buf: Buffer) {
     unimplemented!()
 }

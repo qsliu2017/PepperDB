@@ -59,7 +59,7 @@ pub fn make_parsestate(parent_parse_state: Option<Box<ParseState>>) -> Box<Parse
         p_ctenamespace: Vec::new(),
         p_future_ctes: Vec::new(),
         p_parent_cte: None,
-        p_target_relation: std::ptr::null_mut(),
+        p_target_relation: None,
         p_target_nsitem: None,
         p_grouping_nsitem: None,
         p_is_insert: false,

@@ -11,7 +11,6 @@
 //!  - a catalog index scan (systable index path) finds a seeded pg_type row.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests")]
-#![allow(clippy::future_not_send, reason = "test bodies; not spawned on the runtime")]
 
 use std::sync::Arc;
 
@@ -214,7 +213,7 @@ async fn create_table_writes_catalog_rows_and_resolves_by_name() {
         assert!(rebuilt.is_some(), "the new relation rebuilds from its on-disk catalog rows");
         if let Some(rd) = rebuilt {
             // SAFETY: live rebuilt relation.
-            let natts = unsafe { (*rd).rd_att.as_ref().unwrap().natts };
+            let natts = rd.rd_att.as_ref().unwrap().natts;
             assert_eq!(natts, 1, "the rebuilt descriptor has the one user column");
         }
     }))
@@ -240,7 +239,8 @@ async fn catalog_index_scan_finds_seeded_pg_type_row() {
         let pg_type = relation_id_get_relation(TypeRelationId).expect("pg_type nailed");
         let index = make_oid_index_relation(&shared, TypeRelationId).await;
 
-        let snap = crate::backend::utils::time::snapmgr::GetActiveSnapshot();
+        let snap = crate::backend::utils::time::snapmgr::GetActiveSnapshot()
+            .expect("active snapshot");
         let key = [ScanKeyData {
             flags: 0,
             attno: Anum_pg_type_oid as i16,
@@ -250,12 +250,11 @@ async fn catalog_index_scan_finds_seeded_pg_type_row() {
             func: zero_fmgr_info(),
             argument: ObjectIdGetDatum(INT4OID),
         }];
-        let mut scan = systable_beginscan_indexed(&shared, pg_type, index, snap, &key);
+        let mut scan = systable_beginscan_indexed(&shared, &pg_type, &index, &snap, &key);
         let found = systable_getnext(&shared, &mut scan).await;
         assert!(found.is_some(), "the index scan finds the seeded int4 pg_type row");
         if let Some(t) = found {
-            // SAFETY: live scan tuple; read its oid column.
-            let desc = unsafe { (*pg_type).rd_att.clone().unwrap() };
+            let desc = pg_type.rd_att.clone().unwrap();
             let (oid_d, isnull) =
                 unsafe { crate::backend::access::common::heaptuple::heap_getattr(&*t, Anum_pg_type_oid, &desc) };
             assert!(!isnull);
@@ -270,7 +269,7 @@ async fn catalog_index_scan_finds_seeded_pg_type_row() {
 /// Build + populate a btree index Relation over pg_type's `oid` column, returning
 /// the open index handle (the M2 systable index path needs an index Relation; the
 /// catalog index built by initdb is registered but not relcache-rebuildable yet).
-async fn make_oid_index_relation(shared: &Arc<SharedState>, heap_relid: Oid) -> *mut crate::utils::rel::RelationData {
+async fn make_oid_index_relation(shared: &Arc<SharedState>, heap_relid: Oid) -> Arc<crate::utils::rel::RelationData> {
     use crate::backend::catalog::index::{index_build, make_index_info};
     use crate::backend::utils::cache::relcache::{
         index_init_opclass_support, relation_id_get_relation, relation_init_index_access_info,
@@ -295,7 +294,7 @@ async fn make_oid_index_relation(shared: &Arc<SharedState>, heap_relid: Oid) -> 
 
     // SAFETY: heap relation has a descriptor; copy its oid column into a 1-col index
     // descriptor.
-    let heap_td = unsafe { (*heap).rd_att.clone().unwrap() };
+    let heap_td = heap.rd_att.clone().unwrap();
     let mut itd = crate::access::tupdesc::TupleDescData::create_template(1);
     itd.tdtypmod = -1;
     let from = heap_td.attr((Anum_pg_type_oid - 1) as usize);
@@ -312,19 +311,23 @@ async fn make_oid_index_relation(shared: &Arc<SharedState>, heap_relid: Oid) -> 
     }
     itd.populate_compact_attribute(0);
 
-    let index = build_index_relation(iloc, Arc::new(itd));
-    attach_rd_index(index);
-    relation_init_index_access_info(index);
-    index_init_opclass_support(index, &[Oid(1981)], &[Oid(0)], &[0]);
+    let mut index = build_index_relation(iloc, Arc::new(itd));
+    {
+        // The index is unshared here (just built); mutate in place via get_mut.
+        let idx = Arc::get_mut(&mut index).expect("freshly built index is unshared");
+        attach_rd_index(idx);
+        relation_init_index_access_info(idx);
+        index_init_opclass_support(idx, &[Oid(1981)], &[Oid(0)], &[0]);
+    }
 
-    index_build(shared, heap, index, &info).await;
+    index_build(shared, &heap, &index, &info).await;
     crate::backend::utils::cache::relcache::relation_close(heap);
     index
 }
 
 /// Attach a 1-column unique pg_index Form to an index relation (so the btree AM can
 /// read its key counts).
-fn attach_rd_index(index: *mut crate::utils::rel::RelationData) {
+fn attach_rd_index(index: &mut crate::utils::rel::RelationData) {
     use crate::catalog::pg_index::FormData_pg_index;
     // SAFETY: FormData_pg_index is repr(C) POD; zero then patch.
     let mut idx: Box<FormData_pg_index> = Box::new(unsafe { core::mem::zeroed() });
@@ -332,19 +335,17 @@ fn attach_rd_index(index: *mut crate::utils::rel::RelationData) {
     idx.indnkeyatts = 1;
     idx.indisunique = true;
     idx.indimmediate = true;
-    // SAFETY: live index relation.
-    unsafe {
-        (*index).rd_index = Box::into_raw(idx);
-    }
+    index.rd_index = Some(idx);
 }
 
 /// Build a minimal index `RelationData` (boxed, leaked) backed by `locator`.
 fn build_index_relation(
     locator: crate::storage::relfilelocator::RelFileLocator,
     tupdesc: crate::access::tupdesc::TupleDesc,
-) -> *mut crate::utils::rel::RelationData {
+) -> Arc<crate::utils::rel::RelationData> {
     use crate::catalog::pg_class::{FormData_pg_class, RELKIND_INDEX, RELPERSISTENCE_PERMANENT};
     use crate::utils::rel::{LockInfoData, LockRelId, RelationData};
+    use std::sync::atomic::Ordering;
 
     // SAFETY: FormData_pg_class is repr(C) POD; all-zero is valid, then patched.
     let mut form: Box<FormData_pg_class> = Box::new(unsafe { core::mem::zeroed() });
@@ -352,12 +353,12 @@ fn build_index_relation(
     form.relpersistence = RELPERSISTENCE_PERMANENT;
     form.relnatts = 1;
     form.relam = Oid(403);
-    let form_ptr = Box::into_raw(form);
+    let form_ptr = Some(form);
 
-    let mut rel = Box::new(RelationData::blank());
+    let mut rel = RelationData::blank();
     rel.rd_id = locator.relNumber;
-    rel.rd_isvalid = true;
-    rel.rd_refcnt = 1;
+    rel.rd_isvalid.store(true, Ordering::Relaxed);
+    rel.rd_refcnt.store(1, Ordering::Relaxed);
     rel.rd_rel = form_ptr;
     rel.rd_att = Some(tupdesc);
     rel.rd_amhandler = Oid(403);
@@ -365,7 +366,7 @@ fn build_index_relation(
     rel.rd_lockInfo = LockInfoData {
         lockRelId: LockRelId { relId: locator.relNumber, dbId: locator.dbOid },
     };
-    Box::into_raw(rel)
+    std::sync::Arc::new(rel)
 }
 
 fn zero_fmgr_info() -> crate::fmgr::FmgrInfo {
@@ -377,7 +378,7 @@ fn zero_fmgr_info() -> crate::fmgr::FmgrInfo {
         retset: false,
         stats: 0,
         extra: 0,
-        mcxt: core::ptr::null_mut(),
-        expr: core::ptr::null_mut(),
+        mcxt: (),
+        expr: None,
     }
 }

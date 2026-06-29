@@ -1,6 +1,8 @@
 //! Translated from PostgreSQL src/include/access/spgist_private.h
 //! Private declarations for SP-GiST access method.
 
+use std::sync::Arc;
+
 use crate::access::genam::IndexOrderByDistance;
 use crate::access::itup::{IndexTupleData, MaxIndexTuplesPerPage};
 use crate::access::skey::ScanKey;
@@ -18,8 +20,8 @@ use crate::storage::bufpage::{Page, SizeOfPageHeaderData};
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
 use crate::utils::geo_decls::BOX;
+use crate::utils::rel::RelationData;
 use crate::utils::memutils::MemoryContext;
-use crate::utils::rel::Relation;
 
 /// reloption struct for SP-GiST (in-memory).
 pub struct SpGistOptions {
@@ -153,7 +155,7 @@ pub struct SpGistTypeDesc {
 /// Private state of the index AM, common to insert and search code (in-memory).
 pub struct SpGistState {
     /// index we're working with
-    pub index: Relation,
+    pub index: Arc<RelationData>,
     /// filled in by opclass config method
     pub config: spgConfigOut,
     /// type of values to be indexed/restored
@@ -540,32 +542,32 @@ pub const SPGIST_DEFAULT_FILLFACTOR: i32 = 80;
 
 /* spgutils.c */
 
-pub fn spgGetCache(_index: Relation) -> *mut SpGistCache {
+pub fn spgGetCache(_index: &RelationData) -> *mut SpGistCache {
     unimplemented!()
 }
 
-pub fn getSpGistTupleDesc(_index: Relation, _key_type: &mut SpGistTypeDesc) -> TupleDesc {
+pub fn getSpGistTupleDesc(_index: &RelationData, _key_type: &mut SpGistTypeDesc) -> TupleDesc {
     unimplemented!()
 }
 
-pub fn initSpGistState(_state: &mut SpGistState, _index: Relation) {
+pub fn initSpGistState(_state: &mut SpGistState, _index: &RelationData) {
     unimplemented!()
 }
 
-pub fn SpGistNewBuffer(_index: Relation) -> Buffer {
+pub fn SpGistNewBuffer(_index: &RelationData) -> Buffer {
     unimplemented!()
 }
 
-pub fn SpGistUpdateMetaPage(_index: Relation) {
+pub fn SpGistUpdateMetaPage(_index: &RelationData) {
     unimplemented!()
 }
 
 /// Returns the buffer; `*isNew` out-param folded into the tuple.
-pub fn SpGistGetBuffer(_index: Relation, _flags: i32, _need_space: i32) -> (Buffer, bool) {
+pub fn SpGistGetBuffer(_index: &RelationData, _flags: i32, _need_space: i32) -> (Buffer, bool) {
     unimplemented!()
 }
 
-pub fn SpGistSetLastUsedPage(_index: Relation, _buffer: Buffer) {
+pub fn SpGistSetLastUsedPage(_index: &RelationData, _buffer: Buffer) {
     unimplemented!()
 }
 
@@ -686,7 +688,7 @@ pub fn spgPageIndexMultiDelete(
 }
 
 pub fn spgdoinsert(
-    _index: Relation,
+    _index: &RelationData,
     _state: &mut SpGistState,
     _heap_ptr: &ItemPointerData,
     _datums: &mut [Datum],

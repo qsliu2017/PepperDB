@@ -3,7 +3,7 @@
 use crate::nodes::execnodes::{EState, TableFuncScanState};
 use crate::nodes::plannodes::TableFuncScan;
 
-pub fn ExecInitTableFuncScan(_node: &TableFuncScan, _estate: &mut EState, _eflags: i32) -> *mut TableFuncScanState {
+pub fn ExecInitTableFuncScan(_node: &TableFuncScan, _estate: &mut EState<'_>, _eflags: i32) -> *mut TableFuncScanState {
     unimplemented!() // TODO(ptr)
 }
 pub fn ExecEndTableFuncScan(_node: &mut TableFuncScanState) {

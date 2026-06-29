@@ -7,7 +7,7 @@ use crate::nodes::plannodes::IncrementalSort;
 // TODO(ptr)
 pub fn ExecInitIncrementalSort(
     _node: &IncrementalSort,
-    _estate: &mut EState,
+    _estate: &mut EState<'_>,
     _eflags: i32,
 ) -> *mut IncrementalSortState {
     unimplemented!()

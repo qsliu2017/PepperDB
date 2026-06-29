@@ -124,8 +124,10 @@ pub struct CachedPlan {
     pub generation: i32,
     /// count of live references
     pub refcount: i32,
-    /// context containing this CachedPlan
-    pub context: MemoryContext,
+    /// context containing this CachedPlan; tombstoned in this port (no live
+    /// MemoryContext handle), keeps CachedPlan (and the Portal/QueryDesc that
+    /// hold it) genuinely Send.
+    pub context: (),
 }
 
 /// Cached planned form of a standalone scalar expression.

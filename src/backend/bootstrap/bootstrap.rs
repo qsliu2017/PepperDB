@@ -35,10 +35,6 @@
 //! the BKI bison parser is replaced by the `.dat` codegen, so there is nothing to
 //! translate.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: bootstrap_catalogs runs on one task and holds per-backend raw Relation/HeapTuple handles task-confined for initdb; never migrated mid-await. Same contract as the catalog/relcache modules."
-)]
 
 use crate::access::tupdesc::{TupleDesc, TupleDescData};
 use crate::catalog::pg_attribute::{AttributeRelationId, AttributeRelation_Rowtype_Id};
@@ -400,7 +396,7 @@ pub async fn bootstrap_catalogs(
     let oid_info = make_index_info(&[crate::catalog::pg_type::Anum_pg_type_oid as i16], true);
     index_create(
         shared,
-        pg_type,
+        &pg_type,
         "pg_type_oid_index",
         TypeOidIndexId,
         TypeOidIndexId,

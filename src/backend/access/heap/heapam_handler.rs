@@ -15,11 +15,11 @@
 use std::sync::Arc;
 
 use crate::access::sdir::ScanDirection;
-use crate::backend::access::heap::heapam::{heap_getnext, HeapScanDescData, SendRelation};
+use crate::backend::access::heap::heapam::{heap_getnext, HeapScanDescData};
 use crate::c::CommandId;
 use crate::executor::tuptable::{TupleTableSlot, TupleTableSlotOps};
 use crate::shared_state::SharedState;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// `heapam_slot_callbacks`: the slot implementation suitable for heap tuples
 /// (`TTSOpsBufferHeapTuple` in C -- a buffer-pinned heap-tuple slot).
@@ -28,7 +28,7 @@ use crate::utils::relcache::Relation;
 /// ported (only `TTSOpsVirtual` exists today). The slot-based scan path that
 /// needs it is staged together with the executor slot-store routines; the
 /// heap-level scan (`heap_getnext`) is the complete M2 path.
-pub fn heapam_slot_callbacks(_relation: Relation) -> &'static dyn TupleTableSlotOps {
+pub fn heapam_slot_callbacks(_relation: &RelationData) -> &'static dyn TupleTableSlotOps {
     unimplemented!("heapam_slot_callbacks: TTSOpsBufferHeapTuple (executor slot ops, staged with the slot path)")
 }
 
@@ -39,13 +39,9 @@ pub fn heapam_slot_callbacks(_relation: Relation) -> &'static dyn TupleTableSlot
 /// (`ExecFetchSlotHeapTuple`) is an executor routine not yet ported. The storage
 /// half (`heap_insert`) is complete; callers with a built `HeapTuple` use
 /// `heap_insert` directly until the slot store/fetch lands.
-#[allow(
-    clippy::future_not_send,
-    reason = "staged: the executor TupleTableSlot is !Send and ExecFetchSlotHeapTuple is unported; revisit when the executor slot machinery (Send-correct) lands. The M2-complete insert path (heap_insert) is Send."
-)]
 pub async fn heapam_tuple_insert(
     _shared: &Arc<SharedState>,
-    _relation: SendRelation,
+    _relation: &RelationData,
     _slot: &mut TupleTableSlot,
     _cid: CommandId,
     _options: i32,
@@ -60,13 +56,9 @@ pub async fn heapam_tuple_insert(
 /// are executor routines not yet ported. The scan/visibility half
 /// (`heap_getnext`) is complete; recover tuples via `heap_getnext` +
 /// `heap_deform_tuple` until the slot-store routines land.
-#[allow(
-    clippy::future_not_send,
-    reason = "staged: the executor TupleTableSlot is !Send and ExecStoreBufferHeapTuple is unported; revisit when the executor slot machinery (Send-correct) lands. The M2-complete scan path (heap_getnext) is Send."
-)]
 pub async fn heap_getnextslot(
     shared: &Arc<SharedState>,
-    scan: &mut HeapScanDescData,
+    scan: &mut HeapScanDescData<'_, '_>,
     direction: ScanDirection,
     _slot: &mut TupleTableSlot,
 ) -> bool {

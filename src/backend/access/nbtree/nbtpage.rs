@@ -21,7 +21,6 @@ use crate::access::nbtree::{
     BTMetaPageData, BTPageGetOpaque, BTPageOpaqueData, BTREE_MAGIC, BTREE_METAPAGE,
     BTREE_NOVAC_VERSION, BTREE_VERSION, BTP_LEAF, BTP_META, P_ISMETA, P_NONE,
 };
-use crate::backend::access::heap::heapam::SendPtr;
 use crate::common::relpath::ForkNumber;
 use crate::pg_config::BLCKSZ;
 use crate::shared_state::SharedState;
@@ -30,7 +29,6 @@ use crate::storage::buf::Buffer;
 use crate::storage::bufmgr::{ReadBufferMode, P_NEW};
 use crate::storage::bufpage::{Page, SizeOfPageHeaderData};
 use crate::utils::rel::RelationData;
-use crate::utils::relcache::Relation;
 
 const fn maxalign(n: usize) -> usize {
     (n + 7) & !7
@@ -194,29 +192,22 @@ fn buf_id_of(buffer: Buffer) -> i32 {
     id
 }
 
-/// A `Send` index-relation handle for async helpers that hold it across `.await`
-/// (the raw `*mut RelationData` is task-confined for the operation; same contract
-/// as the heap AM's `SendRelation`).
-pub type SendRelation = SendPtr<RelationData>;
-
-/// Pull the (Send) smgr handle + relpersistence out of an index relation.
-fn index_smgr(relation: Relation) -> (SendPtr<crate::storage::smgr::SmgrRelation>, i8) {
-    // SAFETY: live, open index relation held by the caller.
-    let rel: &mut RelationData = unsafe { &mut *relation };
-    let relpersistence = unsafe { (*rel.rd_rel).relpersistence };
-    (SendPtr(rel.smgr()), relpersistence)
+/// Pull the smgr handle + relpersistence out of an index relation.
+fn index_smgr(relation: &RelationData) -> (*mut crate::storage::smgr::SmgrRelation, i8) {
+    let relpersistence = relation.form().relpersistence;
+    (relation.smgr(), relpersistence)
 }
 
 /// `ReadBuffer(rel, blkno)` for an index: pin `blkno` of the index's main fork
 /// (async; no lock taken -- the caller locks via the copy/write helpers).
 pub async fn bt_read_buffer(
     shared: &Arc<SharedState>,
-    relation: SendRelation,
+    relation: &RelationData,
     blkno: BlockNumber,
 ) -> Buffer {
-    let (smgr_ptr, relpersistence) = index_smgr(relation.0);
-    // SAFETY: relcache-owned smgr handle, valid while the rel is open; Send.
-    let smgr = unsafe { &mut *smgr_ptr.0 };
+    let (smgr_ptr, relpersistence) = index_smgr(relation);
+    // SAFETY: relcache-owned smgr handle, valid while the rel is open.
+    let smgr = unsafe { &mut *smgr_ptr };
     crate::backend::storage::buffer::bufmgr::read_buffer_common(
         shared,
         smgr,
@@ -268,11 +259,11 @@ pub fn bt_relbuf(shared: &Arc<SharedState>, buffer: Buffer) {
 /// here we always extend, which is correct (just not space-optimal). Returns the
 /// pinned buffer for the new, zero-initialized, btree-pageinit'd page (NOT
 /// locked; the caller fills it via [`bt_write_page`]).
-pub async fn bt_allocbuf(shared: &Arc<SharedState>, relation: SendRelation) -> Buffer {
+pub async fn bt_allocbuf(shared: &Arc<SharedState>, relation: &RelationData) -> Buffer {
     let buffer = {
-        let (smgr_ptr, relpersistence) = index_smgr(relation.0);
-        // SAFETY: relcache-owned smgr handle valid while rel open; Send.
-        let smgr = unsafe { &mut *smgr_ptr.0 };
+        let (smgr_ptr, relpersistence) = index_smgr(relation);
+        // SAFETY: relcache-owned smgr handle valid while rel open.
+        let smgr = unsafe { &mut *smgr_ptr };
         crate::backend::storage::buffer::bufmgr::read_buffer_common(
             shared,
             smgr,
@@ -303,7 +294,7 @@ pub async fn bt_allocbuf(shared: &Arc<SharedState>, relation: SendRelation) -> B
 /// (create the root on first insert) lives in nbtinsert via the metapage update.
 pub async fn bt_getroot_read(
     shared: &Arc<SharedState>,
-    relation: SendRelation,
+    relation: &RelationData,
 ) -> Option<(BlockNumber, Box<Page>)> {
     let metabuf = bt_read_buffer(shared, relation, BTREE_METAPAGE).await;
     let metapage = bt_read_page_copy(shared, metabuf);
@@ -320,7 +311,7 @@ pub async fn bt_getroot_read(
 }
 
 /// `_bt_metaversion`: `(heapkeyspace, allequalimage)` from the index's meta page.
-pub async fn bt_metaversion(shared: &Arc<SharedState>, relation: SendRelation) -> (bool, bool) {
+pub async fn bt_metaversion(shared: &Arc<SharedState>, relation: &RelationData) -> (bool, bool) {
     let metabuf = bt_read_buffer(shared, relation, BTREE_METAPAGE).await;
     let metapage = bt_read_page_copy(shared, metabuf);
     bt_relbuf(shared, metabuf);

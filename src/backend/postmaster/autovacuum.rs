@@ -699,7 +699,7 @@ fn scan_pg_database() -> Vec<AvwDbase> {
     let mut dblist: Vec<AvwDbase> = Vec::new();
 
     let rel = table_open(DatabaseRelationId, LockMode::AccessShareLock);
-    let scan = table_beginscan_catalog(rel, 0, &mut []);
+    let scan = table_beginscan_catalog(&rel, 0, &mut []);
 
     loop {
         let tup = heap_getnext(scan, ScanDirection::Forward);
@@ -1276,7 +1276,7 @@ fn collect_tables_to_vacuum(effective_multixact_freeze_max_age: i32) -> Vec<Oid>
     let class_rel = table_open(RelationRelationId, LockMode::AccessShareLock);
 
     // Pass 1: plain relations + matviews.
-    let scan = table_beginscan_catalog(class_rel, 0, &mut []);
+    let scan = table_beginscan_catalog(&class_rel, 0, &mut []);
     loop {
         let tuple = heap_getnext(scan, ScanDirection::Forward);
         // SAFETY: scan-owned tuple read before the next heap_getnext; no await.
@@ -1303,7 +1303,7 @@ fn collect_tables_to_vacuum(effective_multixact_freeze_max_age: i32) -> Vec<Oid>
 
     // Pass 2: TOAST tables (PG uses a scan key on relkind; the catalog scan stub
     // ignores keys, so we filter in the loop).
-    let scan = table_beginscan_catalog(class_rel, 0, &mut []);
+    let scan = table_beginscan_catalog(&class_rel, 0, &mut []);
     loop {
         let tuple = heap_getnext(scan, ScanDirection::Forward);
         // SAFETY: as above.

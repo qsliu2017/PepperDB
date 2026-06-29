@@ -14,7 +14,7 @@ use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
 use crate::storage::relfilelocator::RelFileLocator;
 use crate::storage::sinval::SharedInvalidationMessage;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 // WAL opcodes (info high nibble): 3 bits opcode + 1 init bit. Raw consts.
 pub const XLOG_HEAP_INSERT: u8 = 0x00;
@@ -393,7 +393,7 @@ pub fn heap_xlog_logical_rewrite(_r: &mut XLogReaderState) {
 }
 
 pub fn log_heap_visible(
-    _rel: Relation,
+    _rel: &RelationData,
     _heap_buffer: Buffer,
     _vm_buffer: Buffer,
     _snapshotConflictHorizon: TransactionId,

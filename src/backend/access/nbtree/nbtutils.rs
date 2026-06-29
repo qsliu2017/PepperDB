@@ -14,10 +14,6 @@
 //! "scankey vs index item" convention (unless the column is DESC), exactly as
 //! nbtsearch.c's `_bt_compare` does.
 
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "btree utils take raw Relation/IndexTuple pointers per the C API; the deref is faithful to C (callers pass live handles)"
-)]
 
 use crate::access::itup::IndexTuple;
 use crate::access::nbtree::{
@@ -33,7 +29,6 @@ use crate::storage::bufpage::Page;
 use crate::storage::itemid::LP_NORMAL;
 use crate::storage::off::OffsetNumber;
 use crate::utils::rel::RelationData;
-use crate::utils::relcache::Relation;
 
 /// Reinterpret a page item's bytes as an index tuple handle.
 ///
@@ -61,9 +56,8 @@ fn item_as_index_tuple(item: &[u8]) -> IndexTuple {
 /// which is async); this builds the column array and leaves those as the utility
 /// defaults (`heapkeyspace=true`).
 #[must_use]
-pub fn bt_mkscankey(rel: Relation, itup: Option<IndexTuple>) -> Box<BTScanInsertData> {
-    // SAFETY: live index relation with access info initialized.
-    let r: &RelationData = unsafe { &*rel };
+pub fn bt_mkscankey(rel: &RelationData, itup: Option<IndexTuple>) -> Box<BTScanInsertData> {
+    let r: &RelationData = rel;
     let itupdesc = r.descr();
     let indnkeyatts = r.index_number_of_key_attributes() as usize;
     // SAFETY: itup, when Some, is a live index tuple on a page.
@@ -75,12 +69,8 @@ pub fn bt_mkscankey(rel: Relation, itup: Option<IndexTuple>) -> Box<BTScanInsert
     let mut anynullkeys = false;
 
     for i in 0..indnkeyatts {
-        // SAFETY: support arrays sized >= indnkeyatts; procinfo points into the
-        // relcache support-info array (valid while rel is open).
-        let procinfo: *mut FmgrInfo = index_getprocinfo(rel, (i + 1) as i32, BTORDER_PROC);
-        // SAFETY: live FmgrInfo slot; copy it into the scankey (FmgrInfo is Copy-ish
-        // POD for the builtin path: fn_addr/oid/flags).
-        let func = clone_fmgr_info(unsafe { &*procinfo });
+        // The support FmgrInfo for this key column's comparator (owned copy).
+        let func = index_getprocinfo(rel, (i + 1) as i32, BTORDER_PROC);
 
         let (arg, isnull) = itup.map_or((Datum(0), false), |t| {
             if i < tupnatts {
@@ -91,9 +81,8 @@ pub fn bt_mkscankey(rel: Relation, itup: Option<IndexTuple>) -> Box<BTScanInsert
             }
         });
 
-        // SAFETY: rd_indoption sized >= indnkeyatts.
-        let indoption = unsafe { *r.rd_indoption.add(i) };
-        let collation = unsafe { *r.rd_indcollation.add(i) };
+        let indoption = r.rd_indoption[i];
+        let collation = r.rd_indcollation[i];
         let mut flags = i32::from(indoption) << SK_BT_INDOPTION_SHIFT;
         if isnull {
             flags |= ScanKeyFlags::ISNULL.bits();
@@ -141,21 +130,6 @@ pub fn bt_scankey_set_search_args(key: &mut BTScanInsertData, args: &[(Datum, bo
     key.keysz = args.len().min(key.scankeys.len()) as i32;
 }
 
-/// Shallow-copy an `FmgrInfo` (the builtin path stores no subsidiary `extra`).
-fn clone_fmgr_info(src: &FmgrInfo) -> FmgrInfo {
-    FmgrInfo {
-        fn_addr: src.fn_addr,
-        oid: src.oid,
-        nargs: src.nargs,
-        strict: src.strict,
-        retset: src.retset,
-        stats: src.stats,
-        extra: src.extra,
-        mcxt: src.mcxt,
-        expr: src.expr,
-    }
-}
-
 /// `_bt_compare`: compare the insertion scankey `key` against the index tuple at
 /// `offnum` on `page` of index `rel`. Returns `< 0` if the key sorts before the
 /// item, `0` if equal across all `keysz` columns, `> 0` if after.
@@ -167,13 +141,12 @@ fn clone_fmgr_info(src: &FmgrInfo) -> FmgrInfo {
 ///
 /// SAFETY: `page` holds a valid index tuple at `offnum`; `rel` is a live index.
 pub fn bt_compare(
-    rel: Relation,
+    rel: &RelationData,
     key: &mut BTScanInsertData,
     page: &Page,
     offnum: OffsetNumber,
 ) -> i32 {
-    // SAFETY: live index relation.
-    let r: &RelationData = unsafe { &*rel };
+    let r: &RelationData = rel;
     let itupdesc = r.descr();
 
     let item_id = page.get_item_id(offnum);
@@ -247,7 +220,7 @@ fn call_cmp(func: &mut FmgrInfo, collation: crate::postgres_ext::Oid, a: Datum, 
 /// only supports the leading equality prefix the search/systable path uses.
 #[must_use]
 pub fn bt_checkkeys_eq(
-    rel: Relation,
+    rel: &RelationData,
     key: &mut BTScanInsertData,
     page: &Page,
     offnum: OffsetNumber,

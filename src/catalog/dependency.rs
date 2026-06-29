@@ -6,7 +6,8 @@ use crate::catalog::objectaddress::ObjectAddress;
 use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::DropBehavior;
 use crate::postgres_ext::Oid;
-use crate::utils::rel::Relation;
+use std::sync::Arc;
+use crate::utils::rel::RelationData;
 
 // pg_list is tombstoned; List maps to Vec. Element type unknown at this stub
 // level, so default to Vec<()>.
@@ -205,7 +206,7 @@ pub fn getOwnedSequences(_relid: Oid) -> List {
     unimplemented!()
 }
 
-pub fn getIdentitySequence(_rel: &Relation, _attnum: AttrNumber, _missing_ok: bool) -> Option<Oid> {
+pub fn getIdentitySequence(_rel: &Arc<RelationData>, _attnum: AttrNumber, _missing_ok: bool) -> Option<Oid> {
     unimplemented!()
 }
 

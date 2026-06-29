@@ -13,16 +13,11 @@
 //! `ExecModifyTable` is `async` (rules.md s5). The caller must be inside a WAL
 //! insertion scope (`with_insertion`), as `heap_insert` requires.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: the modify path's per-query state (the source slot, raw Relation handle, in-memory HeapTuple) is !Send and task-confined -- one backend task drives the modification. Same contract as the table AM insert futures."
-)]
 
 use std::sync::Arc;
 
 use crate::backend::access::common::heaptuple::heap_form_tuple;
-use crate::backend::access::heap::heapam::{heap_insert, SendPtr};
-use crate::backend::executor::execMain::exec_relation_for_rti;
+use crate::backend::access::heap::heapam::heap_insert;
 use crate::backend::executor::execProcnode::{
     exec_end_node, exec_init_node, exec_proc_node, PlanStateNode,
 };
@@ -30,20 +25,23 @@ use crate::nodes::execnodes::{EState, ModifyTableState, PlanState};
 use crate::nodes::nodes::{CmdType, Node};
 use crate::nodes::plannodes::ModifyTable;
 use crate::shared_state::SharedState;
-use crate::utils::relcache::Relation;
+use crate::utils::rel::RelationData;
 
 /// Run-state pairing the PG `ModifyTableState` with its child (source) plan-state.
 /// The C node holds the subplan-state through `ps.lefttree` (a `PlanState*`); the
 /// Rust `PlanState.lefttree` is typed `Option<Box<PlanState>>` (the base struct,
 /// not the `PlanStateNode` dispatch enum), so the executable child is kept here.
-pub struct ModifyTableRun {
+///
+/// Borrow-based ownership (relation-ownership-plan step 5): the result relation is
+/// BORROWED from the `EState` range-table (`&'rel RelationData`), whose owner is the
+/// command frame's `Arc` -- no node-owned `Arc`.
+pub struct ModifyTableRun<'rel> {
     pub state: Box<ModifyTableState>,
     /// the source-plan state yielding rows to insert.
-    pub subplan: Box<PlanStateNode>,
-    /// the open target `Relation` (PG keeps it in `resultRelInfo->ri_RelationDesc`,
-    /// whose field is the opaque forward placeholder here; read from the executor
-    /// relation registry at init, see execMain).
-    pub result_relation: Relation,
+    pub subplan: Box<PlanStateNode<'rel>>,
+    /// the target relation borrowed from `EState.es_range_table_rels` (PG keeps it
+    /// in `resultRelInfo->ri_RelationDesc`).
+    pub result_relation: &'rel RelationData,
     /// rows inserted by `ExecModifyTable` (PG bumps `es_processed` directly; here
     /// the EState lives on the QueryDesc, so the driver reads this after the run).
     pub processed: u64,
@@ -52,7 +50,7 @@ pub struct ModifyTableRun {
 /// PG `ExecInitModifyTable` (M2: INSERT). Builds the ModifyTableState, validates
 /// it is an INSERT with a single source subplan, and initializes that subplan. The
 /// per-result-rel slot/projection/trigger/WCO setup grows at later milestones.
-pub fn exec_init_modify_table(node: &ModifyTable, estate: &mut EState, eflags: i32) -> Box<ModifyTableRun> {
+pub fn exec_init_modify_table<'rel>(node: &ModifyTable, estate: &mut EState<'rel>, eflags: i32) -> Box<ModifyTableRun<'rel>> {
     crate::assert!(
         node.operation == CmdType::INSERT,
         "ExecInitModifyTable: only INSERT is reachable in M2"
@@ -76,14 +74,17 @@ pub fn exec_init_modify_table(node: &ModifyTable, estate: &mut EState, eflags: i
     let subplan = exec_init_node(Some(subplan_node), estate, eflags)
         .unwrap_or_else(|| unimplemented!("ExecInitModifyTable: null source subplan"));
 
-    // ExecInitResultRelation: open the (single) target relation. PG reads it from
-    // the EState range-table slots; here it comes from the executor relation
-    // registry by the planned result-relation RT index.
+    // ExecInitResultRelation: the (single) target relation, BORROWED from the
+    // EState range-table slots (PG's `es_relations`, indexed by RTI) -- the command
+    // frame opened it into its owning `Arc` and published the borrow on the EState.
     let rti = node.result_relations[0];
     crate::assert!(rti > 0);
-    let result_relation = exec_relation_for_rti(rti as usize)
+    let result_relation = estate
+        .es_range_table_rels
+        .get((rti - 1) as usize)
+        .copied()
+        .flatten()
         .unwrap_or_else(|| unimplemented!("ExecInitModifyTable: result relation not registered for RTI"));
-    crate::assert!(!result_relation.is_null(), "result relation not opened (registry slot null)");
 
     let ps = PlanState {
         plan: Some(Node::ModifyTable(Box::new(node.clone()))),
@@ -112,7 +113,7 @@ pub fn exec_init_modify_table(node: &ModifyTable, estate: &mut EState, eflags: i
 /// ends after this one drive.
 pub async fn exec_modify_table<'r>(
     shared: &Arc<SharedState>,
-    run: &'r mut ModifyTableRun,
+    run: &'r mut ModifyTableRun<'_>,
 ) -> Option<&'r mut crate::nodes::execnodes::TupleTableSlot> {
     if run.state.mt_done {
         return None;
@@ -130,8 +131,7 @@ pub async fn exec_modify_table<'r>(
 
         // ExecInsert: form a heap tuple from the (virtual) source slot and store
         // it through the table AM. The TID is patched into the tuple by heap_insert.
-        let relation = run.result_relation;
-        exec_insert(shared, relation, slot, cid).await;
+        exec_insert(shared, run.result_relation, slot, cid).await;
         inserted += 1;
     }
 
@@ -151,7 +151,7 @@ pub async fn exec_modify_table<'r>(
 /// insert, WCO/constraint checks, and RETURNING grow at later milestones.
 async fn exec_insert(
     shared: &Arc<SharedState>,
-    relation: Relation,
+    relation: &RelationData,
     slot: &crate::nodes::execnodes::TupleTableSlot,
     cid: crate::c::CommandId,
 ) {
@@ -165,31 +165,22 @@ async fn exec_insert(
 
     // table_tuple_insert -> heap_insert. heap_insert stamps xmin/cmin, places the
     // tuple, emits WAL, and patches t_self.
-    heap_insert(
-        shared,
-        SendPtr(relation),
-        SendPtr(std::ptr::from_mut(&mut tuple)),
-        cid,
-        0,
-    )
-    .await;
+    heap_insert(shared, relation, &mut tuple, cid, 0).await;
 
-    // heap_freetuple: the in-memory tuple body block is reclaimed (the on-page
-    // copy is what persists). tuple drops here; free its body.
+    // heap_freetuple: the in-memory tuple body is reclaimed (the on-page copy is
+    // what persists). tuple drops here; free its body.
     crate::backend::access::common::heaptuple::heap_freetuple(tuple);
 }
 
 /// PG `ExecEndModifyTable`: tear down the subplan; result relations are
 /// caller-owned (M2), closed by the EState teardown.
-pub fn exec_end_modify_table(shared: &Arc<SharedState>, run: &mut ModifyTableRun) {
+pub fn exec_end_modify_table(shared: &Arc<SharedState>, run: &mut ModifyTableRun<'_>) {
     exec_end_node(Some(shared), &mut run.subplan);
 }
 
 /// The rowtype descriptor of a relation (`RelationGetDescr`).
-fn relation_tupdesc(relation: Relation) -> crate::access::tupdesc::TupleDesc {
-    // SAFETY: live open relation supplied by the caller.
-    let rd = unsafe { &*relation };
-    rd.rd_att
+fn relation_tupdesc(relation: &RelationData) -> crate::access::tupdesc::TupleDesc {
+    relation.rd_att
         .clone()
         .unwrap_or_else(|| unimplemented!("relation_tupdesc: relation has no rowtype descriptor"))
 }

@@ -20,7 +20,7 @@ use std::sync::Arc;
 use crate::access::sdir::ScanDirection;
 use crate::access::tableam::ScanOptions;
 use crate::backend::access::common::heaptuple::heap_form_tuple;
-use crate::backend::access::heap::heapam::{heap_insert, SendPtr};
+use crate::backend::access::heap::heapam::heap_insert;
 use crate::backend::access::index::indexam::{
     index_beginscan, index_fetch_heap, index_getnext_tid, index_rescan, IndexScanState,
 };
@@ -105,7 +105,9 @@ fn make_relation(
     locator: RelFileLocator,
     tupdesc: crate::access::tupdesc::TupleDesc,
     relkind: i8,
-) -> *mut RelationData {
+) -> Arc<RelationData> {
+    use std::sync::atomic::Ordering;
+
     use crate::catalog::pg_class::FormData_pg_class;
     // SAFETY: FormData_pg_class is repr(C) POD; all-zero is a valid pattern.
     let mut form: Box<FormData_pg_class> = Box::new(unsafe { core::mem::zeroed() });
@@ -113,33 +115,30 @@ fn make_relation(
     form.relpersistence = RELPERSISTENCE_PERMANENT;
     form.relnatts = tupdesc.natts as i16;
     form.relam = Oid(403); // BTREE_AM_OID for an index; harmless for heap test rels
-    let form_ptr = Box::into_raw(form);
+    let form_ptr = Some(form);
 
     let mut rel = RelationData::blank();
     rel.rd_locator = locator;
-    rel.rd_refcnt = 1;
-    rel.rd_isvalid = true;
+    rel.rd_refcnt.store(1, Ordering::Relaxed);
+    rel.rd_isvalid.store(true, Ordering::Relaxed);
     rel.rd_rel = form_ptr;
     rel.rd_att = Some(tupdesc);
     rel.rd_id = locator.relNumber;
     rel.rd_lockInfo = LockInfoData {
         lockRelId: LockRelId { relId: locator.relNumber, dbId: locator.dbOid },
     };
-    Box::into_raw(Box::new(rel))
+    Arc::new(rel)
 }
 
 /// Attach a single-column int4 pg_index + opclass support to an index relation.
-fn init_index_support(index: *mut RelationData, nkeyatts: i16) {
+fn init_index_support(index: &mut RelationData, nkeyatts: i16) {
     // SAFETY: FormData_pg_index is repr(C) POD; zero then patch the fixed fields.
     let mut idx: Box<FormData_pg_index> = Box::new(unsafe { core::mem::zeroed() });
     idx.indnatts = nkeyatts;
     idx.indnkeyatts = nkeyatts;
     idx.indisunique = false;
     idx.indnullsnotdistinct = false;
-    // SAFETY: live index relation.
-    unsafe {
-        (*index).rd_index = Box::into_raw(idx);
-    }
+    index.rd_index = Some(idx);
     relation_init_index_access_info(index);
     let opclasses = vec![INT4_BTREE_OPS_OID; nkeyatts as usize];
     let collations = vec![InvalidOid; nkeyatts as usize];
@@ -155,24 +154,22 @@ async fn create_main_fork(shared: &Arc<SharedState>, locator: RelFileLocator) {
     smgr.create(shared, ForkNumber::MAIN_FORKNUM, false).await;
 }
 
-#[allow(clippy::future_not_send, reason = "test helper; not spawned on the runtime")]
-async fn insert_row1(shared: &Arc<SharedState>, relation: *mut RelationData, a: i32) {
-    let desc = unsafe { (*relation).rd_att.clone().unwrap() };
+async fn insert_row1(shared: &Arc<SharedState>, relation: &Arc<RelationData>, a: i32) {
+    let desc = relation.rd_att.clone().unwrap();
     let values = [Int32GetDatum(a)];
     let isnull = [false];
     let mut tuple = heap_form_tuple(&desc, &values, &isnull);
     let cid = GetCurrentCommandId(true);
-    heap_insert(shared, SendPtr(relation), SendPtr(std::ptr::from_mut(&mut tuple)), cid, 0).await;
+    heap_insert(shared, relation, &mut tuple, cid, 0).await;
 }
 
-#[allow(clippy::future_not_send, reason = "test helper; not spawned on the runtime")]
-async fn insert_row2(shared: &Arc<SharedState>, relation: *mut RelationData, a: i32, b: i32) {
-    let desc = unsafe { (*relation).rd_att.clone().unwrap() };
+async fn insert_row2(shared: &Arc<SharedState>, relation: &Arc<RelationData>, a: i32, b: i32) {
+    let desc = relation.rd_att.clone().unwrap();
     let values = [Int32GetDatum(a), Int32GetDatum(b)];
     let isnull = [false, false];
     let mut tuple = heap_form_tuple(&desc, &values, &isnull);
     let cid = GetCurrentCommandId(true);
-    heap_insert(shared, SendPtr(relation), SendPtr(std::ptr::from_mut(&mut tuple)), cid, 0).await;
+    heap_insert(shared, relation, &mut tuple, cid, 0).await;
 }
 
 /// An IndexInfo whose key columns are heap columns `1..=nkeys`.
@@ -231,31 +228,36 @@ async fn build_and_forward_scan_sorted() {
         create_main_fork(&shared, hloc).await;
         create_main_fork(&shared, iloc).await;
         let heap = make_relation(hloc, one_int4_desc(), RELKIND_RELATION);
-        let index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
-        init_index_support(index, 1);
+        let mut index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
+        init_index_support(Arc::get_mut(&mut index).unwrap(), 1);
 
         // Insert keys out of order.
         for v in [30, 10, 50, 20, 40] {
-            insert_row1(&shared, heap, v).await;
+            insert_row1(&shared, &heap, v).await;
         }
         crate::backend::access::transam::xact::CommandCounterIncrement();
         crate::backend::utils::time::snapmgr::PushActiveSnapshot(txn_snapshot(&shared));
 
         let ii = index_info(1);
-        let res =
-            crate::backend::access::nbtree::nbtree::btbuild(&shared, heap, index, &ii).await;
+        let res = crate::backend::access::nbtree::nbtree::btbuild(
+            &shared,
+            &heap,
+            &index,
+            &ii,
+        )
+        .await;
         assert_eq!(res.heap_tuples as i64, 5);
         assert_eq!(res.index_tuples as i64, 5);
 
         // Forward full scan returns sorted keys.
-        let snap = txn_snapshot(&shared);
-        let mut scan = index_beginscan(heap, index, snap);
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut scan = index_beginscan(&heap, &index, &snap);
         index_rescan(&mut scan, Vec::new());
         let mut out = Vec::new();
         while let Some(tid) = index_getnext_tid(&shared, &mut scan, ScanDirection::Forward).await {
             // Fetch the heap tuple to read its key.
             let tup = index_fetch_heap(&shared, &mut scan).await.expect("heap tuple");
-            let desc = unsafe { (*heap).rd_att.clone().unwrap() };
+            let desc = heap.rd_att.clone().unwrap();
             let (vals, _n) = unsafe {
                 crate::backend::access::common::heaptuple::heap_deform_tuple(&tup, &desc)
             };
@@ -279,24 +281,30 @@ async fn point_lookup_hit_and_miss() {
         create_main_fork(&shared, hloc).await;
         create_main_fork(&shared, iloc).await;
         let heap = make_relation(hloc, one_int4_desc(), RELKIND_RELATION);
-        let index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
-        init_index_support(index, 1);
+        let mut index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
+        init_index_support(Arc::get_mut(&mut index).unwrap(), 1);
         for v in [5, 15, 25, 35] {
-            insert_row1(&shared, heap, v).await;
+            insert_row1(&shared, &heap, v).await;
         }
         crate::backend::access::transam::xact::CommandCounterIncrement();
         crate::backend::utils::time::snapmgr::PushActiveSnapshot(txn_snapshot(&shared));
         let ii = index_info(1);
-        crate::backend::access::nbtree::nbtree::btbuild(&shared, heap, index, &ii).await;
+        crate::backend::access::nbtree::nbtree::btbuild(
+            &shared,
+            &heap,
+            &index,
+            &ii,
+        )
+        .await;
 
         // Hit: 25 present.
-        let snap = txn_snapshot(&shared);
-        let mut scan = index_beginscan(heap, index, snap);
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut scan = index_beginscan(&heap, &index, &snap);
         index_rescan(&mut scan, vec![(1, Int32GetDatum(25))]);
         let got = index_getnext_tid(&shared, &mut scan, ScanDirection::Forward).await;
         assert!(got.is_some(), "key 25 should be found");
         let tup = index_fetch_heap(&shared, &mut scan).await.expect("heap tuple");
-        let desc = unsafe { (*heap).rd_att.clone().unwrap() };
+        let desc = heap.rd_att.clone().unwrap();
         let (vals, _n) =
             unsafe { crate::backend::access::common::heaptuple::heap_deform_tuple(&tup, &desc) };
         assert_eq!(DatumGetInt32(vals[0]), 25);
@@ -304,8 +312,8 @@ async fn point_lookup_hit_and_miss() {
         assert!(index_getnext_tid(&shared, &mut scan, ScanDirection::Forward).await.is_none());
 
         // Miss: 26 absent.
-        let snap = txn_snapshot(&shared);
-        let mut scan2 = index_beginscan(heap, index, snap);
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut scan2 = index_beginscan(&heap, &index, &snap);
         index_rescan(&mut scan2, vec![(1, Int32GetDatum(26))]);
         assert!(
             index_getnext_tid(&shared, &mut scan2, ScanDirection::Forward).await.is_none(),
@@ -327,24 +335,30 @@ async fn multi_column_scan() {
         create_main_fork(&shared, hloc).await;
         create_main_fork(&shared, iloc).await;
         let heap = make_relation(hloc, two_int4_desc(), RELKIND_RELATION);
-        let index = make_relation(iloc, two_int4_desc(), RELKIND_INDEX);
-        init_index_support(index, 2);
+        let mut index = make_relation(iloc, two_int4_desc(), RELKIND_INDEX);
+        init_index_support(Arc::get_mut(&mut index).unwrap(), 2);
         for (a, b) in [(2, 1), (1, 9), (1, 5), (2, 3)] {
-            insert_row2(&shared, heap, a, b).await;
+            insert_row2(&shared, &heap, a, b).await;
         }
         crate::backend::access::transam::xact::CommandCounterIncrement();
         crate::backend::utils::time::snapmgr::PushActiveSnapshot(txn_snapshot(&shared));
         let ii = index_info(2);
-        crate::backend::access::nbtree::nbtree::btbuild(&shared, heap, index, &ii).await;
+        crate::backend::access::nbtree::nbtree::btbuild(
+            &shared,
+            &heap,
+            &index,
+            &ii,
+        )
+        .await;
 
         // Full scan returns lexicographic (a,b) order.
-        let snap = txn_snapshot(&shared);
-        let mut scan = index_beginscan(heap, index, snap);
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut scan = index_beginscan(&heap, &index, &snap);
         index_rescan(&mut scan, Vec::new());
         let mut out = Vec::new();
         while index_getnext_tid(&shared, &mut scan, ScanDirection::Forward).await.is_some() {
             let tup = index_fetch_heap(&shared, &mut scan).await.expect("heap tuple");
-            let desc = unsafe { (*heap).rd_att.clone().unwrap() };
+            let desc = heap.rd_att.clone().unwrap();
             let (vals, _n) = unsafe {
                 crate::backend::access::common::heaptuple::heap_deform_tuple(&tup, &desc)
             };
@@ -353,8 +367,8 @@ async fn multi_column_scan() {
         assert_eq!(out, vec![(1, 5), (1, 9), (2, 1), (2, 3)]);
 
         // Prefix equality on column a = 1 returns both (1,*) rows.
-        let snap = txn_snapshot(&shared);
-        let mut scan2 = index_beginscan(heap, index, snap);
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut scan2 = index_beginscan(&heap, &index, &snap);
         index_rescan(&mut scan2, vec![(1, Int32GetDatum(1))]);
         let mut count = 0;
         while index_getnext_tid(&shared, &mut scan2, ScanDirection::Forward).await.is_some() {
@@ -377,31 +391,36 @@ async fn build_many_forces_split_then_full_scan_sorted() {
         create_main_fork(&shared, hloc).await;
         create_main_fork(&shared, iloc).await;
         let heap = make_relation(hloc, one_int4_desc(), RELKIND_RELATION);
-        let index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
-        init_index_support(index, 1);
+        let mut index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
+        init_index_support(Arc::get_mut(&mut index).unwrap(), 1);
 
         // Enough keys to span many leaf pages + at least one internal level.
         // An int4 leaf tuple is ~16 bytes; 2000 keys is ~32KB >> one 8KB page.
         let n: i32 = 2000;
         for v in (0..n).rev() {
-            insert_row1(&shared, heap, v).await;
+            insert_row1(&shared, &heap, v).await;
         }
         crate::backend::access::transam::xact::CommandCounterIncrement();
         crate::backend::utils::time::snapmgr::PushActiveSnapshot(txn_snapshot(&shared));
         let ii = index_info(1);
-        let res =
-            crate::backend::access::nbtree::nbtree::btbuild(&shared, heap, index, &ii).await;
+        let res = crate::backend::access::nbtree::nbtree::btbuild(
+            &shared,
+            &heap,
+            &index,
+            &ii,
+        )
+        .await;
         assert_eq!(res.index_tuples as i64, i64::from(n));
 
         // Full forward scan returns all keys sorted (split/internal correctness).
-        let snap = txn_snapshot(&shared);
-        let mut scan = index_beginscan(heap, index, snap);
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut scan = index_beginscan(&heap, &index, &snap);
         index_rescan(&mut scan, Vec::new());
         let mut prev = -1;
         let mut count = 0;
         while let Some(tid) = index_getnext_tid(&shared, &mut scan, ScanDirection::Forward).await {
             let tup = index_fetch_heap(&shared, &mut scan).await.expect("heap tuple");
-            let desc = unsafe { (*heap).rd_att.clone().unwrap() };
+            let desc = heap.rd_att.clone().unwrap();
             let (vals, _n) = unsafe {
                 crate::backend::access::common::heaptuple::heap_deform_tuple(&tup, &desc)
             };
@@ -414,13 +433,13 @@ async fn build_many_forces_split_then_full_scan_sorted() {
         assert_eq!(count, n, "all keys returned");
 
         // A point lookup deep in the tree still works (descends through internals).
-        let snap = txn_snapshot(&shared);
-        let mut scan2 = index_beginscan(heap, index, snap);
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut scan2 = index_beginscan(&heap, &index, &snap);
         index_rescan(&mut scan2, vec![(1, Int32GetDatum(1234))]);
         let tid = index_getnext_tid(&shared, &mut scan2, ScanDirection::Forward).await;
         assert!(tid.is_some(), "key 1234 found via internal descent");
         let tup = index_fetch_heap(&shared, &mut scan2).await.expect("heap tuple");
-        let desc = unsafe { (*heap).rd_att.clone().unwrap() };
+        let desc = heap.rd_att.clone().unwrap();
         let (vals, _n) =
             unsafe { crate::backend::access::common::heaptuple::heap_deform_tuple(&tup, &desc) };
         assert_eq!(DatumGetInt32(vals[0]), 1234);
@@ -442,17 +461,17 @@ async fn inserts_force_split_then_scan_sorted() {
         create_main_fork(&shared, hloc).await;
         create_main_fork(&shared, iloc).await;
         let heap = make_relation(hloc, one_int4_desc(), RELKIND_RELATION);
-        let index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
-        init_index_support(index, 1);
+        let mut index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
+        init_index_support(Arc::get_mut(&mut index).unwrap(), 1);
 
         // Start from an empty btree (meta page only).
-        btbuildempty(&shared, index).await;
+        btbuildempty(&shared, &index).await;
 
         // Insert keys one at a time (forcing many leaf splits + internal levels) and
         // a matching heap row for index_fetch_heap.
         let n: i32 = 800;
         for v in 0..n {
-            insert_row1(&shared, heap, v).await;
+            insert_row1(&shared, &heap, v).await;
             // Use the heap tuple's TID by re-deriving it: the row just inserted is
             // the last one, but for the index we just need a TID; insert_row1 set
             // t_self on its local tuple. Re-insert into the index with the heap TID.
@@ -464,13 +483,13 @@ async fn inserts_force_split_then_scan_sorted() {
                 posid: 0,
             };
             tid.set((v as u32) / 200, ((v % 200) + 1) as u16);
-            index_insert(&shared, index, &[Int32GetDatum(v)], &[false], &tid).await;
+            index_insert(&shared, &index, &[Int32GetDatum(v)], &[false], &tid).await;
         }
         crate::backend::access::transam::xact::CommandCounterIncrement();
 
         // Full forward scan returns all keys sorted (split correctness + balance).
-        let snap = txn_snapshot(&shared);
-        let mut scan = index_beginscan(heap, index, snap);
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut scan = index_beginscan(&heap, &index, &snap);
         index_rescan(&mut scan, Vec::new());
         let mut count = 0;
         while index_getnext_tid(&shared, &mut scan, ScanDirection::Forward).await.is_some() {
@@ -480,8 +499,8 @@ async fn inserts_force_split_then_scan_sorted() {
 
         // Point lookups across the (now multi-level) tree must all hit.
         for probe in [0, 199, 200, 401, 799] {
-            let snap = txn_snapshot(&shared);
-            let mut s = index_beginscan(heap, index, snap);
+            let snap = txn_snapshot(&shared).expect("snapshot");
+            let mut s = index_beginscan(&heap, &index, &snap);
             index_rescan(&mut s, vec![(1, Int32GetDatum(probe))]);
             assert!(
                 index_getnext_tid(&shared, &mut s, ScanDirection::Forward).await.is_some(),
@@ -489,8 +508,8 @@ async fn inserts_force_split_then_scan_sorted() {
             );
         }
         // A miss is still a miss.
-        let snap = txn_snapshot(&shared);
-        let mut s = index_beginscan(heap, index, snap);
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut s = index_beginscan(&heap, &index, &snap);
         index_rescan(&mut s, vec![(1, Int32GetDatum(10_000))]);
         assert!(index_getnext_tid(&shared, &mut s, ScanDirection::Forward).await.is_none());
     })
@@ -514,16 +533,22 @@ async fn systable_index_scan_finds_row() {
         create_main_fork(&shared, iloc).await;
         // A small "catalog-shaped" heap: one int4 key column.
         let heap = make_relation(hloc, one_int4_desc(), RELKIND_RELATION);
-        let index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
-        init_index_support(index, 1);
+        let mut index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
+        init_index_support(Arc::get_mut(&mut index).unwrap(), 1);
 
         for v in [100, 200, 300, 400] {
-            insert_row1(&shared, heap, v).await;
+            insert_row1(&shared, &heap, v).await;
         }
         crate::backend::access::transam::xact::CommandCounterIncrement();
         crate::backend::utils::time::snapmgr::PushActiveSnapshot(txn_snapshot(&shared));
         let ii = index_info(1);
-        crate::backend::access::nbtree::nbtree::btbuild(&shared, heap, index, &ii).await;
+        crate::backend::access::nbtree::nbtree::btbuild(
+            &shared,
+            &heap,
+            &index,
+            &ii,
+        )
+        .await;
 
         // Drive the systable INDEX-scan path for the equality key (column 1 = 300).
         let key = [ScanKeyData {
@@ -535,12 +560,13 @@ async fn systable_index_scan_finds_row() {
             func: zero_fmgr_info(),
             argument: Int32GetDatum(300),
         }];
-        let snap = txn_snapshot(&shared);
-        let mut sysscan = systable_beginscan_indexed(&shared, heap, index, snap, &key);
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut sysscan =
+            systable_beginscan_indexed(&shared, &heap, &index, &snap, &key);
         let tup = systable_getnext(&shared, &mut sysscan).await.expect("row 300 found");
         // SAFETY: live owned tuple held by the scan.
         let tref = unsafe { &*tup };
-        let desc = unsafe { (*heap).rd_att.clone().unwrap() };
+        let desc = heap.rd_att.clone().unwrap();
         let (vals, _n) =
             unsafe { crate::backend::access::common::heaptuple::heap_deform_tuple(tref, &desc) };
         assert_eq!(DatumGetInt32(vals[0]), 300);
@@ -563,11 +589,11 @@ fn zero_fmgr_info() -> crate::fmgr::FmgrInfo {
         retset: false,
         stats: 0,
         extra: 0,
-        mcxt: core::ptr::null_mut(),
-        expr: core::ptr::null_mut(),
+        mcxt: (),
+        expr: None,
     }
 }
 
 // Keep IndexScanState referenced for clarity (the scan type used above).
 #[allow(dead_code)]
-fn _type_check(_s: &IndexScanState) {}
+fn _type_check(_s: &IndexScanState<'_, '_, '_>) {}

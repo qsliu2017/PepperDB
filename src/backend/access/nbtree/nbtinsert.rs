@@ -21,14 +21,6 @@
 //! held across an `.await`. The descent records a stack of (block, child-offset)
 //! so a split can re-find the parent to insert the new downlink.
 
-#![allow(
-    clippy::future_not_send,
-    reason = "rules.md s5: insert holds per-backend raw Relation handles task-confined for the operation; the futures never migrate the pointee between tasks. await_holding_lock is clean (enforced)."
-)]
-#![allow(
-    clippy::not_unsafe_ptr_arg_deref,
-    reason = "btree insert takes raw Relation/IndexTuple pointers per the C API; faithful to C"
-)]
 
 use std::sync::Arc;
 
@@ -61,9 +53,7 @@ use crate::storage::bufpage::{Page, SizeOfPageHeaderData};
 use crate::storage::itemid::ItemIdData;
 use crate::storage::itemptr::ItemPointerData;
 use crate::storage::off::OffsetNumber;
-use crate::backend::access::heap::heapam::SendPtr;
 use crate::utils::rel::RelationData;
-use crate::utils::relcache::Relation;
 
 const fn maxalign(n: usize) -> usize {
     (n + 7) & !7
@@ -108,8 +98,8 @@ fn make_downlink(key_bytes: &[u8], child: BlockNumber) -> Vec<u8> {
 }
 
 /// Read the meta page (owned copy).
-async fn read_meta(shared: &Arc<SharedState>, rel: Relation) -> (Buffer, Box<Page>) {
-    let buf = bt_read_buffer(shared, SendPtr(rel), BTREE_METAPAGE).await;
+async fn read_meta(shared: &Arc<SharedState>, rel: &RelationData) -> (Buffer, Box<Page>) {
+    let buf = bt_read_buffer(shared, rel, BTREE_METAPAGE).await;
     let page = bt_read_page_copy(shared, buf);
     (buf, page)
 }
@@ -119,7 +109,7 @@ async fn read_meta(shared: &Arc<SharedState>, rel: Relation) -> (Buffer, Box<Pag
 /// leaf, inserts, and splits + propagates upward as needed. Returns true.
 pub async fn bt_doinsert(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
     itup_bytes: &[u8],
 ) -> bool {
     // Build the insertion scankey from the new tuple's key columns (the descent +
@@ -154,7 +144,7 @@ pub async fn bt_doinsert(
 /// If it fits, write the page back + WAL. Otherwise split and propagate.
 async fn bt_insertonpg(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
     blk: BlockNumber,
     page: &mut Page,
     newitemoff: OffsetNumber,
@@ -174,7 +164,7 @@ async fn bt_insertonpg(
         crate::assert!(off != 0, "failed to add item to index page");
 
         let recptr = emit_insert_wal(shared, rel, blk, page, off, isleaf).await;
-        let buf = bt_read_buffer(shared, SendPtr(rel), blk).await;
+        let buf = bt_read_buffer(shared, rel, blk).await;
         bt_write_page(shared, buf, page, recptr);
         bt_relbuf(shared, buf);
         return;
@@ -191,7 +181,7 @@ async fn bt_insertonpg(
 #[allow(clippy::too_many_lines, reason = "faithful translation of _bt_split's build-both-halves + propagate body")]
 async fn bt_split_and_propagate(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
     blk: BlockNumber,
     page: &mut Page,
     newitemoff: OffsetNumber,
@@ -245,7 +235,7 @@ async fn bt_split_and_propagate(
     let split_at = split_at.max(1).min(nitems - 1);
 
     // Allocate the right page.
-    let right_buf = bt_allocbuf(shared, SendPtr(rel)).await;
+    let right_buf = bt_allocbuf(shared, rel).await;
     let right_blk = shared.buffers().buffer_get_block_number(right_buf);
 
     // Build the new left page in place of `page`.
@@ -288,7 +278,7 @@ async fn bt_split_and_propagate(
 
     // Write both halves (WAL: split record + full page images).
     let recptr = emit_split_wal(shared, rel, blk, &left, right_blk, &right, level, newitemoff).await;
-    let lbuf = bt_read_buffer(shared, SendPtr(rel), blk).await;
+    let lbuf = bt_read_buffer(shared, rel, blk).await;
     bt_write_page(shared, lbuf, &left, recptr);
     bt_relbuf(shared, lbuf);
     bt_write_page(shared, right_buf, &right, recptr);
@@ -296,7 +286,7 @@ async fn bt_split_and_propagate(
 
     // Fix the old right-sibling's prev pointer to point at the new right page.
     if !was_rightmost && orig_next != P_NONE {
-        let nbuf = bt_read_buffer(shared, SendPtr(rel), orig_next).await;
+        let nbuf = bt_read_buffer(shared, rel, orig_next).await;
         let mut npage = bt_read_page_copy(shared, nbuf);
         opaque_mut(&mut npage).prev = right_blk;
         bt_write_page(shared, nbuf, &npage, crate::access::xlogdefs::INVALID_XLOG_REC_PTR);
@@ -314,7 +304,7 @@ async fn bt_split_and_propagate(
         }
         Some((parent_blk, _child_off)) => {
             // Insert the downlink into the parent (which may itself split).
-            let parent_buf = bt_read_buffer(shared, SendPtr(rel), parent_blk).await;
+            let parent_buf = bt_read_buffer(shared, rel, parent_blk).await;
             let mut parent_page = bt_read_page_copy(shared, parent_buf);
             bt_relbuf(shared, parent_buf);
 
@@ -374,7 +364,7 @@ fn add_data_item(page: &mut Page, bytes: &[u8], minusinf: bool) {
 /// right page, then update the meta page to point at it.
 async fn bt_newroot(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
     lblk: BlockNumber,
     sep_bytes: &[u8],
     rblk: BlockNumber,
@@ -382,7 +372,7 @@ async fn bt_newroot(
 ) {
     // Clear BTP_ROOT on the old root (now an internal/leaf child).
     {
-        let buf = bt_read_buffer(shared, SendPtr(rel), lblk).await;
+        let buf = bt_read_buffer(shared, rel, lblk).await;
         let mut page = bt_read_page_copy(shared, buf);
         opaque_mut(&mut page).flags &= !BTP_ROOT;
         bt_write_page(shared, buf, &page, crate::access::xlogdefs::INVALID_XLOG_REC_PTR);
@@ -390,7 +380,7 @@ async fn bt_newroot(
     }
 
     // Build the new root page.
-    let root_buf = bt_allocbuf(shared, SendPtr(rel)).await;
+    let root_buf = bt_allocbuf(shared, rel).await;
     let root_blk = shared.buffers().buffer_get_block_number(root_buf);
     let mut root = Page::boxed_zeroed();
     bt_pageinit(&mut root, BLCKSZ as usize);
@@ -443,7 +433,7 @@ async fn bt_newroot(
 /// Ensure the index has a root page. If the meta page says the index is empty
 /// (root == P_NONE), create the first leaf page (also the root) and point the meta
 /// page at it.
-async fn ensure_root(shared: &Arc<SharedState>, rel: Relation) {
+async fn ensure_root(shared: &Arc<SharedState>, rel: &RelationData) {
     let (metabuf, metapage) = read_meta(shared, rel).await;
     let root = {
         // SAFETY: meta page contents begin with BTMetaPageData.
@@ -457,7 +447,7 @@ async fn ensure_root(shared: &Arc<SharedState>, rel: Relation) {
     bt_relbuf(shared, metabuf);
 
     // Create the first leaf+root page.
-    let root_buf = bt_allocbuf(shared, SendPtr(rel)).await;
+    let root_buf = bt_allocbuf(shared, rel).await;
     let root_blk = shared.buffers().buffer_get_block_number(root_buf);
     let mut page = Page::boxed_zeroed();
     bt_pageinit(&mut page, BLCKSZ as usize);
@@ -483,8 +473,8 @@ fn read_meta_data(page: &Page) -> &BTMetaPageData {
 }
 
 /// Update the meta page's root/level/fastroot/fastlevel to `(root_blk, level)`.
-async fn update_meta_root(shared: &Arc<SharedState>, rel: Relation, root_blk: BlockNumber, level: u32) {
-    let metabuf = bt_read_buffer(shared, SendPtr(rel), BTREE_METAPAGE).await;
+async fn update_meta_root(shared: &Arc<SharedState>, rel: &RelationData, root_blk: BlockNumber, level: u32) {
+    let metabuf = bt_read_buffer(shared, rel, BTREE_METAPAGE).await;
     let mut metapage = bt_read_page_copy(shared, metabuf);
     {
         let off = maxalign(SizeOfPageHeaderData);
@@ -506,7 +496,7 @@ async fn update_meta_root(shared: &Arc<SharedState>, rel: Relation, root_blk: Bl
 
 async fn emit_insert_wal(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
     blk: BlockNumber,
     page: &Page,
     offnum: OffsetNumber,
@@ -515,7 +505,7 @@ async fn emit_insert_wal(
     if !needs_wal(rel) {
         return crate::access::xlogdefs::INVALID_XLOG_REC_PTR;
     }
-    let locator = unsafe { (*rel).rd_locator };
+    let locator = rel.rd_locator;
     let xlrec = xl_btree_insert { offnum };
     begin_insert();
     register_data(as_bytes(&xlrec, SizeOfBtreeInsert));
@@ -526,7 +516,7 @@ async fn emit_insert_wal(
 #[allow(clippy::too_many_arguments, reason = "mirrors the C XLOG_BTREE_SPLIT block")]
 async fn emit_split_wal(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
     lblk: BlockNumber,
     left: &Page,
     rblk: BlockNumber,
@@ -537,7 +527,7 @@ async fn emit_split_wal(
     if !needs_wal(rel) {
         return crate::access::xlogdefs::INVALID_XLOG_REC_PTR;
     }
-    let locator = unsafe { (*rel).rd_locator };
+    let locator = rel.rd_locator;
     let xlrec = xl_btree_split {
         level,
         firstrightoff: P_FIRSTKEY,
@@ -553,7 +543,7 @@ async fn emit_split_wal(
 
 async fn emit_newroot_wal(
     shared: &Arc<SharedState>,
-    rel: Relation,
+    rel: &RelationData,
     root_blk: BlockNumber,
     root: &Page,
     _level: u32,
@@ -561,16 +551,16 @@ async fn emit_newroot_wal(
     if !needs_wal(rel) {
         return crate::access::xlogdefs::INVALID_XLOG_REC_PTR;
     }
-    let locator = unsafe { (*rel).rd_locator };
+    let locator = rel.rd_locator;
     begin_insert();
     register_block(0, &locator, ForkNumber::MAIN_FORKNUM, root_blk, root, crate::access::xloginsert::RegBuf::WILL_INIT | crate::access::xloginsert::RegBuf::STANDARD);
     xlog_insert(shared.xlog(), RmgrId::Btree as u8, XLOG_BTREE_NEWROOT).await
 }
 
 /// Whether the index needs WAL (a permanent rel with WAL on).
-fn needs_wal(rel: Relation) -> bool {
+fn needs_wal(rel: &RelationData) -> bool {
     // SAFETY: live relation.
-    unsafe { (*rel).needs_wal() }
+    rel.needs_wal()
 }
 
 /// Reinterpret a `#[repr(C)]` WAL fixed-part struct as its leading `size` bytes.

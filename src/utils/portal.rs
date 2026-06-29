@@ -18,7 +18,6 @@ use crate::utils::queryenvironment::QueryEnvironment;
 use crate::utils::resowner::ResourceOwner;
 use crate::utils::snapshot::SnapshotData;
 use crate::utils::tuplestore::Tuplestorestate;
-use crate::utils::palloc::MemoryContext;
 
 /// Execution strategy for a portal. POOR (sequential ordinal) -> enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +53,7 @@ pub struct PortalData {
     // Bookkeeping data
     pub name: String,                  // portal's name
     pub prep_stmt_name: Option<String>, // source prepared statement, if any
-    pub portal_context: MemoryContext, // subsidiary memory for portal
+    pub portal_context: (),            // subsidiary memory; tombstoned in this port (no live MemoryContext handle), keeps PortalData Send
     pub resowner: Option<ResourceOwner>, // resources owned by portal
     pub cleanup: Option<fn(Portal)>,   // cleanup hook (was fn pointer)
 
@@ -82,8 +81,11 @@ pub struct PortalData {
     pub portal_pinned: bool,  // a pinned portal can't be dropped
     pub auto_held: bool,      // auto-converted from pinned to held
 
-    // If Some, Executor is active; call ExecutorEnd eventually.
-    pub query_desc: Option<Box<QueryDesc>>, // info needed for executor invocation
+    // If Some, Executor is active; call ExecutorEnd eventually. The const/portal
+    // SELECT path opens no range-table relations, so the QueryDesc borrows nothing
+    // (`'static`); the scan/modify wire path runs through run_plan_over_wire with a
+    // command-frame-owned QueryDesc, not the portal.
+    pub query_desc: Option<Box<QueryDesc<'static>>>, // info needed for executor invocation
 
     // If portal returns tuples, this is their tupdesc.
     pub tup_desc: Option<TupleDesc>, // descriptor for result tuples (None if none)
@@ -94,7 +96,7 @@ pub struct PortalData {
 
     // Where we store tuples for a held cursor / RETURNING / MOD_WITH / UTIL_SELECT.
     pub hold_store: Option<Box<Tuplestorestate>>, // store for holdable cursors
-    pub hold_context: MemoryContext,              // memory containing holdStore
+    pub hold_context: (),                         // memory containing holdStore; tombstoned (no live MemoryContext handle)
 
     // Snapshot under which tuples in the holdStore were read.
     pub hold_snapshot: PortalSnapshot, // registered snapshot, or None
@@ -230,3 +232,5 @@ pub fn HoldPinnedPortals() {
 pub fn ForgetPortalSnapshots() {
     unimplemented!()
 }
+
+
