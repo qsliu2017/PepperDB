@@ -161,6 +161,8 @@ pub fn cacheinfo() -> Vec<CacheDesc> {
             ),
         );
     }
+    // M5 (step 25B): pg_aggregate (aggfnoid) -- nodeAgg's SearchSysCache1(AGGFNOID).
+    set(SysCacheIdentifier::AGGFNOID, agg_fnoid_desc());
     // M4: pg_type (typname, typnamespace) -- the type-name resolution key
     // (typenameTypeId via SearchSysCache2(TYPENAMENSP)), used by the cast TypeName
     // resolution in the sync expression transform.
@@ -190,6 +192,11 @@ const fn att_name() -> i16 {
 }
 const fn att_num() -> i16 {
     crate::catalog::pg_attribute::Anum_pg_attribute_attnum as i16
+}
+/// The AGGFNOID cache descriptor (pg_aggregate keyed by aggfnoid).
+fn agg_fnoid_desc() -> CacheDesc {
+    use crate::catalog::pg_aggregate::{Anum_pg_aggregate_aggfnoid, AggregateRelationId};
+    cd(AggregateRelationId, [Anum_pg_aggregate_aggfnoid as i16, 0, 0, 0], 1, 16)
 }
 const fn amproc_family() -> i16 {
     crate::catalog::pg_amproc::Anum_pg_amproc_amprocfamily as i16

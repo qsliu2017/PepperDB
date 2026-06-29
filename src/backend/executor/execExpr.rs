@@ -123,6 +123,22 @@ fn exec_init_expr_rec(node: &Node, state: &mut ExprState) {
         Node::CaseExpr(c) => exec_init_case(c, state),
         Node::CoalesceExpr(c) => exec_init_coalesce(c, state),
         Node::MinMaxExpr(m) => exec_init_minmax(m, state),
+        // EEOP_AGGREF: inside an Agg node, an Aggref evaluates to the finalized
+        // per-group value nodeAgg deposited in `econtext.ecxt_aggvalues[aggno]`.
+        // The planner stamps `aggno` (the aggregate's slot in that array).
+        Node::Aggref(aggref) => {
+            expr_eval_push_step(
+                state,
+                ExprEvalStep {
+                    opcode: ExprEvalOp::AGGREF,
+                    resvalue: None,
+                    resnull: None,
+                    d: ExprEvalStepData::Aggref(crate::executor::execExpr::AggrefData {
+                        aggno: aggref.aggno,
+                    }),
+                },
+            );
+        }
         other => not_yet_reachable(&format!("ExecInitExprRec: {other:?}")),
     }
 }

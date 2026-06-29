@@ -24,6 +24,7 @@ use crate::access::tupdesc::TupleDesc;
 use crate::nodes::execnodes::{EState, ResultState, TupleTableSlot};
 use crate::nodes::nodes::Node;
 
+use crate::backend::executor::nodeAgg::{exec_agg, exec_end_agg, exec_init_agg, AggRun};
 use crate::backend::executor::nodeGroup::{exec_end_group, exec_group, exec_init_group, GroupRun};
 use crate::backend::executor::nodeLimit::{exec_end_limit, exec_init_limit, exec_limit, LimitRun};
 use crate::backend::executor::nodeMaterial::{
@@ -75,8 +76,8 @@ pub enum PlanStateNode<'rel> {
     Unique(Box<UniqueRun<'rel>>),
     /// T_GroupState (+ child).
     Group(Box<GroupRun<'rel>>),
-    // NOTE: the T_Agg arm (step 25B, separate agent) is added here. It pairs an
-    // AggState with its child; do not collapse this enum or reorder the arms.
+    /// T_AggState (+ child + resolved per-aggregate metadata). PLAIN/SORTED/HASHED.
+    Agg(Box<AggRun<'rel>>),
     /// Test-only: an in-memory list of pre-built tuples served one per
     /// ExecProcNode. Lets the upper-node unit tests feed a deterministic child
     /// without a SeqScan/initdb dependency (the planner wires real children at
@@ -119,6 +120,7 @@ pub fn result_type_of(node: &PlanStateNode<'_>) -> Option<TupleDesc> {
         PlanStateNode::Material(m) => m.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Unique(u) => u.state.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Group(g) => g.state.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::Agg(a) => a.state.ss.ps.ps_result_tuple_desc.clone(),
         #[cfg(test)]
         PlanStateNode::TupleSource(t) => Some(t.desc.clone()),
     }
@@ -161,6 +163,12 @@ pub fn exec_init_node<'rel>(
             let child = init_child(g.plan.lefttree.as_ref(), estate, eflags);
             Some(PlanStateNode::Group(exec_init_group(g, estate, child)))
         }
+        Node::Agg(a) => {
+            // The agg materializes its input each call; the child needs no
+            // REWIND/BACKWARD/MARK (PG passes eflags through, dropping those).
+            let child = init_child(a.plan.lefttree.as_ref(), estate, child_eflags(eflags));
+            Some(PlanStateNode::Agg(exec_init_agg(a, estate, child)))
+        }
         other => unimplemented!("ExecInitNode: {other:?} not yet translated for this milestone"),
     }
 }
@@ -202,6 +210,7 @@ pub async fn exec_proc_node<'n>(
         PlanStateNode::Material(m) => exec_material(shared, m).await,
         PlanStateNode::Unique(u) => exec_unique(shared, u).await,
         PlanStateNode::Group(g) => exec_group(shared, g).await,
+        PlanStateNode::Agg(a) => exec_agg(shared, a).await,
         #[cfg(test)]
         PlanStateNode::TupleSource(t) => {
             t.current = t.rows.pop_front();
@@ -230,6 +239,7 @@ pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode
         PlanStateNode::Material(m) => exec_end_material(shared, m),
         PlanStateNode::Unique(u) => exec_end_unique(shared, u),
         PlanStateNode::Group(g) => exec_end_group(shared, g),
+        PlanStateNode::Agg(a) => exec_end_agg(shared, a),
         #[cfg(test)]
         PlanStateNode::TupleSource(_) => {}
     }

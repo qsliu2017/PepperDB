@@ -39,10 +39,10 @@ use crate::common::int::{
     pg_sub_s32_overflow,
 };
 use crate::ereport;
-use crate::fmgr::{FunctionCallInfoBaseData, PG_NARGS};
+use crate::fmgr::{FunctionCallInfoBaseData, PG_ARGISNULL, PG_NARGS};
 use crate::postgres::{
     BoolGetDatum, CStringGetDatum, Datum, DatumGetBool, DatumGetCString, DatumGetInt16,
-    DatumGetInt32, DatumGetInt64, Int16GetDatum, Int32GetDatum,
+    DatumGetInt32, DatumGetInt64, Int16GetDatum, Int32GetDatum, Int64GetDatum,
 };
 use crate::utils::elog::ERROR;
 use crate::utils::errcodes::{
@@ -941,6 +941,112 @@ pub fn int4smaller(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     let arg1 = pg_getarg_int32(fcinfo, 0);
     let arg2 = pg_getarg_int32(fcinfo, 1);
     Int32GetDatum(if arg1 < arg2 { arg1 } else { arg2 })
+}
+
+// ===========================================================================
+//   INT8 (bigint) -- the subset count/sum/min/max need (int8.c, partial).
+//   int8 is pass-by-value here (USE_FLOAT8_BYVAL), so the AggCheckCallContext
+//   in-place transition path is ifdef-ed out: the by-value branch is the only
+//   one, and the transition value flows by value through fmgr.
+// ===========================================================================
+
+/// PG `int8in`: parse a bigint text representation.
+pub fn int8in(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let s = pg_getarg_cstring(fcinfo, 0);
+    let trimmed = s.trim();
+    let v: i64 = trimmed.parse().unwrap_or_else(|_| {
+        ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(ERRCODE_INVALID_TEXT_REPRESENTATION)
+                .errmsg(format!("invalid input syntax for type bigint: \"{trimmed}\""));
+        });
+        unreachable!("ereport!(ERROR) raises")
+    });
+    Int64GetDatum(v)
+}
+
+/// PG `int8out`: bigint -> its decimal text.
+pub fn int8out(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let val = pg_getarg_int64(fcinfo, 0);
+    pg_return_cstring(&val.to_string())
+}
+
+/// PG `int8inc`: increment the running count (COUNT(*) transition fn). With int8
+/// pass-by-value the in-place aggregate path is ifdef-ed out; this is the plain
+/// `arg + 1` form.
+pub fn int8inc(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let arg = pg_getarg_int64(fcinfo, 0);
+    let result = pg_add_s64_overflow(arg, 1).unwrap_or_else(|| bigint_out_of_range());
+    Int64GetDatum(result)
+}
+
+/// PG `int8inc_any`: COUNT(expr) transition fn -- ignores arg 1 (the counted
+/// value, already known non-null by the caller) and increments the count in arg 0.
+pub fn int8inc_any(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    int8inc(fcinfo)
+}
+
+/// PG `int8larger`: max of two int64.
+pub fn int8larger(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let arg1 = pg_getarg_int64(fcinfo, 0);
+    let arg2 = pg_getarg_int64(fcinfo, 1);
+    Int64GetDatum(if arg1 > arg2 { arg1 } else { arg2 })
+}
+
+/// PG `int8smaller`: min of two int64.
+pub fn int8smaller(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let arg1 = pg_getarg_int64(fcinfo, 0);
+    let arg2 = pg_getarg_int64(fcinfo, 1);
+    Int64GetDatum(if arg1 < arg2 { arg1 } else { arg2 })
+}
+
+/// PG `int8pl`: int64 + int64 (the count/sum combine fn).
+pub fn int8pl(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let arg1 = pg_getarg_int64(fcinfo, 0);
+    let arg2 = pg_getarg_int64(fcinfo, 1);
+    Int64GetDatum(pg_add_s64_overflow(arg1, arg2).unwrap_or_else(|| bigint_out_of_range()))
+}
+
+/// PG `int4_sum`: SUM(int4) transition fn -- accumulate an int4 into an int8
+/// running sum. NOT strict on the state: a NULL state seeds from the first
+/// non-null input (PG marks it strict only on the input, handled by the caller
+/// passing non-null inputs; we replicate the explicit null checks).
+pub fn int4_sum(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    if PG_ARGISNULL(fcinfo, 0) {
+        if PG_ARGISNULL(fcinfo, 1) {
+            fcinfo.isnull = true;
+            return Datum(0);
+        }
+        return Int64GetDatum(i64::from(pg_getarg_int32(fcinfo, 1)));
+    }
+    let oldsum = pg_getarg_int64(fcinfo, 0);
+    if PG_ARGISNULL(fcinfo, 1) {
+        return Int64GetDatum(oldsum);
+    }
+    Int64GetDatum(oldsum + i64::from(pg_getarg_int32(fcinfo, 1)))
+}
+
+/// PG `int2_sum`: SUM(int2) transition fn -- like int4_sum over int16 input.
+pub fn int2_sum(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    if PG_ARGISNULL(fcinfo, 0) {
+        if PG_ARGISNULL(fcinfo, 1) {
+            fcinfo.isnull = true;
+            return Datum(0);
+        }
+        return Int64GetDatum(i64::from(pg_getarg_int16(fcinfo, 1)));
+    }
+    let oldsum = pg_getarg_int64(fcinfo, 0);
+    if PG_ARGISNULL(fcinfo, 1) {
+        return Int64GetDatum(oldsum);
+    }
+    Int64GetDatum(oldsum + i64::from(pg_getarg_int16(fcinfo, 1)))
+}
+
+/// bigint out of range error (PG int8.c's overflow ereport).
+fn bigint_out_of_range() -> ! {
+    ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE).errmsg("bigint out of range");
+    });
+    unreachable!("ereport!(ERROR) raises")
 }
 
 // ===========================================================================

@@ -11,6 +11,10 @@ use crate::postgres_ext::Oid;
 type List = Vec<Node>;
 
 pub const AggregateRelationId: Oid = Oid(2600);
+/// pg_aggregate's composite (row) type OID. genbki auto-assigns catalog rowtypes;
+/// only stored as the nailed descriptor's `tdtypeid` (not load-bearing for the
+/// AGGFNOID lookup, like pg_cast's).
+pub const AggregateRelation_Rowtype_Id: Oid = Oid(11628);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -44,6 +48,7 @@ pub type Form_pg_aggregate = *mut FormData_pg_aggregate; // TODO(ptr)
 
 // DECLARE_TOAST(pg_aggregate, 4159, 4160)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_aggregate_fnoid_index, 2650, AggregateFnoidIndexId, ...)
+pub const AggregateFnoidIndexId: Oid = Oid(2650);
 // MAKE_SYSCACHE(AGGFNOID, pg_aggregate_fnoid_index, 16)
 
 // Symbolic values for aggkind column.

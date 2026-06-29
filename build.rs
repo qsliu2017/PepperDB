@@ -79,6 +79,15 @@ fn main() {
     )
     .unwrap();
 
+    // M5 (step 25B): resolved pg_aggregate + agg/transfn pg_proc seed rows for the
+    // common aggregates (count/sum/min/max/avg). Reuses the M3Proc struct shape for
+    // the proc rows. Symbolic aggfnoid/transfn/finalfn names resolved to OIDs here.
+    std::fs::write(
+        out.join("bootstrap_m5_agg_seed_generated.rs"),
+        gen_m5_aggregate_seeds(&inc, &types),
+    )
+    .unwrap();
+
     // Grammar (gram.y analog): process every .lalrpop under src/ into OUT_DIR
     // (mirroring the source path), so gram.rs can include it via lalrpop_mod!.
     // Isolated from the .dat codegen above. lalrpop emits no rerun directives, so
@@ -549,6 +558,16 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("int4um", "crate::backend::utils::adt::int::int4um"),
     ("int4up", "crate::backend::utils::adt::int::int4up"),
     ("int4xor", "crate::backend::utils::adt::int::int4xor"),
+    // int8.c (step 25B subset): count/sum/min/max support over bigint.
+    ("int2_sum", "crate::backend::utils::adt::int::int2_sum"),
+    ("int4_sum", "crate::backend::utils::adt::int::int4_sum"),
+    ("int8in", "crate::backend::utils::adt::int::int8in"),
+    ("int8inc", "crate::backend::utils::adt::int::int8inc"),
+    ("int8inc_any", "crate::backend::utils::adt::int::int8inc_any"),
+    ("int8larger", "crate::backend::utils::adt::int::int8larger"),
+    ("int8out", "crate::backend::utils::adt::int::int8out"),
+    ("int8pl", "crate::backend::utils::adt::int::int8pl"),
+    ("int8smaller", "crate::backend::utils::adt::int::int8smaller"),
     ("nameconcatoid", "crate::backend::utils::adt::name::nameconcatoid"),
     ("nameeq", "crate::backend::utils::adt::name::nameeq"),
     ("namege", "crate::backend::utils::adt::name::namege"),
@@ -1309,6 +1328,9 @@ fn gen_bootstrap_schemas(
         // M4 (step 23): pg_cast is nailed for the same reason -- the CASTSOURCETARGET
         // syscache reads its descriptor before pg_cast has a pg_class self-row.
         ("pg_cast", "pg_cast.h"),
+        // M5 (step 25B): pg_aggregate is nailed so the AGGFNOID syscache can read its
+        // descriptor before pg_aggregate has a pg_class self-row -- same rationale.
+        ("pg_aggregate", "pg_aggregate.h"),
     ];
 
     for (cat, hdr) in catalogs {
@@ -1586,6 +1608,209 @@ fn gen_m4_cast_seeds(
     }
     out.push_str("];\n");
     out
+}
+
+// ===========================================================================
+// M5 (step 25B): pg_aggregate + agg/transfn pg_proc seed rows.
+// ===========================================================================
+
+/// The aggregates M5 seeds, by their pg_aggregate `aggfnoid` signature string.
+/// Each resolves the agg pg_proc OID, transfn/finalfn OIDs, transtype, and
+/// initval from pg_aggregate.dat + pg_proc.dat. count/sum(int*)/min/max(int*) are
+/// the executor-implemented set; the numeric/avg ones are seeded for catalog
+/// completeness (their transfns stage until numeric accumulators land).
+const M5_AGGREGATES: &[&str] = &[
+    "count(*)", // alias resolved to count() below
+    "count(any)",
+    "sum(int2)",
+    "sum(int4)",
+    "sum(int8)",
+    "sum(numeric)",
+    "max(int2)",
+    "max(int4)",
+    "max(int8)",
+    "max(numeric)",
+    "max(text)",
+    "min(int2)",
+    "min(int4)",
+    "min(int8)",
+    "min(numeric)",
+    "min(text)",
+];
+
+/// Resolve a pg_proc record by an `aggfnoid`-style signature `name(arg,arg)` (or
+/// `name(*)`/`name()` for the zero-arg case). Matches proname + the argument
+/// type-name list. `count(*)` is the zero-arg `count` proc.
+fn m5_find_proc_by_sig<'a>(
+    proc_recs: &'a [std::collections::HashMap<String, String>],
+    sig: &str,
+) -> &'a std::collections::HashMap<String, String> {
+    let (name, argstr) = sig.split_once('(').unwrap_or((sig, ")"));
+    let argstr = argstr.trim_end_matches(')');
+    let want_args: Vec<&str> = if argstr.is_empty() || argstr == "*" {
+        Vec::new()
+    } else {
+        argstr.split(',').map(str::trim).collect()
+    };
+    proc_recs
+        .iter()
+        .find(|r| {
+            r.get("proname").map(String::as_str) == Some(name)
+                && r.get("proargtypes").map_or(Vec::new(), |s| s.split_whitespace().collect::<Vec<_>>())
+                    == want_args
+        })
+        .unwrap_or_else(|| panic!("M5 agg seed: no pg_proc for signature {sig}"))
+}
+
+/// Resolve a proc by bare name (transfn/finalfn names are unique among the
+/// aggregate support set we seed). `None` for the empty / `-` sentinel.
+fn m5_find_proc_by_name<'a>(
+    proc_recs: &'a [std::collections::HashMap<String, String>],
+    name: &str,
+) -> Option<&'a std::collections::HashMap<String, String>> {
+    if name.is_empty() || name == "-" {
+        return None;
+    }
+    proc_recs.iter().find(|r| r.get("proname").map(String::as_str) == Some(name))
+}
+
+/// Emit the M5 resolved pg_aggregate rows + their supporting pg_proc rows (the
+/// aggregate procs themselves, with prokind 'a', plus the transition/final fns).
+/// Symbolic names are resolved to OIDs here (genbki BKI_LOOKUP).
+fn gen_m5_aggregate_seeds(
+    inc: &Path,
+    types: &std::collections::HashMap<String, TypeProps>,
+) -> String {
+    // type_oid resolves names, numeric literals, and the empty string (-> 0). A
+    // leading `_` denotes the element type's auto-generated array type (avg's
+    // `_int8` transtype), resolved via the element's array_type_oid.
+    let type_oid = |name: &str| -> u32 {
+        if name.is_empty() {
+            return 0;
+        }
+        if let Ok(n) = name.parse::<u32>() {
+            return n;
+        }
+        if let Some(elem) = name.strip_prefix('_') {
+            return types
+                .get(elem)
+                .map(|t| t.array_type_oid)
+                .filter(|&o| o != 0)
+                .unwrap_or_else(|| panic!("M5 agg seed: no array type for element {elem}"));
+        }
+        types
+            .get(name)
+            .unwrap_or_else(|| panic!("M5 agg seed: unknown type {name}"))
+            .oid
+    };
+
+    let proc_text = std::fs::read_to_string(inc.join("pg_proc.dat")).unwrap();
+    // Leak proc_recs to 'static so the resolved refs outlive helper scope (build
+    // script; one-shot codegen, leak is fine).
+    let proc_recs: &'static [std::collections::HashMap<String, String>] =
+        Box::leak(parse_records(&proc_text).into_boxed_slice());
+
+    let agg_text = std::fs::read_to_string(inc.join("pg_aggregate.dat")).unwrap();
+    let agg_recs = parse_records(&agg_text);
+    let find_agg = |sig: &str| -> &std::collections::HashMap<String, String> {
+        // count(*) is stored as count() in pg_aggregate.dat.
+        let key = if sig == "count(*)" { "count()" } else { sig };
+        agg_recs
+            .iter()
+            .find(|r| r.get("aggfnoid").map(String::as_str) == Some(key))
+            .unwrap_or_else(|| panic!("M5 agg seed: no pg_aggregate row for {sig}"))
+    };
+
+    let mut out = String::from(
+        "// Generated by build.rs (M5). Resolved pg_aggregate + agg/transfn pg_proc\n\
+         // seed rows for the common aggregates. Names resolved to OIDs.\n",
+    );
+
+    // Collect the pg_proc rows to seed: the aggregate procs + their transfn /
+    // finalfn support procs (deduped by OID). Reuses the M3Proc struct.
+    let mut proc_oids: Vec<u32> = Vec::new();
+    let mut proc_rows: Vec<&std::collections::HashMap<String, String>> = Vec::new();
+    let push_proc = |rec: &'static std::collections::HashMap<String, String>,
+                     oids: &mut Vec<u32>,
+                     rows: &mut Vec<&'static std::collections::HashMap<String, String>>| {
+        let oid: u32 = rec.get("oid").unwrap().parse().unwrap();
+        if !oids.contains(&oid) {
+            oids.push(oid);
+            rows.push(rec);
+        }
+    };
+    // The pg_aggregate rows.
+    out.push_str(
+        "pub struct M5Aggregate {\n\
+        \x20   pub aggfnoid: u32, pub aggkind: u8, pub aggtransfn: u32, pub aggfinalfn: u32,\n\
+        \x20   pub aggtranstype: u32, pub initval: Option<&'static str>,\n\
+        }\n",
+    );
+    out.push_str("pub static SEED_PG_AGGREGATE_M5: &[M5Aggregate] = &[\n");
+    for &sig in M5_AGGREGATES {
+        let agg = find_agg(sig);
+        let aggproc = m5_find_proc_by_sig(proc_recs, sig);
+        let aggfnoid: u32 = aggproc.get("oid").unwrap().parse().unwrap();
+        push_proc(aggproc, &mut proc_oids, &mut proc_rows);
+
+        let transfn_name = agg.get("aggtransfn").map_or("", String::as_str);
+        let finalfn_name = agg.get("aggfinalfn").map_or("", String::as_str);
+        let transfn = m5_find_proc_by_name(proc_recs, transfn_name)
+            .unwrap_or_else(|| panic!("M5 agg seed: transfn {transfn_name} not found"));
+        let transfn_oid: u32 = transfn.get("oid").unwrap().parse().unwrap();
+        push_proc(transfn, &mut proc_oids, &mut proc_rows);
+        let finalfn_oid = m5_find_proc_by_name(proc_recs, finalfn_name).map_or(0u32, |f| {
+            push_proc(f, &mut proc_oids, &mut proc_rows);
+            f.get("oid").unwrap().parse().unwrap()
+        });
+
+        let transtype = type_oid(agg.get("aggtranstype").map_or("", String::as_str));
+        let initval =
+            agg.get("agginitval").map_or_else(|| "None".to_string(), |s| format!("Some(\"{s}\")"));
+        // aggkind defaults to 'n' (normal) in pg_aggregate.dat.
+        let aggkind = agg.get("aggkind").and_then(|s| s.bytes().next()).unwrap_or(b'n');
+        out.push_str(&format!(
+            "    M5Aggregate {{ aggfnoid: {aggfnoid}, aggkind: {aggkind}, aggtransfn: {transfn_oid}, \
+             aggfinalfn: {finalfn_oid}, aggtranstype: {transtype}, initval: {initval} }},\n",
+        ));
+    }
+    out.push_str("];\n");
+
+    // The supporting pg_proc rows (agg procs + transfn/finalfn), as M3Proc.
+    out.push_str("pub static SEED_PG_PROC_M5_AGG: &[M3Proc] = &[\n");
+    for rec in &proc_rows {
+        emit_m5_proc_row(&mut out, rec, &type_oid);
+    }
+    out.push_str("];\n");
+    out
+}
+
+/// Emit one M5 supporting-proc seed row (an agg proc or a transfn/finalfn), as an
+/// `M3Proc` literal with names resolved to OIDs.
+fn emit_m5_proc_row(
+    out: &mut String,
+    rec: &std::collections::HashMap<String, String>,
+    type_oid: &impl Fn(&str) -> u32,
+) {
+    let oid: u32 = rec.get("oid").unwrap().parse().unwrap();
+    let name = rec.get("proname").unwrap();
+    let rettype = type_oid(rec.get("prorettype").map_or("", String::as_str));
+    let argtypes: Vec<u32> = rec
+        .get("proargtypes")
+        .map(|s| s.split_whitespace().map(type_oid).collect())
+        .unwrap_or_default();
+    // Aggregate procs (prokind 'a') are not strict; the .dat default is 't'.
+    let strict = rec.get("proisstrict").is_none_or(|s| s == "t");
+    let retset = rec.get("proretset").is_some_and(|s| s == "t");
+    let prosrc = rec.get("prosrc").cloned().unwrap_or_else(|| name.clone());
+    let kind = rec.get("prokind").and_then(|s| s.bytes().next()).unwrap_or(b'f');
+    let arglist = argtypes.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
+    out.push_str(&format!(
+        "    M3Proc {{ oid: {oid}, name: \"{name}\", rettype: {rettype}, \
+         argtypes: &[{arglist}], strict: {strict}, retset: {retset}, prosrc: \"{prosrc}\" }}, \
+         // prokind={}\n",
+        kind as char,
+    ));
 }
 
 /// Emit the M3 resolved seed tables for pg_proc and pg_operator. Symbolic type /

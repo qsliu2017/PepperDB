@@ -32,6 +32,7 @@ pub fn exec_rescan(shared: &Arc<SharedState>, node: &mut PlanStateNode) {
         PlanStateNode::Material(m) => crate::backend::executor::nodeMaterial::exec_rescan_material(m),
         PlanStateNode::Unique(u) => crate::backend::executor::nodeUnique::exec_rescan_unique(u),
         PlanStateNode::Group(g) => crate::backend::executor::nodeGroup::exec_rescan_group(g),
+        PlanStateNode::Agg(a) => crate::backend::executor::nodeAgg::exec_rescan_agg(a),
         #[cfg(test)]
         PlanStateNode::TupleSource(_) => {
             unimplemented!("ExecReScan: test tuple source is not rescannable")

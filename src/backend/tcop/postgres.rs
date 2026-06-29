@@ -188,6 +188,36 @@ pub async fn bootstrap_cluster(shared: Arc<SharedState>) {
     crate::session::scope(sess, run).await;
 }
 
+/// Test-only: run `initdb` (warming the syscaches, like `bootstrap_cluster`) and
+/// then `body`, all inside ONE backend session + relcache/catcache scope stack, so
+/// the warm catcache (which is task-local) is live for `body`. Lets node-level
+/// executor tests resolve catalog lookups (e.g. the AGGFNOID syscache) without the
+/// full supervisor/wire harness. Boxed for the deep scope stack.
+#[cfg(test)]
+pub async fn bootstrap_then<F, Fut, T>(shared: Arc<SharedState>, body: F) -> T
+where
+    F: FnOnce(Arc<SharedState>) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = T> + 'static,
+    T: Send + 'static,
+{
+    let sess = Arc::new(crate::session::Session::new(crate::miscadmin::BackendType::BACKEND));
+    sess.set_database_id(DEFAULT_DATABASE_OID);
+    sess.set_database_tablespace(crate::common::relpath::DEFAULTTABLESPACE_OID);
+
+    let out: Arc<std::sync::Mutex<Option<T>>> = Arc::new(std::sync::Mutex::new(None));
+    let out2 = Arc::clone(&out);
+    let shared2 = shared.clone();
+    let inner = async move {
+        do_initdb(shared.clone()).await;
+        let r = body(shared).await;
+        *out2.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r);
+    };
+    let run = Box::pin(init_postgres(shared2, Box::pin(inner)));
+    crate::session::scope(sess, run).await;
+    let r = out.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+    r.unwrap_or_else(|| unreachable!("bootstrap_then body produced a result"))
+}
+
 /// The initdb body, run inside the boot session + connect-to-database scopes:
 /// open a transaction, push the active snapshot the index build reads, seed the
 /// catalogs, then commit so the rows are durable + committed for later backends.

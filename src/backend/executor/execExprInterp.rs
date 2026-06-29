@@ -252,6 +252,17 @@ fn exec_interp_step(
             eval_minmax(step, econtext, resvalue, resnull);
             pc + 1
         }
+        ExprEvalOp::AGGREF => {
+            // Read the finalized per-group aggregate value nodeAgg deposited in
+            // econtext.ecxt_aggvalues[aggno] / ecxt_aggnulls[aggno].
+            let ExprEvalStepData::Aggref(a) = &step.d else {
+                unreachable!("EEOP_AGGREF without Aggref payload");
+            };
+            let aggno = a.aggno as usize;
+            *resvalue = econtext.ecxt_aggvalues.get(aggno).copied().unwrap_or(Datum(0));
+            *resnull = econtext.ecxt_aggnulls.get(aggno).copied().unwrap_or(true);
+            pc + 1
+        }
         // DONE_RETURN/DONE_NO_RETURN are handled by the two callers
         // (exec_interp_expr top level, run_scalar sub-program) before dispatch.
         other => not_yet_reachable(other),

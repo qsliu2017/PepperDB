@@ -17,6 +17,7 @@ pub mod execProcnode;
 pub mod execScan;
 pub mod execTuples;
 pub mod execUtils;
+pub mod nodeAgg;
 pub mod nodeGroup;
 pub mod nodeLimit;
 pub mod nodeMaterial;
