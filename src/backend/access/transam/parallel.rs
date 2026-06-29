@@ -39,6 +39,8 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use parking_lot::Mutex;
+
 use crate::access::xlogdefs::XLogRecPtr;
 use crate::backend::access::transam::xact::{GetCurrentSubTransactionId, IsInParallelMode};
 use crate::backend::storage::lmgr::proc::{
@@ -81,21 +83,64 @@ impl ParallelWorkerInfo {
 /// worker number identifies which worker is running.
 pub type ParallelWorkerMainType = fn(worker_number: i32, last_xlog_end: &Arc<AtomicU64>);
 
+/// A parallel context. Shared as `Arc<ParallelContext>`: the leader binding and
+/// the per-leader `PCXT_LIST` hold the SAME value (PG's caller pointer aliases
+/// its `pcxt_list` entry). The immutable fields are read directly; the fields the
+/// launch/wait/destroy paths mutate live behind `inner` (a `parking_lot::Mutex`,
+/// no poison). The list and the leader both reach the context by `Arc` clone --
+/// no raw self-address is laundered through the task-local.
 pub struct ParallelContext {
     pub subid: SubTransactionId,
     pub nworkers: i32,
-    pub nworkers_to_launch: i32,
-    pub nworkers_launched: i32,
     pub library_name: String,
     pub function_name: String,
     /// Arc-cloned leader shared state (replaces the DSM segment). Workers borrow
     /// the same process-wide subsystems the leader uses.
     pub shared: Arc<SharedState>,
-    pub workers: Vec<ParallelWorkerInfo>,
-    pub known_attached_workers: Vec<bool>,
-    pub nknown_attached_workers: i32,
     /// ex-FixedParallelState.last_xlog_end (XLogRecPtr as raw u64).
     pub last_xlog_end: Arc<AtomicU64>,
+    inner: Mutex<ParallelContextInner>,
+}
+
+/// The mutable launch/wait state of a `ParallelContext`, guarded by
+/// `ParallelContext::inner`. Only the owning leader task touches it.
+#[derive(Default)]
+struct ParallelContextInner {
+    nworkers_to_launch: i32,
+    nworkers_launched: i32,
+    workers: Vec<ParallelWorkerInfo>,
+    known_attached_workers: Vec<bool>,
+    nknown_attached_workers: i32,
+}
+
+impl ParallelContext {
+    /// PG `pcxt->nworkers_launched`: workers actually spawned.
+    pub fn nworkers_launched(&self) -> i32 {
+        self.inner.lock().nworkers_launched
+    }
+
+    /// PG `pcxt->nknown_attached_workers`.
+    pub fn nknown_attached_workers(&self) -> i32 {
+        self.inner.lock().nknown_attached_workers
+    }
+
+    /// True once every worker slot has surrendered its JoinHandle (no leaked tasks).
+    #[cfg(test)]
+    fn all_handles_released(&self) -> bool {
+        self.inner.lock().workers.iter().all(|w| w.handle.is_none())
+    }
+
+    /// Take worker `i`'s JoinHandle (tests await it directly).
+    #[cfg(test)]
+    fn take_worker_handle(&self, i: usize) -> Option<tokio::task::JoinHandle<()>> {
+        self.inner.lock().workers[i].handle.take()
+    }
+
+    /// Pull one queued message from worker `i`'s error channel (test observation).
+    #[cfg(test)]
+    fn try_recv_worker_message(&self, i: usize) -> Option<ParallelMessage> {
+        self.inner.lock().workers[i].error_rx.as_mut()?.try_recv().ok()
+    }
 }
 
 tokio::task_local! {
@@ -104,11 +149,13 @@ tokio::task_local! {
     static PARALLEL_WORKER_NUMBER: Cell<Option<u32>>;
     /// PG `InitializingParallelWorker`.
     static INITIALIZING_PARALLEL_WORKER: Cell<bool>;
-    /// PG `pcxt_list`: active parallel contexts owned by THIS leader task. We
-    /// store the addresses as `usize` (not `*mut`) so the leader future stays
-    /// `Send` for `tokio::spawn`; each pointer is only ever dereferenced on the
-    /// leader task that owns the backing `Box`.
-    static PCXT_LIST: RefCell<Vec<usize>>;
+    /// PG `pcxt_list`: active parallel contexts of THIS leader task. Holds an
+    /// `Arc<ParallelContext>` per context (PG links them intrusively in a dlist;
+    /// here the leader binding and this list share the same `Arc`, so the leader
+    /// reaches a context by clone -- no raw self-address laundered through the
+    /// task-local). `Arc<ParallelContext>` is `Send`, so the leader future stays
+    /// spawnable.
+    static PCXT_LIST: RefCell<Vec<Arc<ParallelContext>>>;
 }
 
 /// PG `ParallelWorkerNumber` accessor (None outside a worker task).
@@ -135,26 +182,24 @@ pub fn CreateParallelContext(
     function_name: &str,
     nworkers: i32,
     shared: Arc<SharedState>,
-) -> Box<ParallelContext> {
+) -> Arc<ParallelContext> {
     debug_assert!(IsInParallelMode());
     debug_assert!(nworkers >= 0);
 
-    let mut pcxt = Box::new(ParallelContext {
+    let pcxt = Arc::new(ParallelContext {
         subid: GetCurrentSubTransactionId(),
         nworkers,
-        nworkers_to_launch: nworkers,
-        nworkers_launched: 0,
         library_name: library_name.to_owned(),
         function_name: function_name.to_owned(),
         shared,
-        workers: Vec::new(),
-        known_attached_workers: Vec::new(),
-        nknown_attached_workers: 0,
         last_xlog_end: Arc::new(AtomicU64::new(0)),
+        inner: Mutex::new(ParallelContextInner {
+            nworkers_to_launch: nworkers,
+            ..ParallelContextInner::default()
+        }),
     });
 
-    let ptr: *mut ParallelContext = &raw mut *pcxt;
-    pcxt_list_push(ptr);
+    pcxt_list_push(pcxt.clone());
     pcxt
 }
 
@@ -162,39 +207,42 @@ pub fn CreateParallelContext(
 /// relmapper/library/entrypoint is deleted by redesign: single-process shares
 /// state by Arc, no DSM serialization. We only create the per-worker error
 /// channels and zero last_xlog_end.
-pub fn InitializeParallelDSM(pcxt: &mut ParallelContext) {
+pub fn InitializeParallelDSM(pcxt: &ParallelContext) {
     // PG zeroes nworkers when !INTERRUPTS_CAN_BE_PROCESSED() (parallel.c:245-246)
     // so a non-interruptible leader can't deadlock awaiting a worker whose error
     // interrupt it can't receive. Intentionally dropped: worker errors here are
     // observed by awaiting the JoinHandles + draining the mpsc, not via interrupts.
     pcxt.last_xlog_end.store(0, Ordering::Relaxed);
-    setup_worker_slots(pcxt);
-    pcxt.nworkers_to_launch = pcxt.nworkers;
+    let mut inner = pcxt.inner.lock();
+    setup_worker_slots(&mut inner, pcxt.nworkers);
+    inner.nworkers_to_launch = pcxt.nworkers;
 }
 
 /// PG `ReinitializeParallelDSM`: wait for old workers, then recreate channels.
-pub async fn ReinitializeParallelDSM(pcxt: &mut ParallelContext) {
-    if pcxt.nworkers_launched > 0 {
+pub async fn ReinitializeParallelDSM(pcxt: &ParallelContext) {
+    if pcxt.inner.lock().nworkers_launched > 0 {
         WaitForParallelWorkersToFinish(pcxt).await;
         WaitForParallelWorkersToExit(pcxt).await;
-        pcxt.nworkers_launched = 0;
-        pcxt.known_attached_workers.clear();
-        pcxt.nknown_attached_workers = 0;
+        let mut inner = pcxt.inner.lock();
+        inner.nworkers_launched = 0;
+        inner.known_attached_workers.clear();
+        inner.nknown_attached_workers = 0;
     }
     pcxt.last_xlog_end.store(0, Ordering::Relaxed);
-    setup_worker_slots(pcxt);
+    let mut inner = pcxt.inner.lock();
+    setup_worker_slots(&mut inner, pcxt.nworkers);
 }
 
 /// PG `ReinitializeParallelWorkers`: trim the launch count to <= nworkers.
-pub fn ReinitializeParallelWorkers(pcxt: &mut ParallelContext, nworkers_to_launch: i32) {
-    pcxt.nworkers_to_launch = pcxt.nworkers.min(nworkers_to_launch);
+pub fn ReinitializeParallelWorkers(pcxt: &ParallelContext, nworkers_to_launch: i32) {
+    pcxt.inner.lock().nworkers_to_launch = pcxt.nworkers.min(nworkers_to_launch);
 }
 
 /// Allocate empty per-worker slots (no channels yet; LaunchParallelWorkers
 /// makes one per worker it actually spawns).
-fn setup_worker_slots(pcxt: &mut ParallelContext) {
-    pcxt.workers = std::iter::repeat_with(ParallelWorkerInfo::new)
-        .take(pcxt.nworkers.max(0) as usize)
+fn setup_worker_slots(inner: &mut ParallelContextInner, nworkers: i32) {
+    inner.workers = std::iter::repeat_with(ParallelWorkerInfo::new)
+        .take(nworkers.max(0) as usize)
         .collect();
 }
 
@@ -205,8 +253,9 @@ fn setup_worker_slots(pcxt: &mut ParallelContext) {
 /// ParallelMessage::Error instead of aborting the process. Spawning replaces
 /// RegisterDynamicBackgroundWorker (it cannot fail, so the "fewer workers"
 /// branch collapses to the launched accounting).
-pub fn LaunchParallelWorkers(pcxt: &mut ParallelContext) {
-    if pcxt.nworkers == 0 || pcxt.nworkers_to_launch == 0 {
+pub fn LaunchParallelWorkers(pcxt: &ParallelContext) {
+    let mut inner = pcxt.inner.lock();
+    if pcxt.nworkers == 0 || inner.nworkers_to_launch == 0 {
         return;
     }
 
@@ -217,7 +266,7 @@ pub fn LaunchParallelWorkers(pcxt: &mut ParallelContext) {
 
     let entrypt = LookupParallelWorkerFunction(&pcxt.library_name, &pcxt.function_name);
 
-    for i in 0..pcxt.nworkers_to_launch {
+    for i in 0..inner.nworkers_to_launch {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ParallelMessage>();
         let last_xlog_end = pcxt.last_xlog_end.clone();
         let session = leader_session.clone();
@@ -231,15 +280,16 @@ pub fn LaunchParallelWorkers(pcxt: &mut ParallelContext) {
             tx,
         ));
 
-        let slot = &mut pcxt.workers[i as usize];
+        let slot = &mut inner.workers[i as usize];
         slot.handle = Some(handle);
         slot.error_rx = Some(rx);
-        pcxt.nworkers_launched += 1;
+        inner.nworkers_launched += 1;
     }
 
-    if pcxt.nworkers_launched > 0 {
-        pcxt.known_attached_workers = vec![false; pcxt.nworkers_launched as usize];
-        pcxt.nknown_attached_workers = 0;
+    if inner.nworkers_launched > 0 {
+        let launched = inner.nworkers_launched as usize;
+        inner.known_attached_workers = vec![false; launched];
+        inner.nknown_attached_workers = 0;
     }
 }
 
@@ -296,35 +346,43 @@ async fn worker_cradle(
 /// be un-attached. Marking every launched slot attached is therefore the faithful
 /// in-process equivalent of PG's loop, not a simplification of its logic; there is
 /// no startup-failure case left to wait for. (No `.await`: nothing to wait on.)
-pub fn WaitForParallelWorkersToAttach(pcxt: &mut ParallelContext) {
-    if pcxt.nworkers_launched == 0 {
+pub fn WaitForParallelWorkersToAttach(pcxt: &ParallelContext) {
+    let mut inner = pcxt.inner.lock();
+    if inner.nworkers_launched == 0 {
         return;
     }
-    let newly = pcxt
+    let newly = inner
         .known_attached_workers
         .iter_mut()
         .filter(|w| !**w)
         .map(|w| *w = true)
         .count();
-    pcxt.nknown_attached_workers += newly as i32;
+    inner.nknown_attached_workers += newly as i32;
 }
 
 /// PG `WaitForParallelWorkersToFinish`: drain each worker's error channel
 /// (re-raising on Error), await all worker tasks, and fold last_xlog_end into
 /// the leader's XactLastRecEnd.
-pub async fn WaitForParallelWorkersToFinish(pcxt: &mut ParallelContext) {
-    drain_pcxt(pcxt);
+pub async fn WaitForParallelWorkersToFinish(pcxt: &ParallelContext) {
+    drain_pcxt(&mut pcxt.inner.lock());
 
-    for slot in &mut pcxt.workers {
-        if let Some(handle) = slot.handle.take() {
-            // A worker panic is caught inside the cradle and reported via the
-            // error channel; the JoinHandle still resolves Ok.
-            let _ = handle.await;
-        }
+    // Take the JoinHandles out under the lock, then await them WITHOUT holding it
+    // (the worker tasks do not touch pcxt.inner, but never await with a lock held).
+    let handles: Vec<_> = pcxt
+        .inner
+        .lock()
+        .workers
+        .iter_mut()
+        .filter_map(|slot| slot.handle.take())
+        .collect();
+    for handle in handles {
+        // A worker panic is caught inside the cradle and reported via the
+        // error channel; the JoinHandle still resolves Ok.
+        let _ = handle.await;
     }
 
     // Drain any messages that arrived as the workers finished.
-    drain_pcxt(pcxt);
+    drain_pcxt(&mut pcxt.inner.lock());
 
     let last = pcxt.last_xlog_end.load(Ordering::Relaxed);
     crate::backend::access::transam::xact::fold_worker_last_rec_end(XLogRecPtr(last));
@@ -333,28 +391,36 @@ pub async fn WaitForParallelWorkersToFinish(pcxt: &mut ParallelContext) {
 /// PG `WaitForParallelWorkersToExit`: ensure complete worker shutdown. Tasks are
 /// already awaited in WaitForParallelWorkersToFinish; here we abort/await any
 /// stragglers and drop the channels.
-async fn WaitForParallelWorkersToExit(pcxt: &mut ParallelContext) {
-    for slot in &mut pcxt.workers {
-        if let Some(handle) = slot.handle.take() {
-            handle.abort();
-            let _ = handle.await;
-        }
-        slot.error_rx = None;
+async fn WaitForParallelWorkersToExit(pcxt: &ParallelContext) {
+    let handles: Vec<_> = {
+        let mut inner = pcxt.inner.lock();
+        inner
+            .workers
+            .iter_mut()
+            .filter_map(|slot| {
+                slot.error_rx = None;
+                slot.handle.take()
+            })
+            .collect()
+    };
+    for handle in handles {
+        handle.abort();
+        let _ = handle.await;
     }
 }
 
 /// PG `DestroyParallelContext`: remove from the active list first, abort any
 /// remaining workers, drop the channels, and await the tasks. The DSM detach /
 /// private-memory free is deleted by redesign.
-pub async fn DestroyParallelContext(pcxt: &mut ParallelContext) {
-    let ptr: *mut ParallelContext = pcxt;
-    pcxt_list_remove(ptr);
+pub async fn DestroyParallelContext(pcxt: &Arc<ParallelContext>) {
+    pcxt_list_remove(pcxt);
 
     WaitForParallelWorkersToExit(pcxt).await;
-    pcxt.workers.clear();
-    pcxt.nworkers_launched = 0;
-    pcxt.known_attached_workers.clear();
-    pcxt.nknown_attached_workers = 0;
+    let mut inner = pcxt.inner.lock();
+    inner.workers.clear();
+    inner.nworkers_launched = 0;
+    inner.known_attached_workers.clear();
+    inner.nknown_attached_workers = 0;
 }
 
 /// PG `ParallelContextActive`.
@@ -374,30 +440,24 @@ pub fn HandleParallelMessageInterrupt() {
 /// PG `ProcessParallelMessages`: drain every active context's worker error
 /// channels, re-raising Error messages in the leader and logging Notices.
 pub fn ProcessParallelMessages() {
-    PCXT_LIST
-        .try_with(|list| {
-            for &addr in list.borrow().iter() {
-                // SAFETY: the leader owns each pcxt for as long as it is on this
-                // task-local list; entries are removed in DestroyParallelContext
-                // before the Box is dropped, and the list is only touched by this
-                // task.
-                let pcxt = unsafe { &mut *(addr as *mut ParallelContext) };
-                drain_pcxt(pcxt);
-            }
-        })
-        .ok();
+    // Clone the active-context Arcs out of the list first, then drain each.
+    let contexts = PCXT_LIST
+        .try_with(|list| list.borrow().clone())
+        .unwrap_or_default();
+    for pcxt in &contexts {
+        drain_pcxt(&mut pcxt.inner.lock());
+    }
 }
 
-/// Drain a single context's worker channels (the `&mut ParallelContext` form
-/// used by the wait loop, which already holds the context).
-fn drain_pcxt(pcxt: &mut ParallelContext) {
-    let nlaunched = pcxt.nworkers_launched as usize;
-    for i in 0..nlaunched.min(pcxt.workers.len()) {
-        if pcxt.known_attached_workers.get(i) == Some(&false) {
-            pcxt.known_attached_workers[i] = true;
-            pcxt.nknown_attached_workers += 1;
+/// Drain a single context's worker channels. Caller holds the `inner` lock.
+fn drain_pcxt(inner: &mut ParallelContextInner) {
+    let nlaunched = inner.nworkers_launched as usize;
+    for i in 0..nlaunched.min(inner.workers.len()) {
+        if inner.known_attached_workers.get(i) == Some(&false) {
+            inner.known_attached_workers[i] = true;
+            inner.nknown_attached_workers += 1;
         }
-        let Some(rx) = pcxt.workers[i].error_rx.as_mut() else {
+        let Some(rx) = inner.workers[i].error_rx.as_mut() else {
             continue;
         };
         while let Ok(msg) = rx.try_recv() {
@@ -423,25 +483,21 @@ fn ProcessParallelMessage(_worker: usize, msg: ParallelMessage) {
 
 /// PG `AtEOSubXact_Parallel`: destroy contexts created in this subtransaction.
 pub async fn AtEOSubXact_Parallel(is_commit: bool, my_sub_id: SubTransactionId) {
-    while let Some(ptr) = pcxt_list_head_if(|p| p.subid == my_sub_id) {
+    while let Some(pcxt) = pcxt_list_head_if(|p| p.subid == my_sub_id) {
         if is_commit {
             crate::elog!(crate::utils::elog::WARNING, "leaked parallel context");
         }
-        // SAFETY: head pointer of the active list, owned by this leader task.
-        let pcxt = unsafe { &mut *ptr };
-        DestroyParallelContext(pcxt).await;
+        DestroyParallelContext(&pcxt).await;
     }
 }
 
 /// PG `AtEOXact_Parallel`: destroy all remaining contexts.
 pub async fn AtEOXact_Parallel(is_commit: bool) {
-    while let Some(ptr) = pcxt_list_head() {
+    while let Some(pcxt) = pcxt_list_head() {
         if is_commit {
             crate::elog!(crate::utils::elog::WARNING, "leaked parallel context");
         }
-        // SAFETY: head pointer of the active list, owned by this leader task.
-        let pcxt = unsafe { &mut *ptr };
-        DestroyParallelContext(pcxt).await;
+        DestroyParallelContext(&pcxt).await;
     }
 }
 
@@ -569,31 +625,24 @@ fn parallel_vacuum_main(_worker: i32, _last_xlog_end: &Arc<AtomicU64>) {
 // pcxt_list helpers (PG's dlist of active contexts, per leader task).
 // ---------------------------------------------------------------------------
 
-fn pcxt_list_push(ptr: *mut ParallelContext) {
-    let _ = PCXT_LIST.try_with(|l| l.borrow_mut().insert(0, ptr as usize));
+fn pcxt_list_push(pcxt: Arc<ParallelContext>) {
+    let _ = PCXT_LIST.try_with(|l| l.borrow_mut().insert(0, pcxt));
 }
 
-fn pcxt_list_remove(ptr: *mut ParallelContext) {
-    let key = ptr as usize;
-    let _ = PCXT_LIST.try_with(|l| l.borrow_mut().retain(|&p| p != key));
+fn pcxt_list_remove(pcxt: &Arc<ParallelContext>) {
+    let _ = PCXT_LIST.try_with(|l| l.borrow_mut().retain(|p| !Arc::ptr_eq(p, pcxt)));
 }
 
-fn pcxt_list_head() -> Option<*mut ParallelContext> {
+fn pcxt_list_head() -> Option<Arc<ParallelContext>> {
     PCXT_LIST
-        .try_with(|l| l.borrow().first().copied())
+        .try_with(|l| l.borrow().first().cloned())
         .ok()
         .flatten()
-        .map(|addr| addr as *mut ParallelContext)
 }
 
-fn pcxt_list_head_if<F: Fn(&ParallelContext) -> bool>(pred: F) -> Option<*mut ParallelContext> {
-    let ptr = pcxt_list_head()?;
-    // SAFETY: head of the active list, owned by this leader task.
-    if pred(unsafe { &*ptr }) {
-        Some(ptr)
-    } else {
-        None
-    }
+fn pcxt_list_head_if<F: Fn(&ParallelContext) -> bool>(pred: F) -> Option<Arc<ParallelContext>> {
+    let head = pcxt_list_head()?;
+    pred(&head).then_some(head)
 }
 
 /// Run `f` inside a fresh per-leader pcxt-list scope. Leader tasks wrap their
@@ -680,25 +729,25 @@ mod tests {
             assert!(!is_parallel_worker());
             assert_eq!(parallel_worker_number(), None);
 
-            let mut pcxt = CreateParallelContext("postgres", "test_ok_worker", 3, shared);
+            let pcxt = CreateParallelContext("postgres", "test_ok_worker", 3, shared);
             assert!(ParallelContextActive());
-            InitializeParallelDSM(&mut pcxt);
-            LaunchParallelWorkers(&mut pcxt);
-            assert_eq!(pcxt.nworkers_launched, 3);
+            InitializeParallelDSM(&pcxt);
+            LaunchParallelWorkers(&pcxt);
+            assert_eq!(pcxt.nworkers_launched(), 3);
 
-            WaitForParallelWorkersToAttach(&mut pcxt);
-            assert_eq!(pcxt.nknown_attached_workers, 3);
+            WaitForParallelWorkersToAttach(&pcxt);
+            assert_eq!(pcxt.nknown_attached_workers(), 3);
 
-            tokio::time::timeout(Duration::from_secs(5), WaitForParallelWorkersToFinish(&mut pcxt))
+            tokio::time::timeout(Duration::from_secs(5), WaitForParallelWorkersToFinish(&pcxt))
                 .await
                 .expect("workers finish");
 
             // last_xlog_end folded from the workers.
             assert_eq!(pcxt.last_xlog_end.load(Ordering::SeqCst), 42);
 
-            DestroyParallelContext(&mut pcxt).await;
+            DestroyParallelContext(&pcxt).await;
             assert!(!ParallelContextActive(), "no leaked context after destroy");
-            assert!(pcxt.workers.iter().all(|w| w.handle.is_none()), "no leaked tasks");
+            assert!(pcxt.all_handles_released(), "no leaked tasks");
         })
         .await;
 
@@ -715,22 +764,21 @@ mod tests {
         let shared = fresh_shared();
 
         with_leader(shared.clone(), |shared| async move {
-            let mut pcxt = CreateParallelContext("postgres", "test_panic_worker", 1, shared);
-            InitializeParallelDSM(&mut pcxt);
-            LaunchParallelWorkers(&mut pcxt);
-            assert_eq!(pcxt.nworkers_launched, 1);
+            let pcxt = CreateParallelContext("postgres", "test_panic_worker", 1, shared);
+            InitializeParallelDSM(&pcxt);
+            LaunchParallelWorkers(&pcxt);
+            assert_eq!(pcxt.nworkers_launched(), 1);
 
             // The worker panic is caught at its spawn boundary (not aborting the
             // process) and reported as a ParallelMessage::Error. Await the worker
             // task, then drain the error channel directly to observe the message.
-            let handle = pcxt.workers[0].handle.take().expect("worker handle");
+            let handle = pcxt.take_worker_handle(0).expect("worker handle");
             tokio::time::timeout(Duration::from_secs(5), handle)
                 .await
                 .expect("worker task joins")
                 .expect("worker task did not abort the process");
 
-            let rx = pcxt.workers[0].error_rx.as_mut().expect("error channel");
-            let msg = rx.try_recv().expect("worker reported a message");
+            let msg = pcxt.try_recv_worker_message(0).expect("worker reported a message");
             assert!(
                 matches!(&msg, ParallelMessage::Error(t) if t.contains("boom from worker")),
                 "worker error carried the panic text, got {msg:?}"
@@ -741,7 +789,7 @@ mod tests {
             assert!(reraised, "leader re-raises the worker error");
 
             // The handle was already taken; drop the rest cleanly.
-            DestroyParallelContext(&mut pcxt).await;
+            DestroyParallelContext(&pcxt).await;
             assert!(!ParallelContextActive());
         })
         .await;
