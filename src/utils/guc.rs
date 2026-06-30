@@ -416,9 +416,7 @@ pub fn DeescapeQuotedString(_s: &str) -> String {
 
 // --- Functions exported by guc.c ---
 
-pub fn SetConfigOption(_name: &str, _value: &str, _context: GucContext, _source: GucSource) {
-    unimplemented!()
-}
+pub use crate::backend::utils::misc::guc::SetConfigOption;
 
 #[allow(clippy::too_many_arguments)]
 pub fn DefineCustomBoolVariable(
@@ -509,18 +507,7 @@ pub fn MarkGUCPrefixReserved(_class_name: &str) {
     unimplemented!()
 }
 
-/// Look up a GUC's current value; None if missing (when missing_ok).
-pub fn GetConfigOption(
-    _name: &str,
-    _missing_ok: bool,
-    _restrict_privileged: bool,
-) -> Option<String> {
-    unimplemented!()
-}
-
-pub fn GetConfigOptionResetString(_name: &str) -> Option<String> {
-    unimplemented!()
-}
+pub use crate::backend::utils::misc::guc::{GetConfigOption, GetConfigOptionResetString};
 
 pub fn GetConfigOptionFlags(_name: &str, _missing_ok: bool) -> i32 {
     unimplemented!()
@@ -546,25 +533,9 @@ pub fn SelectConfigFiles(_user_doption: Option<&str>, _progname: &str) -> bool {
     unimplemented!()
 }
 
-pub fn ResetAllOptions() {
-    unimplemented!()
-}
-
-pub fn AtStart_GUC() {
-    unimplemented!()
-}
-
-pub fn NewGUCNestLevel() -> i32 {
-    unimplemented!()
-}
-
-pub fn RestrictSearchPath() {
-    unimplemented!()
-}
-
-pub fn AtEOXact_GUC(_is_commit: bool, _nest_level: i32) {
-    unimplemented!()
-}
+pub use crate::backend::utils::misc::guc::{
+    AtEOXact_GUC, AtStart_GUC, NewGUCNestLevel, ResetAllOptions, RestrictSearchPath,
+};
 
 pub fn BeginReportingGUCOptions() {
     unimplemented!()
@@ -593,36 +564,7 @@ pub fn parse_real(_value: &str, _flags: i32) -> Result<f64, Option<&'static str>
     unimplemented!()
 }
 
-/// set_config_option: returns 1 if ok, 0 if not ok (would error), -1 if ok but
-/// changeVal was false. Kept as i32 to preserve the tri-state.
-#[allow(clippy::too_many_arguments)]
-pub fn set_config_option(
-    _name: &str,
-    _value: Option<&str>,
-    _context: GucContext,
-    _source: GucSource,
-    _action: GucAction,
-    _change_val: bool,
-    _elevel: i32,
-    _is_reload: bool,
-) -> i32 {
-    unimplemented!()
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn set_config_option_ext(
-    _name: &str,
-    _value: Option<&str>,
-    _context: GucContext,
-    _source: GucSource,
-    _srole: Oid,
-    _action: GucAction,
-    _change_val: bool,
-    _elevel: i32,
-    _is_reload: bool,
-) -> i32 {
-    unimplemented!()
-}
+pub use crate::backend::utils::misc::guc::{set_config_option, set_config_option_ext};
 
 #[allow(clippy::too_many_arguments)]
 pub fn set_config_with_handle(
@@ -649,10 +591,7 @@ pub fn AlterSystemSetConfigFile(_altersysstmt: &AlterSystemStmt) {
     unimplemented!()
 }
 
-/// Get a GUC's value by name plus its canonical name (C out-param `varname`).
-pub fn GetConfigOptionByName(_name: &str, _missing_ok: bool) -> Option<(String, String)> {
-    unimplemented!()
-}
+pub use crate::backend::utils::misc::guc::GetConfigOptionByName;
 
 /// Transform a GUC array into (names, values) lists (C out-params).
 pub fn TransformGUCArray(_array: &ArrayType) -> (Vec<String>, Vec<String>) {
@@ -695,21 +634,9 @@ pub fn RestoreGUCState(_gucstate: *mut ()) {
 
 // --- Functions exported by guc_funcs.c ---
 
-pub fn ExecSetVariableStmt(_stmt: &VariableSetStmt, _is_top_level: bool) {
-    unimplemented!()
-}
-
-pub fn ExtractSetVariableArgs(_stmt: &VariableSetStmt) -> String {
-    unimplemented!()
-}
-
-pub fn SetPGVariable(_name: &str, _args: &[String], _is_local: bool) {
-    unimplemented!()
-}
-
-pub fn GetPGVariable(_name: &str, _dest: &mut dyn DestReceiver) {
-    unimplemented!()
-}
+pub use crate::backend::utils::misc::guc_funcs::{
+    ExecSetVariableStmt, ExtractSetVariableArgs, GetPGVariable, SetPGVariable,
+};
 
 pub fn GetPGVariableResultDesc(_name: &str) -> TupleDesc {
     unimplemented!()

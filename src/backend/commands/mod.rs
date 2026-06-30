@@ -3,3 +3,4 @@
 pub mod define;
 pub mod indexcmds;
 pub mod tablecmds;
+pub mod variable;
