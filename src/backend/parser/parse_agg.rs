@@ -77,6 +77,68 @@ pub fn transformAggregateCall(
     pstate.p_has_aggs = true;
 }
 
+/// PG `transformWindowFuncCall`: link a `WindowFunc` to its `WindowClause` by
+/// recording its `WindowDef` in `pstate.p_windowdefs` and setting `winref` to the
+/// 1-based position of that def. A reference (`OVER name`, only `refname` set)
+/// resolves against a named WINDOW definition; an inline `OVER (...)` def is matched
+/// against the existing inline defs (deduplicated when identical) or appended.
+///
+/// M12 (step 42): the no-nested-window / placement (SELECT/ORDER BY only) checks are
+/// staged behind the milestone tlists (the window call already arrives only from the
+/// SELECT target list); they grow with the general expression-kind walker.
+pub fn transformWindowFuncCall(
+    pstate: &mut ParseState,
+    wfunc: &mut crate::nodes::primnodes::WindowFunc,
+    windef: &crate::nodes::parsenodes::WindowDef,
+) {
+    use crate::nodes::nodes::Node;
+    use crate::nodes::parsenodes::WindowDef;
+
+    if let Some(refname) = windef.refname.as_ref() {
+        // `OVER name`: reference a named WINDOW definition. Find it by name.
+        let pos = pstate.p_windowdefs.iter().position(|n| {
+            matches!(n, Node::WindowDef(d) if d.name.as_deref() == Some(refname.as_str()))
+        });
+        let Some(pos) = pos else {
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_OBJECT)
+                    .errmsg(format!("window \"{refname}\" does not exist"));
+            });
+            unreachable!("ereport(ERROR) diverges");
+        };
+        wfunc.winref = (pos + 1) as crate::c::Index;
+    } else {
+        // Inline `OVER (...)`: reuse an identical anonymous def if one exists, else
+        // append. Identity is the partition/order/frame triple (PG compares the
+        // WindowDef fields; the milestone defs carry no name/refname).
+        let matched = pstate.p_windowdefs.iter().position(|n| {
+            matches!(n, Node::WindowDef(d)
+                if d.name.is_none()
+                    && d.partitionClause == windef.partitionClause
+                    && d.orderClause == windef.orderClause
+                    && d.frameOptions == windef.frameOptions
+                    && d.startOffset == windef.startOffset
+                    && d.endOffset == windef.endOffset)
+        });
+        let pos = matched.unwrap_or_else(|| {
+            pstate.p_windowdefs.push(Node::WindowDef(Box::new(WindowDef {
+                name: None,
+                refname: None,
+                partitionClause: windef.partitionClause.clone(),
+                orderClause: windef.orderClause.clone(),
+                frameOptions: windef.frameOptions,
+                startOffset: windef.startOffset.clone(),
+                endOffset: windef.endOffset.clone(),
+                location: windef.location,
+            })));
+            pstate.p_windowdefs.len() - 1
+        });
+        wfunc.winref = (pos + 1) as crate::c::Index;
+    }
+
+    pstate.p_has_window_funcs = true;
+}
+
 /// PG `parseCheckAggregates`: after the SELECT is otherwise transformed, verify the
 /// query is a valid aggregate/grouped query -- every targetlist (and HAVING)
 /// expression must be either an aggregate input or built only from the GROUP BY

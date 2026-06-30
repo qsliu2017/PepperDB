@@ -77,6 +77,9 @@ use crate::backend::executor::nodeSort::{exec_end_sort, exec_init_sort, exec_sor
 use crate::backend::executor::nodeUnique::{
     exec_end_unique, exec_init_unique, exec_unique, UniqueRun,
 };
+use crate::backend::executor::nodeWindowAgg::{
+    exec_end_window_agg, exec_init_window_agg, exec_window_agg, WindowAggRun,
+};
 use crate::shared_state::SharedState;
 use std::sync::Arc;
 
@@ -131,6 +134,8 @@ pub enum PlanStateNode<'rel> {
     Group(Box<GroupRun<'rel>>),
     /// T_AggState (+ child + resolved per-aggregate metadata). PLAIN/SORTED/HASHED.
     Agg(Box<AggRun<'rel>>),
+    /// T_WindowAggState (+ child + per-window-function metadata + partition spool).
+    WindowAgg(Box<WindowAggRun<'rel>>),
     /// T_NestLoopState (+ outer/inner children, joinqual, projection).
     NestLoop(Box<NestLoopRun<'rel>>),
     /// T_HashJoinState (+ outer child + Hash inner child, hashclauses, projection).
@@ -193,6 +198,7 @@ pub fn result_type_of(node: &PlanStateNode<'_>) -> Option<TupleDesc> {
         PlanStateNode::Unique(u) => u.state.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Group(g) => g.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Agg(a) => a.state.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::WindowAgg(w) => w.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::NestLoop(n) => n.state.js.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::HashJoin(h) => h.state.js.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::MergeJoin(m) => m.state.js.ps.ps_result_tuple_desc.clone(),
@@ -269,6 +275,12 @@ pub fn exec_init_node<'rel>(
             // REWIND/BACKWARD/MARK (PG passes eflags through, dropping those).
             let child = init_child(a.plan.lefttree.as_ref(), estate, child_eflags(eflags));
             Some(PlanStateNode::Agg(exec_init_agg(a, estate, child)))
+        }
+        Node::WindowAgg(w) => {
+            // The window agg spools each partition; the child (a Sort) materializes,
+            // so it needs no REWIND/BACKWARD/MARK.
+            let child = init_child(w.plan.lefttree.as_ref(), estate, child_eflags(eflags));
+            Some(PlanStateNode::WindowAgg(exec_init_window_agg(w, estate, child)))
         }
         Node::NestLoop(n) => {
             // Two children: outer=lefttree, inner=righttree (PG outer/innerPlan).
@@ -365,6 +377,7 @@ pub async fn exec_proc_node<'n>(
         PlanStateNode::Unique(u) => exec_unique(shared, u).await,
         PlanStateNode::Group(g) => exec_group(shared, g).await,
         PlanStateNode::Agg(a) => exec_agg(shared, a).await,
+        PlanStateNode::WindowAgg(w) => exec_window_agg(shared, w).await,
         PlanStateNode::NestLoop(n) => exec_nest_loop(shared, n).await,
         PlanStateNode::HashJoin(h) => exec_hash_join(shared, h).await,
         PlanStateNode::MergeJoin(m) => exec_merge_join(shared, m).await,
@@ -433,6 +446,7 @@ pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode
         PlanStateNode::Unique(u) => exec_end_unique(shared, u),
         PlanStateNode::Group(g) => exec_end_group(shared, g),
         PlanStateNode::Agg(a) => exec_end_agg(shared, a),
+        PlanStateNode::WindowAgg(w) => exec_end_window_agg(shared, w),
         PlanStateNode::NestLoop(n) => exec_end_nest_loop(shared, n),
         PlanStateNode::HashJoin(h) => exec_end_hash_join(shared, h),
         PlanStateNode::MergeJoin(m) => exec_end_merge_join(shared, m),

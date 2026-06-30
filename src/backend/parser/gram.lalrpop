@@ -39,6 +39,10 @@ use crate::backend::parser::parser::{
     make_create_trig_stmt, make_fk_constraint, make_column_fk_constraint, set_constraint_name,
     make_null_const, TrigTiming, TrigEvent,
     DropBehaviorTok, ObjType,
+    attach_over_clause, make_window_ref, make_window_def, assemble_frame_options,
+    frame_defaults, frameopt_range, frameopt_rows, frameopt_groups,
+    frameopt_exclude_current_row, frameopt_exclude_group, frameopt_exclude_ties,
+    FrameBoundTok,
 };
 use crate::nodes::parsenodes::{CursorOptions, FetchDirection, FETCH_ALL};
 use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
@@ -262,6 +266,21 @@ extern {
         "PARTIAL"    => Token::Keyword("partial"),
         "SIMPLE"     => Token::Keyword("simple"),
         "ACTION"     => Token::Keyword("action"),
+        // M12 (step 42): window-function keywords (OVER / WINDOW / frame_clause).
+        "OVER"       => Token::Keyword("over"),
+        "WINDOW"     => Token::Keyword("window"),
+        "PARTITION"  => Token::Keyword("partition"),
+        "RANGE"      => Token::Keyword("range"),
+        "ROWS"       => Token::Keyword("rows"),
+        "GROUPS"     => Token::Keyword("groups"),
+        "PRECEDING"  => Token::Keyword("preceding"),
+        "FOLLOWING"  => Token::Keyword("following"),
+        "UNBOUNDED"  => Token::Keyword("unbounded"),
+        "EXCLUDE"    => Token::Keyword("exclude"),
+        "TIES"       => Token::Keyword("ties"),
+        "OTHERS"     => Token::Keyword("others"),
+        "BETWEEN"    => Token::Keyword("between"),
+        "FILTER"     => Token::Keyword("filter"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -1680,7 +1699,7 @@ SelectClause: Node = {
 // operations are added at their milestones.
 SimpleSelect: Node = {
     "SELECT" <distinct:OptDistinctClause> <targets:OptTargetList> <frm:FromClause>
-        <whr:WhereClause> <grp:GroupClause> => {
+        <whr:WhereClause> <grp:GroupClause> <win:WindowClause> => {
         let n = SelectStmt {
             distinctClause: distinct,
             intoClause: None,
@@ -1690,7 +1709,7 @@ SimpleSelect: Node = {
             groupClause: grp,
             groupDistinct: false,
             havingClause: None,
-            windowClause: Vec::new(),
+            windowClause: win,
             valuesLists: Vec::new(),
             sortClause: Vec::new(),
             limitOffset: None,
@@ -1730,6 +1749,96 @@ GroupClause: Vec<Node> = {
 GroupByList: Vec<Node> = {
     <e:AExpr> => vec![e],
     <mut list:GroupByList> "," <e:AExpr> => { list.push(e); list },
+};
+
+// ===========================================================================
+//  WINDOW clause  (gram.y window_clause -> window_definition_list -> window_definition)
+// ===========================================================================
+
+// gram.y `window_clause: WINDOW window_definition_list | /*EMPTY*/`. Each
+// `window_definition` is `ColId AS window_specification` -> a named WindowDef.
+WindowClause: Vec<Node> = {
+    "WINDOW" <list:WindowDefinitionList> => list,
+    => Vec::new(),
+};
+
+WindowDefinitionList: Vec<Node> = {
+    <d:WindowDefinition> => vec![d],
+    <mut list:WindowDefinitionList> "," <d:WindowDefinition> => { list.push(d); list },
+};
+
+// gram.y `window_definition: ColId AS window_specification`. The name is the
+// window's own name; the spec carries PARTITION BY / ORDER BY / frame.
+WindowDefinition: Node = {
+    <n:ColId> "AS" <w:WindowSpecification> => {
+        let mut w = w;
+        w.name = Some(n);
+        Node::WindowDef(w)
+    },
+};
+
+// gram.y `window_specification: '(' opt_existing_window_name opt_partition_clause
+// opt_sort_clause opt_frame_clause ')'`. Builds an anonymous WindowDef (the name is
+// stamped by the caller for a named WINDOW definition). `opt_existing_window_name`
+// (window inheritance, `(base ...)`) grows later.
+WindowSpecification: Box<crate::nodes::parsenodes::WindowDef> = {
+    "(" <part:OptPartitionClause> <ord:OptWindowSortClause> <frame:OptFrameClause> ")" =>
+        make_window_def(part, ord, frame),
+};
+
+// gram.y `opt_partition_clause: PARTITION BY expr_list | /*EMPTY*/`.
+OptPartitionClause: Vec<Node> = {
+    "PARTITION" "BY" <list:ExprList> => list,
+    => Vec::new(),
+};
+
+// The window spec's ORDER BY (gram.y opt_sort_clause inside window_specification).
+OptWindowSortClause: Vec<Node> = {
+    SortClause,
+    => Vec::new(),
+};
+
+// gram.y `opt_frame_clause`: `{RANGE|ROWS|GROUPS} frame_extent opt_window_exclusion
+// | /*EMPTY*/`. Returns the assembled frameOptions bitmask + (start,end) offset
+// exprs. EMPTY -> the default frame (RANGE UNBOUNDED PRECEDING .. CURRENT ROW).
+OptFrameClause: (i32, Option<Node>, Option<Node>) = {
+    <mode:FrameMode> <ext:FrameExtent> <excl:OptFrameExclusion> =>
+        assemble_frame_options(mode, ext, excl),
+    => (frame_defaults(), None, None),
+};
+
+FrameMode: i32 = {
+    "RANGE"  => frameopt_range(),
+    "ROWS"   => frameopt_rows(),
+    "GROUPS" => frameopt_groups(),
+};
+
+// gram.y `frame_extent: frame_bound | BETWEEN frame_bound AND frame_bound`. The
+// single-bound form is `start .. CURRENT ROW`; the BETWEEN form gives both bounds.
+// Each bound is (start_bits, end_bits-mask, offset-expr); assemble_frame_options
+// combines them. We carry the raw start/end FrameBound results.
+FrameExtent: (FrameBoundTok, Option<FrameBoundTok>) = {
+    <b:FrameBound> => (b, None),
+    "BETWEEN" <s:FrameBound> "AND" <e:FrameBound> => (s, Some(e)),
+};
+
+// gram.y `frame_bound`: UNBOUNDED PRECEDING/FOLLOWING | CURRENT ROW | a_expr
+// PRECEDING/FOLLOWING. Carries a discriminant + the offset expr (for OFFSET forms).
+FrameBound: FrameBoundTok = {
+    "UNBOUNDED" "PRECEDING" => FrameBoundTok::UnboundedPreceding,
+    "UNBOUNDED" "FOLLOWING" => FrameBoundTok::UnboundedFollowing,
+    "CURRENT" "ROW"         => FrameBoundTok::CurrentRow,
+    <e:AExpr> "PRECEDING"   => FrameBoundTok::OffsetPreceding(e),
+    <e:AExpr> "FOLLOWING"   => FrameBoundTok::OffsetFollowing(e),
+};
+
+// gram.y `opt_window_exclusion`: EXCLUDE {CURRENT ROW|GROUP|TIES|NO OTHERS}.
+OptFrameExclusion: i32 = {
+    "EXCLUDE" "CURRENT" "ROW" => frameopt_exclude_current_row(),
+    "EXCLUDE" "GROUP"         => frameopt_exclude_group(),
+    "EXCLUDE" "TIES"          => frameopt_exclude_ties(),
+    "EXCLUDE" "NO" "OTHERS"   => 0,
+    => 0,
 };
 
 // ===========================================================================
@@ -2046,13 +2155,35 @@ CExpr: Node = {
     "NULL" => make_null_const(),
 };
 
-// gram.y `func_expr: func_application ... | func_expr_common_subexpr`. M3 reaches a
-// plain function call `name ( arglist )`; M4 (step 23) adds the cast/conditional
-// special forms (CAST, COALESCE, NULLIF, GREATEST, LEAST). WITHIN GROUP / FILTER /
-// OVER and the remaining common-subexpr forms (CURRENT_DATE, ...) grow later.
+// gram.y `func_expr: func_application within_group_clause filter_clause over_clause
+// | func_expr_common_subexpr`. M3 reaches a plain function call `name ( arglist )`;
+// M4 (step 23) adds the cast/conditional special forms (CAST, COALESCE, NULLIF,
+// GREATEST, LEAST). M12 (step 42) adds the `[FILTER (WHERE ...)] OVER window`
+// suffix that turns an aggregate / window function into a windowed call (the
+// `over_clause` sets `FuncCall.over`). WITHIN GROUP and the remaining
+// common-subexpr forms (CURRENT_DATE, ...) grow later.
 FuncExpr: Node = {
     FuncApplication,
+    <f:FuncApplication> <filter:FilterClause> <over:OverClause> =>
+        attach_over_clause(f, filter, over),
     FuncExprCommonSubexpr,
+};
+
+// gram.y `filter_clause: FILTER '(' WHERE a_expr ')' | /*EMPTY*/`. Staged: the
+// per-row FILTER over a windowed aggregate is not yet executed, so a present FILTER
+// fails loudly in parse-analysis (clean not_yet_reachable); the grammar accepts it.
+FilterClause: Option<Node> = {
+    "FILTER" "(" "WHERE" <e:AExpr> ")" => Some(e),
+    => None,
+};
+
+// gram.y `over_clause: OVER window_specification | OVER ColId | /*EMPTY*/`. The
+// inline `OVER ( ... )` builds an anonymous WindowDef; `OVER name` references a
+// named WINDOW clause (refname). An OVER clause is always present in this rule
+// (the no-OVER alternative is the bare FuncApplication arm above).
+OverClause: Box<crate::nodes::parsenodes::WindowDef> = {
+    "OVER" <w:WindowSpecification> => w,
+    "OVER" <n:ColId> => make_window_ref(n),
 };
 
 // gram.y `func_expr_common_subexpr` (M4 subset): the SQL-keyword "function" forms.

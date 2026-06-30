@@ -1,8 +1,7 @@
 //! Translated from PostgreSQL src/include/parser/parse_agg.h
 
 use crate::nodes::nodes::Node;
-use crate::nodes::parsenodes::{Query, WindowDef};
-use crate::nodes::primnodes::{Aggref, GroupingFunc, WindowFunc};
+use crate::nodes::primnodes::{Aggref, GroupingFunc};
 use crate::parser::parse_node::ParseState;
 use crate::postgres_ext::Oid;
 
@@ -10,15 +9,11 @@ use crate::postgres_ext::Oid;
 /// fills the Aggref's args/aggargtypes and marks `pstate.p_has_aggs`.
 pub use crate::backend::parser::parse_agg::transformAggregateCall;
 
-pub fn transformGroupingFunc(_pstate: &mut ParseState, _p: &mut GroupingFunc) -> Node {
-    unimplemented!()
-}
+/// PG `transformWindowFuncCall`. See `crate::backend::parser::parse_agg` (M12 body):
+/// records the WindowDef in pstate.p_windowdefs and links the WindowFunc's winref.
+pub use crate::backend::parser::parse_agg::transformWindowFuncCall;
 
-pub fn transformWindowFuncCall(
-    _pstate: &mut ParseState,
-    _wfunc: &mut WindowFunc,
-    _windef: &WindowDef,
-) {
+pub fn transformGroupingFunc(_pstate: &mut ParseState, _p: &mut GroupingFunc) -> Node {
     unimplemented!()
 }
 

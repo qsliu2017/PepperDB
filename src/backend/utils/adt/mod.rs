@@ -15,3 +15,4 @@ pub mod ruleutils;
 pub mod selfuncs;
 pub mod timestamp;
 pub mod varlena;
+pub mod windowfuncs;

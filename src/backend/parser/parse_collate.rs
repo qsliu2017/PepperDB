@@ -220,6 +220,15 @@ fn assign_collations_walker(
             no_collation(context);
             false
         }
+        // M12 (step 42): a WindowFunc. Descend into its (plain) argument expressions;
+        // the reachable window functions produce uncollatable results.
+        Node::WindowFunc(w) => {
+            for arg in &mut w.args {
+                assign_expr_collations(pstate, arg);
+            }
+            no_collation(context);
+            false
+        }
         // CollateExpr / SubLink / ... (collation-bearing) grow per milestone.
         other => not_yet_reachable(other),
     }

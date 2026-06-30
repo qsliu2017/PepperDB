@@ -81,6 +81,7 @@ fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
         Node::HashJoin(h) => Node::HashJoin(Box::new(set_hashjoin_refs(root, *h, rtoffset))),
         Node::Hash(h) => Node::Hash(Box::new(set_hash_refs(root, *h, rtoffset))),
         Node::Agg(a) => Node::Agg(Box::new(set_agg_refs(root, *a, rtoffset))),
+        Node::WindowAgg(w) => Node::WindowAgg(Box::new(set_windowagg_refs(root, *w, rtoffset))),
         Node::Sort(s) => Node::Sort(Box::new(set_sort_refs(root, *s, rtoffset))),
         Node::Unique(u) => Node::Unique(Box::new(set_unique_refs(root, *u, rtoffset))),
         Node::Limit(l) => Node::Limit(Box::new(set_limit_refs(root, *l, rtoffset))),
@@ -106,6 +107,30 @@ fn set_agg_refs(root: &mut PlannerInfo, mut plan: Agg, rtoffset: usize) -> Agg {
     fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
     crate::assert!(plan.plan.qual.is_empty(), "set_plan_refs: Agg HAVING qual not yet reachable");
     assign_agg_nos(&mut plan.plan.targetlist);
+    plan.plan.lefttree = Some(child);
+    plan
+}
+
+/// PG `set_plan_refs` T_WindowAgg arm + `set_upper_references`: recurse into the
+/// child, then rewrite the WindowAgg's tlist Vars (and the WindowFunc-argument Vars)
+/// to reference the child output by position (OUTER_VAR). A WindowFunc whose `winref`
+/// is NOT this node's is a lower window's already-computed column: it is left to be
+/// read from the child output (the executor copies it through), so it is rewritten to
+/// the child OUTER_VAR position holding it. (M12: no run-condition, no HAVING qual.)
+fn set_windowagg_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::WindowAgg,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::WindowAgg {
+    let child = plan
+        .plan
+        .lefttree
+        .take()
+        .unwrap_or_else(|| not_yet_reachable("set_plan_refs: WindowAgg without child"));
+    let child = set_plan_refs(root, child, rtoffset);
+    let child_tlist = plan_tlist(&child).to_vec();
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
     plan.plan.lefttree = Some(child);
     plan
 }
@@ -176,6 +201,7 @@ fn plan_tlist(plan: &Node) -> &[Node] {
         Node::IndexOnlyScan(s) => &s.scan.plan.targetlist,
         Node::BitmapHeapScan(s) => &s.scan.plan.targetlist,
         Node::Agg(a) => &a.plan.targetlist,
+        Node::WindowAgg(w) => &w.plan.targetlist,
         Node::Sort(s) => &s.plan.targetlist,
         Node::Unique(u) => &u.plan.targetlist,
         Node::Limit(l) => &l.plan.targetlist,
@@ -438,6 +464,13 @@ fn fix_upper_expr(expr: Node, child_tlist: &[Node]) -> Node {
                 .collect();
             Node::Aggref(agg)
         }
+        Node::WindowFunc(mut w) => {
+            // Rewrite the window function's argument Vars to the child output. The
+            // WindowFunc node itself stays in the WindowAgg tlist (the executor reads
+            // its winref to decide whether to compute it here or copy it through).
+            w.args = w.args.into_iter().map(|a| fix_upper_expr(a, child_tlist)).collect();
+            Node::WindowFunc(w)
+        }
         other => other,
     }
 }
@@ -457,7 +490,18 @@ fn child_position_of_var(
                 return Some(te.resno);
             }
             // The child entry is an OUTER_VAR (already-rewritten lower upper node):
-            // match on the rewritten attno.
+            // its varnosyn/varattnosyn preserve the original base-rel identity, so
+            // match the searched base-rel Var against those (the rewritten varattno
+            // is the child output position, which need not equal the heap attno).
+            Some(Node::Var(cv))
+                if cv.varno == OUTER_VAR
+                    && i64::try_from(cv.varnosyn).unwrap_or(-1) == i64::from(varno)
+                    && cv.varattnosyn == varattno =>
+            {
+                return Some(te.resno);
+            }
+            // Fallback: an OUTER_VAR whose rewritten attno already equals the searched
+            // attno (the identity case where heap attno == output position).
             Some(Node::Var(cv)) if cv.varno == OUTER_VAR && cv.varattno == varattno => {
                 return Some(te.resno);
             }

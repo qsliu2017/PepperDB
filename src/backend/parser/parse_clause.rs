@@ -244,6 +244,146 @@ pub fn transform_sort_clause(
     sortlist
 }
 
+/// PG `transformWindowDefinitions`: turn the parse state's collected `WindowDef`s
+/// (the explicit `WINDOW name AS (...)` list plus the inline `OVER (...)`
+/// definitions, both gathered into `pstate.p_windowdefs` by `transformWindowFuncCall`)
+/// into the `Query.windowClause` list of `WindowClause` nodes, each carrying its
+/// transformed `partitionClause` / `orderClause` (as `SortGroupClause` lists) and
+/// the `frameOptions` / start/end offsets. The `winref` matches the value
+/// `transformWindowFuncCall` stamped on each `WindowFunc` (1-based position).
+///
+/// M12 (step 42): window inheritance (`OVER (base ...)`) and the RANGE/GROUPS
+/// in_range support-function resolution are clean grow guards; the milestone frames
+/// are ROWS and the default RANGE UNBOUNDED PRECEDING .. CURRENT ROW.
+pub fn transformWindowDefinitions(
+    pstate: &mut ParseState,
+    windowdefs: &[Node],
+    targetlist: &mut Vec<Node>,
+) -> Vec<Node> {
+    use crate::nodes::parsenodes::{FrameOptions, WindowClause, WindowDef};
+
+    let mut result: Vec<Node> = Vec::new();
+    for (i, wd) in windowdefs.iter().enumerate() {
+        let Node::WindowDef(windef): &Node = wd else {
+            not_yet_reachable("transformWindowDefinitions: non-WindowDef in window list");
+        };
+        let windef: &WindowDef = windef;
+
+        // PARTITION BY -> SortGroupClause list (group semantics: eqop + sortop).
+        let partition_clause = transform_group_clause(
+            pstate,
+            windef.partitionClause.clone(),
+            &mut Vec::new(),
+            targetlist,
+            Vec::new(),
+            crate::parser::parse_node::ParseExprKind::WindowPartition,
+            true,
+        );
+
+        // ORDER BY -> SortGroupClause list (full ordering: sortop + nulls_first).
+        let order_clause = transform_sort_clause(
+            pstate,
+            windef.orderClause.clone(),
+            targetlist,
+            crate::parser::parse_node::ParseExprKind::WindowOrder,
+            true,
+        );
+
+        let frame_options = windef.frameOptions;
+        // RANGE/GROUPS modes with an ORDER BY column need an in_range function and a
+        // single ordering column; the milestone reaches ROWS frames and the default
+        // RANGE UNBOUNDED PRECEDING .. CURRENT ROW (which needs no in_range probe).
+        let start_offset = transformFrameOffset(pstate, frame_options, true, windef.startOffset.clone());
+        let end_offset = transformFrameOffset(pstate, frame_options, false, windef.endOffset.clone());
+
+        let exotic =
+            FrameOptions::from_bits_truncate(frame_options).intersects(FrameOptions::EXCLUSION);
+        if exotic {
+            not_yet_reachable("transformWindowDefinitions: frame EXCLUDE clause");
+        }
+
+        result.push(Node::WindowClause(Box::new(WindowClause {
+            name: windef.name.clone(),
+            refname: windef.refname.clone(),
+            partitionClause: partition_clause,
+            orderClause: order_clause,
+            frameOptions: frame_options,
+            startOffset: start_offset,
+            endOffset: end_offset,
+            startInRangeFunc: crate::postgres_ext::InvalidOid,
+            endInRangeFunc: crate::postgres_ext::InvalidOid,
+            inRangeColl: crate::postgres_ext::InvalidOid,
+            inRangeAsc: true,
+            inRangeNullsFirst: false,
+            winref: (i + 1) as crate::c::Index,
+            copiedOrder: false,
+        })));
+    }
+    result
+}
+
+/// PG `transformFrameOffset`: transform a ROWS/RANGE/GROUPS frame OFFSET expression
+/// (`n PRECEDING` / `n FOLLOWING`) and coerce it to the offset's expected type. For
+/// ROWS and GROUPS the offset is an int8 row/group count. RANGE-mode offsets (which
+/// require the column-type in_range support function) are staged.
+pub fn transformFrameOffset(
+    pstate: &mut ParseState,
+    frame_options: i32,
+    is_start: bool,
+    clause: Option<Node>,
+) -> Option<Node> {
+    use crate::catalog::genbki::{INT2OID, INT4OID, INT8OID};
+    use crate::nodes::parsenodes::FrameOptions;
+
+    let opts = FrameOptions::from_bits_truncate(frame_options);
+    let offset_bit = if is_start {
+        FrameOptions::START_OFFSET
+    } else {
+        FrameOptions::END_OFFSET
+    };
+    if !opts.intersects(offset_bit) {
+        return None; // not an OFFSET bound -> no offset expression
+    }
+
+    if opts.contains(FrameOptions::RANGE) {
+        not_yet_reachable("transformFrameOffset: RANGE-mode OFFSET (needs in_range)");
+    }
+
+    let node = clause.unwrap_or_else(|| {
+        not_yet_reachable("transformFrameOffset: OFFSET bound without an offset expression")
+    });
+    let expr = crate::parser::parse_expr::transformExpr(
+        pstate,
+        Some(node),
+        crate::parser::parse_node::ParseExprKind::WindowFrameRange,
+    )
+    .unwrap_or_else(|| not_yet_reachable("transformFrameOffset: NULL offset expression"));
+
+    // ROWS / GROUPS: the offset is a bigint row/group count. An integer literal
+    // widens exactly to int8 (the same fold transform_limit_clause uses).
+    let expr_type = exprType(&expr);
+    if expr_type == INT8OID {
+        return Some(expr);
+    }
+    if (expr_type == INT4OID || expr_type == INT2OID)
+        && let Node::Const(c) = &expr
+        && !c.constisnull
+    {
+        let v = i64::from(crate::postgres::DatumGetInt32(c.constvalue));
+        return Some(Node::Const(Box::new(crate::nodes::primnodes::Const {
+            consttype: INT8OID,
+            consttypmod: -1,
+            constcollid: crate::postgres_ext::InvalidOid,
+            constlen: 8,
+            constvalue: crate::postgres::Int64GetDatum(v),
+            constisnull: false,
+            constbyval: true,
+            location: c.location,
+        })));
+    }
+    not_yet_reachable("transformFrameOffset: non-literal ROWS/GROUPS offset");
+}
+
 /// PG `transformDistinctClause` (plain DISTINCT): build a `SortGroupClause` per
 /// non-junk targetlist column (DISTINCT over the whole select list), reusing the
 /// ORDER BY clauses' refs where they coincide. DISTINCT ON grows separately.

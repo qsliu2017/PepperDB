@@ -36,13 +36,10 @@ pub use crate::backend::parser::parse_clause::transform_group_clause as transfor
 /// builds the ORDER BY SortGroupClause list.
 pub use crate::backend::parser::parse_clause::transform_sort_clause as transformSortClause;
 
-pub fn transformWindowDefinitions(
-    _pstate: &mut ParseState,
-    _windowdefs: Vec<Node>,
-    _targetlist: &mut Vec<Node>,
-) -> Vec<Node> {
-    unimplemented!()
-}
+/// PG `transformWindowDefinitions`. See `crate::backend::parser::parse_clause` (M12
+/// body): builds the Query.windowClause WindowClause list from the collected
+/// WindowDefs.
+pub use crate::backend::parser::parse_clause::transformWindowDefinitions;
 
 /// PG `transformDistinctClause`. See `crate::backend::parser::parse_clause` (M5
 /// body): builds the DISTINCT SortGroupClause list over the select-list columns.

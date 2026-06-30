@@ -61,6 +61,9 @@ pub fn exec_rescan(shared: &Arc<SharedState>, node: &mut PlanStateNode) {
         PlanStateNode::Unique(u) => crate::backend::executor::nodeUnique::exec_rescan_unique(u),
         PlanStateNode::Group(g) => crate::backend::executor::nodeGroup::exec_rescan_group(g),
         PlanStateNode::Agg(a) => crate::backend::executor::nodeAgg::exec_rescan_agg(a),
+        PlanStateNode::WindowAgg(_) => {
+            unimplemented!("ExecReScan: WindowAgg rescan not yet reachable")
+        }
         // The M7 join nodes materialize their inner side once and are not rescanned
         // (no nestloop params / no join sits below a rescanning parent yet).
         PlanStateNode::NestLoop(_)

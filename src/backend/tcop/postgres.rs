@@ -2181,6 +2181,180 @@ mod wire_tests {
             .expect("supervisor task ok");
     }
 
+    /// THE M12 MILESTONE: window functions over the wire. Over t(g int, v int) with
+    /// rows {(1,10),(1,20),(1,20),(2,5),(2,15)}:
+    ///   - `row_number() OVER (ORDER BY v)`            -> 1..5 in v order.
+    ///   - `rank()/dense_rank() OVER (ORDER BY v)`     -> peers share rank.
+    ///   - `row_number() OVER (PARTITION BY g ORDER BY v)` -> restarts per g.
+    ///   - `sum(v) OVER (PARTITION BY g)`              -> the partition total per row.
+    ///   - `sum(v) OVER (ORDER BY v)`                  -> running total (default frame).
+    ///   - `lag(v)/lead(v) OVER (ORDER BY v)`          -> neighbor value + NULL ends.
+    ///   - a named `WINDOW w AS (...)` reused by two functions.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "end-to-end wire test exercising the full M12 window-function surface in one session"
+    )]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m12_window_functions_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        simple_query(&mut client, &mut buf, "CREATE TABLE t (g int, v int)").await;
+        for (g, v) in [(1, 10), (1, 20), (1, 20), (2, 5), (2, 15)] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO t VALUES ({g}, {v})")).await;
+        }
+
+        let texts = |msgs: &[Msg]| -> Vec<Vec<String>> {
+            msgs.iter().filter(|m| m.ty == b'D').map(|m| datarow_texts(&m.body)).collect()
+        };
+
+        // row_number() OVER (ORDER BY v): 1..5 in ascending v order.
+        let sel = simple_query(
+            &mut client,
+            &mut buf,
+            "SELECT v, row_number() OVER (ORDER BY v) FROM t ORDER BY v",
+        )
+        .await;
+        assert_eq!(
+            texts(&sel),
+            vec![
+                vec!["5".to_owned(), "1".to_owned()],
+                vec!["10".to_owned(), "2".to_owned()],
+                vec!["15".to_owned(), "3".to_owned()],
+                vec!["20".to_owned(), "4".to_owned()],
+                vec!["20".to_owned(), "5".to_owned()],
+            ],
+            "row_number() OVER (ORDER BY v)"
+        );
+
+        // rank() and dense_rank() OVER (ORDER BY v): the two v=20 rows are peers.
+        let sel = simple_query(
+            &mut client,
+            &mut buf,
+            "SELECT v, rank() OVER (ORDER BY v), dense_rank() OVER (ORDER BY v) FROM t ORDER BY v",
+        )
+        .await;
+        assert_eq!(
+            texts(&sel),
+            vec![
+                vec!["5".to_owned(), "1".to_owned(), "1".to_owned()],
+                vec!["10".to_owned(), "2".to_owned(), "2".to_owned()],
+                vec!["15".to_owned(), "3".to_owned(), "3".to_owned()],
+                vec!["20".to_owned(), "4".to_owned(), "4".to_owned()],
+                vec!["20".to_owned(), "4".to_owned(), "4".to_owned()],
+            ],
+            "rank/dense_rank with peers"
+        );
+
+        // row_number() OVER (PARTITION BY g ORDER BY v): restarts at each partition.
+        let sel = simple_query(
+            &mut client,
+            &mut buf,
+            "SELECT g, v, row_number() OVER (PARTITION BY g ORDER BY v) FROM t ORDER BY g, v",
+        )
+        .await;
+        assert_eq!(
+            texts(&sel),
+            vec![
+                vec!["1".to_owned(), "10".to_owned(), "1".to_owned()],
+                vec!["1".to_owned(), "20".to_owned(), "2".to_owned()],
+                vec!["1".to_owned(), "20".to_owned(), "3".to_owned()],
+                vec!["2".to_owned(), "5".to_owned(), "1".to_owned()],
+                vec!["2".to_owned(), "15".to_owned(), "2".to_owned()],
+            ],
+            "row_number() restarts per partition"
+        );
+
+        // sum(v) OVER (PARTITION BY g): the partition total on every row (g=1 -> 50,
+        // g=2 -> 20).
+        let sel = simple_query(
+            &mut client,
+            &mut buf,
+            "SELECT g, v, sum(v) OVER (PARTITION BY g) FROM t ORDER BY g, v",
+        )
+        .await;
+        assert_eq!(
+            texts(&sel),
+            vec![
+                vec!["1".to_owned(), "10".to_owned(), "50".to_owned()],
+                vec!["1".to_owned(), "20".to_owned(), "50".to_owned()],
+                vec!["1".to_owned(), "20".to_owned(), "50".to_owned()],
+                vec!["2".to_owned(), "5".to_owned(), "20".to_owned()],
+                vec!["2".to_owned(), "15".to_owned(), "20".to_owned()],
+            ],
+            "sum(v) OVER (PARTITION BY g) partition total"
+        );
+
+        // sum(v) OVER (ORDER BY v): running total over the default RANGE frame
+        // (UNBOUNDED PRECEDING .. CURRENT ROW). The two v=20 rows are peers, so both
+        // include each other: 5,15,30,70,70.
+        let sel = simple_query(
+            &mut client,
+            &mut buf,
+            "SELECT v, sum(v) OVER (ORDER BY v) FROM t ORDER BY v",
+        )
+        .await;
+        assert_eq!(
+            texts(&sel),
+            vec![
+                vec!["5".to_owned(), "5".to_owned()],
+                vec!["10".to_owned(), "15".to_owned()],
+                vec!["15".to_owned(), "30".to_owned()],
+                vec!["20".to_owned(), "70".to_owned()],
+                vec!["20".to_owned(), "70".to_owned()],
+            ],
+            "sum(v) OVER (ORDER BY v) running total (RANGE peers)"
+        );
+
+        // lag(v) and lead(v) OVER (ORDER BY v): previous / next value, NULL at ends.
+        let sel = simple_query(
+            &mut client,
+            &mut buf,
+            "SELECT v, lag(v) OVER (ORDER BY v), lead(v) OVER (ORDER BY v) FROM t ORDER BY v",
+        )
+        .await;
+        assert_eq!(
+            texts(&sel),
+            vec![
+                vec!["5".to_owned(), "NULL".to_owned(), "10".to_owned()],
+                vec!["10".to_owned(), "5".to_owned(), "15".to_owned()],
+                vec!["15".to_owned(), "10".to_owned(), "20".to_owned()],
+                vec!["20".to_owned(), "15".to_owned(), "20".to_owned()],
+                vec!["20".to_owned(), "20".to_owned(), "NULL".to_owned()],
+            ],
+            "lag/lead with NULL at the partition ends"
+        );
+
+        // A named WINDOW reused by two functions.
+        let sel = simple_query(
+            &mut client,
+            &mut buf,
+            "SELECT v, row_number() OVER w, sum(v) OVER w FROM t WINDOW w AS (ORDER BY v) ORDER BY v",
+        )
+        .await;
+        assert_eq!(
+            texts(&sel),
+            vec![
+                vec!["5".to_owned(), "1".to_owned(), "5".to_owned()],
+                vec!["10".to_owned(), "2".to_owned(), "15".to_owned()],
+                vec!["15".to_owned(), "3".to_owned(), "30".to_owned()],
+                vec!["20".to_owned(), "4".to_owned(), "70".to_owned()],
+                vec!["20".to_owned(), "5".to_owned(), "70".to_owned()],
+            ],
+            "named WINDOW w reused"
+        );
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
     /// THE M7 MILESTONE: two-table INNER joins over the wire (the cost-chosen
     /// nestloop/hash/merge method). Over a(x int) {1,2,3,4} and b(y int, z int)
     /// {(2,20),(3,30),(3,31),(5,50)}:

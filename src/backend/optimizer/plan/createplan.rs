@@ -698,11 +698,12 @@ fn make_result(
 pub fn build_upper_plan(root: &PlannerInfo, subplan: Node) -> Node {
     let parse = &root.parse;
     let has_grouping = parse.hasAggs || !parse.groupClause.is_empty();
+    let has_windows = parse.hasWindowFuncs || !parse.windowClause.is_empty();
     let has_distinct = !parse.distinctClause.is_empty();
     let has_sort = !parse.sortClause.is_empty();
     let has_limit = parse.limitCount.is_some() || parse.limitOffset.is_some();
 
-    if !has_grouping && !has_distinct && !has_sort && !has_limit {
+    if !has_grouping && !has_windows && !has_distinct && !has_sort && !has_limit {
         return subplan;
     }
 
@@ -713,6 +714,12 @@ pub fn build_upper_plan(root: &PlannerInfo, subplan: Node) -> Node {
     // 1) Grouping / aggregation.
     if has_grouping {
         plan = create_agg_plan(root, plan);
+    }
+
+    // 1b) Window functions (one WindowAgg per distinct window, each with a Sort
+    //     below ordering by PARTITION BY then ORDER BY).
+    if has_windows {
+        plan = create_window_plans(root, plan);
     }
 
     // 2) ORDER BY (a Sort over the current plan's output).
@@ -792,6 +799,110 @@ fn create_agg_plan(root: &PlannerInfo, subplan: Node) -> Node {
         chain: Vec::new(),
     };
     Node::Agg(Box::new(agg))
+}
+
+/// PG `create_one_window_path` (M12 subset): stack one `WindowAgg` per distinct
+/// `WindowClause`, bottom-up in winref order, each over a `Sort` that orders the
+/// input by the window's PARTITION BY keys then ORDER BY keys. Every WindowAgg
+/// carries the query's final `processed_tlist`; the executor evaluates only the
+/// WindowFuncs whose `winref` equals the node's, passing the lower windows' results
+/// (and the plain Vars) through from the child output by position.
+fn create_window_plans(root: &PlannerInfo, subplan: Node) -> Node {
+    let final_tlist = root.processed_tlist.clone();
+    let mut plan = subplan;
+
+    let windows: Vec<crate::nodes::parsenodes::WindowClause> = root
+        .parse
+        .windowClause
+        .iter()
+        .filter_map(|n| match n {
+            Node::WindowClause(wc) => Some((**wc).clone()),
+            _ => None,
+        })
+        .collect();
+    let top_winref = windows.last().map_or(0, |w| w.winref);
+
+    for wc in &windows {
+        plan = create_windowagg_plan(wc, plan, final_tlist.clone(), wc.winref == top_winref);
+    }
+    plan
+}
+
+/// PG `create_windowagg_plan` + `make_windowagg`: build one `WindowAgg` over a
+/// `Sort` on the window's (PARTITION BY keys ++ ORDER BY keys). The part/ord column
+/// indexes are the child output positions of those SortGroupClause columns; the
+/// frame options / offsets carry through from the WindowClause.
+fn create_windowagg_plan(
+    wc: &crate::nodes::parsenodes::WindowClause,
+    subplan: Node,
+    tlist: Vec<Node>,
+    top_window: bool,
+) -> Node {
+    use crate::nodes::plannodes::WindowAgg;
+
+    // The Sort orders by PARTITION BY keys first, then ORDER BY keys (PG's
+    // make_pathkeys_for_window: partition pathkeys ++ order pathkeys).
+    let mut sort_cls: Vec<Node> = wc.partitionClause.clone();
+    sort_cls.extend(wc.orderClause.clone());
+    let child = if sort_cls.is_empty() {
+        subplan
+    } else {
+        let keys = sort_keys_from_clause(&sort_cls, current_tlist(&subplan));
+        Node::Sort(Box::new(make_sort(subplan, keys)))
+    };
+
+    let child_tlist = current_tlist(&child);
+
+    // Partition columns: child output positions + their eqops/collations.
+    let mut part_col_idx = Vec::new();
+    let mut part_operators = Vec::new();
+    let mut part_collations = Vec::new();
+    for n in &wc.partitionClause {
+        let Node::SortGroupClause(sgc) = n else { continue };
+        part_col_idx.push(child_col_for_sortgroupref(child_tlist, sgc.tleSortGroupRef));
+        part_operators.push(sgc.eqop);
+        part_collations.push(crate::postgres_ext::InvalidOid);
+    }
+
+    // Ordering columns (for peer detection): child positions + eqops.
+    let mut ord_col_idx = Vec::new();
+    let mut ord_operators = Vec::new();
+    let mut ord_collations = Vec::new();
+    for n in &wc.orderClause {
+        let Node::SortGroupClause(sgc) = n else { continue };
+        ord_col_idx.push(child_col_for_sortgroupref(child_tlist, sgc.tleSortGroupRef));
+        ord_operators.push(sgc.eqop);
+        ord_collations.push(crate::postgres_ext::InvalidOid);
+    }
+
+    let part_num_cols = i32::try_from(part_col_idx.len()).unwrap_or(0);
+    let ord_num_cols = i32::try_from(ord_col_idx.len()).unwrap_or(0);
+
+    let node = WindowAgg {
+        plan: Plan { lefttree: Some(child), ..empty_plan(tlist, Vec::new()) },
+        winname: wc.name.clone(),
+        winref: wc.winref,
+        part_num_cols,
+        part_col_idx,
+        part_operators,
+        part_collations,
+        ord_num_cols,
+        ord_col_idx,
+        ord_operators,
+        ord_collations,
+        frame_options: wc.frameOptions,
+        start_offset: wc.startOffset.clone(),
+        end_offset: wc.endOffset.clone(),
+        run_condition: Vec::new(),
+        run_condition_orig: Vec::new(),
+        start_in_range_func: wc.startInRangeFunc,
+        end_in_range_func: wc.endInRangeFunc,
+        in_range_coll: wc.inRangeColl,
+        in_range_asc: wc.inRangeAsc,
+        in_range_nulls_first: wc.inRangeNullsFirst,
+        top_window,
+    };
+    Node::WindowAgg(Box::new(node))
 }
 
 /// PG `create_distinct_paths` + `create_upper_unique_plan` (M5 subset): a `Unique`
@@ -910,6 +1021,7 @@ fn current_tlist(plan: &Node) -> &[Node] {
         Node::IndexOnlyScan(s) => &s.scan.plan.targetlist,
         Node::BitmapHeapScan(s) => &s.scan.plan.targetlist,
         Node::Agg(a) => &a.plan.targetlist,
+        Node::WindowAgg(w) => &w.plan.targetlist,
         Node::Sort(s) => &s.plan.targetlist,
         Node::Unique(u) => &u.plan.targetlist,
         Node::Limit(l) => &l.plan.targetlist,

@@ -431,6 +431,163 @@ pub fn make_distinct_func_call(name_parts: Vec<String>, args: Vec<Node>) -> Node
     Node::FuncCall(fc)
 }
 
+// ===========================================================================
+//  Window functions (M12, step 42): OVER / WINDOW / frame_clause helpers.
+// ===========================================================================
+
+/// A frame bound as recognized by the grammar (gram.y `frame_bound`), before it is
+/// resolved into the FrameOptions start/end bits. The OFFSET forms carry their
+/// (raw, untransformed) offset expression.
+pub enum FrameBoundTok {
+    UnboundedPreceding,
+    UnboundedFollowing,
+    CurrentRow,
+    OffsetPreceding(Node),
+    OffsetFollowing(Node),
+}
+
+/// gram.y `over_clause: OVER ColId` -> a WindowDef that only references an existing
+/// (named) window by `refname`. transformWindowFuncCall resolves the reference.
+pub fn make_window_ref(name: String) -> Box<crate::nodes::parsenodes::WindowDef> {
+    Box::new(crate::nodes::parsenodes::WindowDef {
+        name: None,
+        refname: Some(name),
+        partitionClause: Vec::new(),
+        orderClause: Vec::new(),
+        frameOptions: crate::nodes::parsenodes::FrameOptions::DEFAULTS.bits(),
+        startOffset: None,
+        endOffset: None,
+        location: -1,
+    })
+}
+
+/// gram.y `window_specification`: build an anonymous WindowDef from the PARTITION BY
+/// list, the ORDER BY list, and the assembled frame `(options, start, end)`.
+pub fn make_window_def(
+    partition_clause: Vec<Node>,
+    order_clause: Vec<Node>,
+    frame: (i32, Option<Node>, Option<Node>),
+) -> Box<crate::nodes::parsenodes::WindowDef> {
+    let (frame_options, start_offset, end_offset) = frame;
+    Box::new(crate::nodes::parsenodes::WindowDef {
+        name: None,
+        refname: None,
+        partitionClause: partition_clause,
+        orderClause: order_clause,
+        frameOptions: frame_options,
+        startOffset: start_offset,
+        endOffset: end_offset,
+        location: -1,
+    })
+}
+
+/// gram.y `func_expr: func_application filter_clause over_clause`: stamp the OVER
+/// window (and optional FILTER) onto the FuncCall built by `func_application`.
+pub fn attach_over_clause(
+    func: Node,
+    filter: Option<Node>,
+    over: Box<crate::nodes::parsenodes::WindowDef>,
+) -> Node {
+    let Node::FuncCall(mut fc) = func else {
+        unreachable!("attach_over_clause over a FuncCall");
+    };
+    fc.over = Some(over);
+    fc.agg_filter = filter;
+    Node::FuncCall(fc)
+}
+
+/// The default frame options bits (RANGE UNBOUNDED PRECEDING .. CURRENT ROW), used
+/// when no frame_clause is given.
+#[must_use]
+pub fn frame_defaults() -> i32 {
+    crate::nodes::parsenodes::FrameOptions::DEFAULTS.bits()
+}
+
+#[must_use]
+pub fn frameopt_range() -> i32 {
+    use crate::nodes::parsenodes::FrameOptions as F;
+    (F::NONDEFAULT | F::RANGE).bits()
+}
+
+#[must_use]
+pub fn frameopt_rows() -> i32 {
+    use crate::nodes::parsenodes::FrameOptions as F;
+    (F::NONDEFAULT | F::ROWS).bits()
+}
+
+#[must_use]
+pub fn frameopt_groups() -> i32 {
+    use crate::nodes::parsenodes::FrameOptions as F;
+    (F::NONDEFAULT | F::GROUPS).bits()
+}
+
+#[must_use]
+pub fn frameopt_exclude_current_row() -> i32 {
+    crate::nodes::parsenodes::FrameOptions::EXCLUDE_CURRENT_ROW.bits()
+}
+
+#[must_use]
+pub fn frameopt_exclude_group() -> i32 {
+    crate::nodes::parsenodes::FrameOptions::EXCLUDE_GROUP.bits()
+}
+
+#[must_use]
+pub fn frameopt_exclude_ties() -> i32 {
+    crate::nodes::parsenodes::FrameOptions::EXCLUDE_TIES.bits()
+}
+
+/// gram.y frame-clause assembly: combine the frame mode bits, the `frame_extent`
+/// (start bound + optional end bound), and the exclusion bits into the final
+/// `(frameOptions, startOffset, endOffset)`. Mirrors gram.y's per-bound bit
+/// assignment (the START_* / END_* families) and the BETWEEN flag.
+pub fn assemble_frame_options(
+    mode: i32,
+    extent: (FrameBoundTok, Option<FrameBoundTok>),
+    exclusion: i32,
+) -> (i32, Option<Node>, Option<Node>) {
+    use crate::nodes::parsenodes::FrameOptions as F;
+    let (start, end) = extent;
+    let mut opts = mode | exclusion;
+    let mut start_offset = None;
+    let mut end_offset = None;
+
+    // The single-bound form is implicitly `BETWEEN bound AND CURRENT ROW`; the
+    // explicit BETWEEN form sets the flag and supplies an end bound.
+    if end.is_some() {
+        opts |= F::BETWEEN.bits();
+    }
+    let end = end.unwrap_or(FrameBoundTok::CurrentRow);
+
+    match start {
+        FrameBoundTok::UnboundedPreceding => opts |= F::START_UNBOUNDED_PRECEDING.bits(),
+        FrameBoundTok::UnboundedFollowing => opts |= F::START_UNBOUNDED_FOLLOWING.bits(),
+        FrameBoundTok::CurrentRow => opts |= F::START_CURRENT_ROW.bits(),
+        FrameBoundTok::OffsetPreceding(e) => {
+            opts |= F::START_OFFSET_PRECEDING.bits();
+            start_offset = Some(e);
+        }
+        FrameBoundTok::OffsetFollowing(e) => {
+            opts |= F::START_OFFSET_FOLLOWING.bits();
+            start_offset = Some(e);
+        }
+    }
+    match end {
+        FrameBoundTok::UnboundedPreceding => opts |= F::END_UNBOUNDED_PRECEDING.bits(),
+        FrameBoundTok::UnboundedFollowing => opts |= F::END_UNBOUNDED_FOLLOWING.bits(),
+        FrameBoundTok::CurrentRow => opts |= F::END_CURRENT_ROW.bits(),
+        FrameBoundTok::OffsetPreceding(e) => {
+            opts |= F::END_OFFSET_PRECEDING.bits();
+            end_offset = Some(e);
+        }
+        FrameBoundTok::OffsetFollowing(e) => {
+            opts |= F::END_OFFSET_FOLLOWING.bits();
+            end_offset = Some(e);
+        }
+    }
+
+    (opts, start_offset, end_offset)
+}
+
 /// gram.y `sortby: a_expr opt_asc_desc opt_nulls_order` -> a `SortBy` node.
 pub fn make_sortby(
     expr: Node,

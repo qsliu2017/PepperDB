@@ -502,10 +502,10 @@ pub fn subquery_planner(
     // identity over them), so it needs no guard either. WCO / onConflict / window
     // expression preprocessing grows with those features. MERGE action preprocessing
     // is staged (MERGE execution is staged this milestone).
-    if !root.parse.withCheckOptions.is_empty()
-        || root.parse.onConflict.is_some()
-        || !root.parse.windowClause.is_empty()
-    {
+    // M12 (step 42): the window clause's frame offsets are simple int8 Consts and its
+    // partition/order SortGroupClauses carry no preprocessable expressions, so
+    // preprocess_expression over the window clause is an identity here.
+    if !root.parse.withCheckOptions.is_empty() || root.parse.onConflict.is_some() {
         not_yet_reachable("subquery_planner: expression preprocessing");
     }
 
@@ -630,9 +630,6 @@ fn grouping_planner(root: &mut PlannerInfo, tuple_fraction: f64, setops: Option<
     if !root.parse.groupingSets.is_empty() {
         not_yet_reachable("grouping_planner: grouping sets");
     }
-    if root.parse.hasWindowFuncs || !root.parse.windowClause.is_empty() {
-        not_yet_reachable("grouping_planner: window functions");
-    }
 
     // Preprocess targetlist into root->processed_tlist (the FINAL tlist; carries the
     // Aggrefs and the grouping/sort-keyed ressortgrouprefs).
@@ -644,6 +641,8 @@ fn grouping_planner(root: &mut PlannerInfo, tuple_fraction: f64, setops: Option<
     // grouping/aggregation reads), not the final Aggref-bearing tlist; compute it and
     // stash it in `scan_input_tlist` so query_planner builds the scan rel from it.
     let needs_upper = root.parse.hasAggs
+        || root.parse.hasWindowFuncs
+        || !root.parse.windowClause.is_empty()
         || !root.parse.groupClause.is_empty()
         || !root.parse.distinctClause.is_empty()
         || !root.parse.sortClause.is_empty()
@@ -750,6 +749,14 @@ fn pull_vars_into(
                 if let Some(inner) = inner {
                     pull_vars_into(inner, 0, exprs, refs);
                 }
+            }
+        }
+        // M12 (step 42): a window function's argument Vars are scan inputs too (the
+        // partition/order columns are pulled as their own resjunk tlist Vars). The
+        // args are plain expressions (not TargetEntry-wrapped, unlike Aggref).
+        Node::WindowFunc(w) => {
+            for arg in &w.args {
+                pull_vars_into(arg, 0, exprs, refs);
             }
         }
         // M5 milestone tlists are flat (a Var or an Aggref per column). Constants

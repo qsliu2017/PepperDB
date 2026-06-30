@@ -479,9 +479,16 @@ async fn transform_select_stmt_async(
     // / ORDER BY / aggregate transforms resolve over the wire.
     warm_grouping_caches(shared, pstate, stmt).await;
 
+    // Seed the named WINDOW definitions into the parse state before the target list
+    // transform so an inline `OVER name` can reference them (PG sets
+    // pstate->p_windowdefs = stmt->windowClause up front).
+    pstate.p_windowdefs.clone_from(&stmt.windowClause);
+
     // Transform the target list (now that the namespace is populated, `*` and
     // column refs resolve). Aggregate calls in the target list resolve to Aggref
-    // nodes here (transformAggregateCall, which sets pstate.p_has_aggs).
+    // nodes here (transformAggregateCall, which sets pstate.p_has_aggs); window
+    // calls resolve to WindowFunc nodes (transformWindowFuncCall, which appends any
+    // inline OVER definition to pstate.p_windowdefs and sets p_has_window_funcs).
     qry.targetList =
         transformTargetList(pstate, stmt.targetList.clone(), ParseExprKind::SelectTarget);
 
@@ -499,6 +506,18 @@ async fn transform_select_stmt_async(
     // ordering: GROUP BY (which may extend the tlist) before ORDER BY/DISTINCT,
     // which reference the (now-final) tlist; LIMIT/OFFSET last. (M5, step 26.)
     transform_select_clauses(pstate, stmt, &mut qry);
+
+    // WINDOW + inline OVER definitions -> Query.windowClause (M12, step 42). Runs
+    // after the tlist/clause transforms have collected every WindowDef into
+    // pstate.p_windowdefs; resolves their PARTITION BY / ORDER BY / frame.
+    if !pstate.p_windowdefs.is_empty() {
+        let windowdefs = std::mem::take(&mut pstate.p_windowdefs);
+        qry.windowClause = crate::backend::parser::parse_clause::transformWindowDefinitions(
+            pstate,
+            &windowdefs,
+            &mut qry.targetList,
+        );
+    }
 
     reject_unsupported_select_clauses(stmt);
 
@@ -684,13 +703,23 @@ async fn warm_grouping_caches(shared: &Arc<SharedState>, pstate: &ParseState, st
             collect_func_names(rt.val.as_ref(), &mut agg_names);
         }
     }
+    // The polymorphic window-function arg vectors (the M12 lag/lead/first_value/...
+    // rows are declared over `anyelement`); buildoidvector keys the catcache by the
+    // exact arg OID vector, so these must be warmed alongside the concrete forms.
+    let anyelement = Oid::new(2283);
+    let int4 = INT4OID;
     for name in &agg_names {
         let nd = name_data(name);
-        // Try the zero-arg form (count(*)) and each single-arg type.
+        // Try the zero-arg form (count(*) / row_number()) and each single-arg type.
         let mut arglists: Vec<Vec<Oid>> = vec![Vec::new()];
         for &t in &types {
             arglists.push(vec![t]);
         }
+        // Window-function polymorphic signatures: f(anyelement),
+        // f(anyelement,int4), f(anyelement,int4,anyelement).
+        arglists.push(vec![anyelement]);
+        arglists.push(vec![anyelement, int4]);
+        arglists.push(vec![anyelement, int4, anyelement]);
         for argtypes in &arglists {
             let argvec = crate::utils::builtins::buildoidvector(argtypes);
             let keys = [
@@ -720,10 +749,15 @@ async fn warm_grouping_caches(shared: &Arc<SharedState>, pstate: &ParseState, st
     }
 
     // 2) The grouping / ordering comparison operators (`=`/`<`/`>`) over each
-    //    candidate type, but only when the query actually groups/sorts/distincts.
+    //    candidate type, but only when the query actually groups/sorts/distincts or
+    //    has a window (PARTITION BY needs `=`, ORDER BY needs `<`/`>`).
+    let has_window = !stmt.windowClause.is_empty()
+        || stmt.targetList.iter().any(|n| matches!(n, Node::ResTarget(rt)
+            if target_has_over(rt.val.as_ref())));
     if stmt.groupClause.is_empty()
         && stmt.sortClause.is_empty()
         && stmt.distinctClause.is_empty()
+        && !has_window
     {
         return;
     }
@@ -741,6 +775,12 @@ async fn warm_grouping_caches(shared: &Arc<SharedState>, pstate: &ParseState, st
             }
         }
     }
+}
+
+/// Whether a raw target expression carries an `OVER` clause (a windowed call), so
+/// the partition/order comparison operators get pre-warmed.
+fn target_has_over(node: Option<&Node>) -> bool {
+    matches!(node, Some(Node::FuncCall(fc)) if fc.over.is_some())
 }
 
 /// Collect the (last-component) function names of every `FuncCall` in a raw
@@ -1608,11 +1648,9 @@ fn reject_unsupported_select_clauses(stmt: &SelectStmt) {
     if stmt.havingClause.is_some() {
         not_yet_reachable("transformSelectStmt: HAVING clause");
     }
-    if !stmt.windowClause.is_empty() {
-        not_yet_reachable("transformSelectStmt: WINDOW clause");
-    }
-    // The locking clause (FOR UPDATE/SHARE) is handled by transform_locking_clause
-    // after finish_query (M8, step 34).
+    // WINDOW (and inline OVER) are handled by transformWindowDefinitions before
+    // finish_query (M12, step 42). The locking clause (FOR UPDATE/SHARE) is handled
+    // by transform_locking_clause after finish_query (M8, step 34).
 }
 
 /// PG `transformLockingClause`: turn each `FOR UPDATE/SHARE [OF ...]` clause into

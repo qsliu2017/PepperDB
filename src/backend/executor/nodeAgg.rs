@@ -204,7 +204,7 @@ fn resolve_aggref(aggref: &Aggref) -> AggInfo {
 /// Read `(transfn, finalfn, transtype, initval-as-Datum)` for an aggregate from a
 /// warm AGGFNOID syscache hit. The initial value, when present, is parsed from its
 /// catalog text into the transition type's Datum (M5: count's int8 `0`).
-fn lookup_aggregate(aggfnoid: Oid) -> (Oid, Oid, Oid, Option<Datum>) {
+pub(crate) fn lookup_aggregate(aggfnoid: Oid) -> (Oid, Oid, Oid, Option<Datum>) {
     use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache};
     use crate::catalog::pg_aggregate::{Form_pg_aggregate, FormData_pg_aggregate};
     use crate::postgres::ObjectIdGetDatum;
@@ -244,7 +244,7 @@ fn lookup_aggregate(aggfnoid: Oid) -> (Oid, Oid, Oid, Option<Datum>) {
 /// The compiled-in initial transition value for an aggregate (the catalog
 /// `agginitval`, parsed into the transition type's Datum). M5: count's int8 `0`;
 /// all other seeded aggregates start with a NULL transition value.
-fn agg_initval(aggfnoid: Oid, transtype: Oid) -> Option<Datum> {
+pub(crate) fn agg_initval(aggfnoid: Oid, transtype: Oid) -> Option<Datum> {
     use crate::catalog::genbki::INT8OID;
     // count() = 2803, count(any) = 2147 -> int8 initval 0.
     if (aggfnoid.get() == 2803 || aggfnoid.get() == 2147) && transtype == INT8OID {
@@ -327,7 +327,7 @@ fn advance_transition(info: &AggInfo, st: &mut PerGroupState, slot: &mut TupleTa
 /// Whether a transfn is a strict min/max comparator (int*larger/smaller,
 /// numeric/text larger/smaller) -- those seed the state from the first input
 /// directly rather than through a NULL-state transfn call.
-fn is_strict_minmax(transfn: Oid) -> bool {
+pub(crate) fn is_strict_minmax(transfn: Oid) -> bool {
     use crate::utils::fmgroids as f;
     matches!(
         transfn,
@@ -343,7 +343,7 @@ fn is_strict_minmax(transfn: Oid) -> bool {
 /// NULL, returning the result (or None if the result is NULL). Used to seed
 /// sum-style aggregates from a NULL transition value (int4_sum/int2_sum read
 /// `PG_ARGISNULL(0)`). The fcinfo is built directly to set the isnull flag.
-fn call_transition_nullable(transfn: Oid, state: Option<Datum>, input: Datum) -> Option<Datum> {
+pub(crate) fn call_transition_nullable(transfn: Oid, state: Option<Datum>, input: Datum) -> Option<Datum> {
     use crate::fmgr::{fmgr_info, FmgrInfo, FunctionCallInfoBaseData, FunctionCallInvoke};
     use crate::postgres::NullableDatum;
     use crate::postgres_ext::InvalidOid;
