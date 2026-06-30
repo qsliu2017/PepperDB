@@ -434,6 +434,27 @@ pub struct RelOptInfo {
     pub nullable_partexprs: Vec<Vec<Node>>,
 }
 
+impl RelOptInfo {
+    /// A lightweight clone for use as a `Path.parent` back-pointer. In PG `parent`
+    /// is a shared pointer; here each field is owned, so a naive `clone()` would
+    /// deep-copy the rel's `pathlist` -- and every path in it re-embeds its own
+    /// parent rel, forming a value cycle that blows up super-linearly across DP
+    /// levels (a 3-rel join exhausts memory). The `Path.parent` consumers only read
+    /// scalar metadata (relids/relid/rows/rtekind/reltarget/...), never the parent's
+    /// paths, so this snapshot drops the path-bearing fields to break the cycle.
+    #[must_use]
+    pub fn parent_snapshot(&self) -> Self {
+        let mut snap = self.clone();
+        snap.pathlist = Vec::new();
+        snap.partial_pathlist = Vec::new();
+        snap.cheapest_startup_path = None;
+        snap.cheapest_total_path = None;
+        snap.cheapest_unique_path = None;
+        snap.cheapest_parameterized_paths = Vec::new();
+        snap
+    }
+}
+
 /// Per-index planner information.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexOptInfo {
@@ -581,6 +602,25 @@ pub struct EquivalenceClass {
     pub max_security: usize,
     /// Set if merged into another EC.
     pub merged: Option<Box<Self>>,
+}
+
+impl EquivalenceClass {
+    /// A lightweight clone for use as a `RestrictInfo` back-pointer (`parent_ec` /
+    /// `left_ec` / `right_ec`). In PG these are shared pointers; here each field is
+    /// owned, so a full `clone()` deep-copies `sources` / `derives_list` -- and each
+    /// `RestrictInfo` in them owns a clone of THIS ec, a value cycle that grows the
+    /// derived-clause cache super-linearly (a multi-rel join exhausts memory). The
+    /// back-pointer's only role is identity/marking (which EC a clause came from);
+    /// dropping the RestrictInfo-bearing lists breaks the cycle while keeping the
+    /// identity-bearing fields (members / relids / opfamilies / has_const / ...).
+    /// Compare live ECs against this via `identity_snapshot` on both sides.
+    #[must_use]
+    pub fn identity_snapshot(&self) -> Self {
+        let mut snap = self.clone();
+        snap.sources = Vec::new();
+        snap.derives_list = Vec::new();
+        snap
+    }
 }
 
 /// One member expression of an EquivalenceClass.

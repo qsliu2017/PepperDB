@@ -50,8 +50,18 @@ use crate::backend::executor::nodeLimit::{exec_end_limit, exec_init_limit, exec_
 use crate::backend::executor::nodeMaterial::{
     exec_end_material, exec_init_material, exec_material, MaterialRun,
 };
+use crate::backend::executor::nodeHash::{exec_end_hash, exec_init_hash, HashRun};
+use crate::backend::executor::nodeHashjoin::{
+    exec_end_hash_join, exec_hash_join, exec_init_hash_join, HashJoinRun,
+};
+use crate::backend::executor::nodeMergejoin::{
+    exec_end_merge_join, exec_init_merge_join, exec_merge_join, MergeJoinRun,
+};
 use crate::backend::executor::nodeModifyTable::{
     exec_end_modify_table, exec_init_modify_table, exec_modify_table, ModifyTableRun,
+};
+use crate::backend::executor::nodeNestloop::{
+    exec_end_nest_loop, exec_init_nest_loop, exec_nest_loop, NestLoopRun,
 };
 use crate::backend::executor::nodeResult::{exec_end_result, exec_init_result, exec_result};
 use crate::backend::executor::nodeSeqscan::{
@@ -111,6 +121,15 @@ pub enum PlanStateNode<'rel> {
     Group(Box<GroupRun<'rel>>),
     /// T_AggState (+ child + resolved per-aggregate metadata). PLAIN/SORTED/HASHED.
     Agg(Box<AggRun<'rel>>),
+    /// T_NestLoopState (+ outer/inner children, joinqual, projection).
+    NestLoop(Box<NestLoopRun<'rel>>),
+    /// T_HashJoinState (+ outer child + Hash inner child, hashclauses, projection).
+    HashJoin(Box<HashJoinRun<'rel>>),
+    /// T_HashState. The inner build side of a HashJoin: driven by ExecHashJoin (not
+    /// a tuple-returning ExecProcNode); its proc arm is an error.
+    Hash(Box<HashRun<'rel>>),
+    /// T_MergeJoinState (+ outer/inner children, mergeclauses, projection).
+    MergeJoin(Box<MergeJoinRun<'rel>>),
     /// Test-only: an in-memory list of pre-built tuples served one per
     /// ExecProcNode. Lets the upper-node unit tests feed a deterministic child
     /// without a SeqScan/initdb dependency (the planner wires real children at
@@ -161,6 +180,11 @@ pub fn result_type_of(node: &PlanStateNode<'_>) -> Option<TupleDesc> {
         PlanStateNode::Unique(u) => u.state.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Group(g) => g.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Agg(a) => a.state.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::NestLoop(n) => n.state.js.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::HashJoin(h) => h.state.js.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::MergeJoin(m) => m.state.js.ps.ps_result_tuple_desc.clone(),
+        // The Hash node is a build side; it yields no tuples, so no result rowtype.
+        PlanStateNode::Hash(_) => None,
         #[cfg(test)]
         PlanStateNode::TupleSource(t) => Some(t.desc.clone()),
     }
@@ -230,6 +254,29 @@ pub fn exec_init_node<'rel>(
             // REWIND/BACKWARD/MARK (PG passes eflags through, dropping those).
             let child = init_child(a.plan.lefttree.as_ref(), estate, child_eflags(eflags));
             Some(PlanStateNode::Agg(exec_init_agg(a, estate, child)))
+        }
+        Node::NestLoop(n) => {
+            // Two children: outer=lefttree, inner=righttree (PG outer/innerPlan).
+            // No nestloop params (M7) -> the inner is materialized here, so neither
+            // child needs special eflags.
+            let outer = init_child(n.join.plan.lefttree.as_ref(), estate, eflags);
+            let inner = init_child(n.join.plan.righttree.as_ref(), estate, eflags);
+            Some(PlanStateNode::NestLoop(exec_init_nest_loop(n, estate, eflags, outer, inner)))
+        }
+        Node::HashJoin(h) => {
+            // outer=lefttree; inner=righttree is a Hash node (the build side).
+            let outer = init_child(h.join.plan.lefttree.as_ref(), estate, eflags);
+            let inner = init_child(h.join.plan.righttree.as_ref(), estate, eflags);
+            Some(PlanStateNode::HashJoin(exec_init_hash_join(h, estate, eflags, outer, inner)))
+        }
+        Node::Hash(h) => {
+            let child = init_child(h.plan.lefttree.as_ref(), estate, eflags);
+            Some(PlanStateNode::Hash(exec_init_hash(h, estate, child)))
+        }
+        Node::MergeJoin(m) => {
+            let outer = init_child(m.join.plan.lefttree.as_ref(), estate, eflags);
+            let inner = init_child(m.join.plan.righttree.as_ref(), estate, eflags);
+            Some(PlanStateNode::MergeJoin(exec_init_merge_join(m, estate, eflags, outer, inner)))
         }
         other => unimplemented!("ExecInitNode: {other:?} not yet translated for this milestone"),
     }
@@ -301,6 +348,14 @@ pub async fn exec_proc_node<'n>(
         PlanStateNode::Unique(u) => exec_unique(shared, u).await,
         PlanStateNode::Group(g) => exec_group(shared, g).await,
         PlanStateNode::Agg(a) => exec_agg(shared, a).await,
+        PlanStateNode::NestLoop(n) => exec_nest_loop(shared, n).await,
+        PlanStateNode::HashJoin(h) => exec_hash_join(shared, h).await,
+        PlanStateNode::MergeJoin(m) => exec_merge_join(shared, m).await,
+        // The Hash node is the HashJoin's build side; it is driven internally by
+        // ExecHashJoin (MultiExecHash), not pulled as a tuple source.
+        PlanStateNode::Hash(_) => {
+            unimplemented!("ExecProcNode: a Hash node is driven by its HashJoin parent")
+        }
         #[cfg(test)]
         PlanStateNode::TupleSource(t) => {
             t.current = t.rows.pop_front();
@@ -359,6 +414,10 @@ pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode
         PlanStateNode::Unique(u) => exec_end_unique(shared, u),
         PlanStateNode::Group(g) => exec_end_group(shared, g),
         PlanStateNode::Agg(a) => exec_end_agg(shared, a),
+        PlanStateNode::NestLoop(n) => exec_end_nest_loop(shared, n),
+        PlanStateNode::HashJoin(h) => exec_end_hash_join(shared, h),
+        PlanStateNode::MergeJoin(m) => exec_end_merge_join(shared, m),
+        PlanStateNode::Hash(h) => exec_end_hash(shared, h),
         #[cfg(test)]
         PlanStateNode::TupleSource(_) => {}
     }

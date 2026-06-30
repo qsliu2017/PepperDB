@@ -297,7 +297,10 @@ fn commit_ri_ec(
     em1: Option<Box<EquivalenceMember>>,
     em2: Option<Box<EquivalenceMember>>,
 ) {
-    let ec = root.eq_classes[idx].clone();
+    // Lightweight identity snapshot (no sources/derives_list) -- a full clone would
+    // re-embed this EC's RestrictInfo lists into the back-pointers, forming a deep
+    // value cycle (the C original shares a pointer here).
+    let ec = Box::new(root.eq_classes[idx].identity_snapshot());
     ri.left_ec = Some(ec.clone());
     ri.right_ec = Some(ec.clone());
     ri.left_em = em1.clone();
@@ -458,7 +461,9 @@ pub fn get_eclass_for_sort_expr(
                 continue;
             }
             if opcintype == cur_em.datatype && *expr == cur_em.expr {
-                return Some(cur_ec.as_ref().clone());
+                // Identity snapshot (no sources/derives_list): this EC is stored as a
+                // merge-clause back-pointer; the full lists would form a value cycle.
+                return Some(cur_ec.identity_snapshot());
             }
         }
     }
@@ -479,7 +484,7 @@ pub fn get_eclass_for_sort_expr(
     let expr_relids_opt = if expr_relids.is_empty() { None } else { Some(expr_relids) };
     add_eq_member(&mut newec, *expr, expr_relids_opt, &jdomain, opcintype);
 
-    let snapshot = newec.clone();
+    let snapshot = newec.identity_snapshot();
     root.eq_classes.push(Box::new(newec));
     // ec_merging_done mop-up (adding the new EC to rel eclass_indexes) is only
     // needed once path generation has begun; not exercised by the inner-join
@@ -930,8 +935,11 @@ fn create_join_clause(
         min_security,
     );
 
-    // parent_ec marks the clause redundant with other joinclauses.
-    let ec_snapshot = root.eq_classes[ec_index].clone();
+    // parent_ec marks the clause redundant with other joinclauses. Store a
+    // lightweight identity snapshot (no sources/derives_list) so the back-pointer
+    // does not re-embed this EC's RestrictInfo lists -- otherwise the derived-clause
+    // cache below grows a deep value cycle that blows up memory on multi-rel joins.
+    let ec_snapshot = Box::new(root.eq_classes[ec_index].identity_snapshot());
     rinfo.parent_ec = if parent_is_self { Some(ec_snapshot.clone()) } else { None };
     rinfo.left_ec = Some(ec_snapshot.clone());
     rinfo.right_ec = Some(ec_snapshot);
@@ -957,7 +965,7 @@ fn build_implied_join_equality(
     security_level: usize,
 ) -> RestrictInfo {
     // BOOLOID result, opretset = false (an equality operator).
-    let clause = crate::backend::nodes::makefuncs::make_opclause(
+    let mut clause = crate::backend::nodes::makefuncs::make_opclause(
         opno,
         BOOLOID,
         false,
@@ -966,6 +974,13 @@ fn build_implied_join_equality(
         InvalidOid,
         collation,
     );
+    // Resolve the implementing function (`opfuncid`): the parser never saw this
+    // synthesized clause, so set it here (PG defers it to setrefs' fix_opfuncids;
+    // setting it at build time is equivalent for our interpreter, which reads
+    // `op.opfuncid` directly).
+    if let crate::nodes::nodes::Node::OpExpr(op) = &mut clause {
+        op.opfuncid = crate::backend::utils::cache::lsyscache::get_opcode(opno);
+    }
 
     let mut ri = crate::backend::optimizer::util::restrictinfo::make_restrictinfo(
         root,
@@ -995,11 +1010,14 @@ fn ec_search_clause_for_ems(
     parent_is_self: bool,
 ) -> Option<RestrictInfo> {
     let ec = &root.eq_classes[ec_index];
+    // The stored `parent_ec` is an identity snapshot (no sources/derives_list), so
+    // compare against the live EC's matching snapshot rather than the full EC.
+    let ec_identity = ec.identity_snapshot();
     for ri in ec.sources.iter().chain(ec.derives_list.iter()) {
         let parent_matches = ri
             .parent_ec
             .as_ref()
-            .map_or(!parent_is_self, |pec| parent_is_self && pec.as_ref() == ec.as_ref());
+            .map_or(!parent_is_self, |pec| parent_is_self && pec.as_ref() == &ec_identity);
         if !parent_matches {
             continue;
         }

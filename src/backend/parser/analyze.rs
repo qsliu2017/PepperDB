@@ -338,19 +338,27 @@ async fn transform_select_stmt_async(
         not_yet_reachable("transformSelectStmt: SELECT ... INTO");
     }
 
+    // M7 (step 32): an INNER `joined_table` (`a JOIN b ON q` / `a CROSS JOIN b`) is
+    // equivalent to a comma cross-join with the ON quals ANDed into WHERE. Flatten
+    // the FROM list to its base RangeVars and gather the join quals, so the proven
+    // comma-join + WHERE pipeline plans it (the planner's join search produces the
+    // cost-chosen nestloop/hash/merge). OUTER joins and JOIN ... USING stay grow
+    // guards inside `flatten_inner_joins` (USING needs a real join RTE).
+    let mut from_list = Vec::new();
+    let mut join_quals: Vec<Node> = Vec::new();
+    for item in stmt.fromClause.clone() {
+        flatten_inner_joins(item, &mut from_list, &mut join_quals);
+    }
+    let where_clause = combine_quals(stmt.whereClause.clone(), join_quals);
+
     // Process the FROM clause (builds the rangetable + namespace).
-    crate::backend::parser::parse_clause::transform_from_clause(
-        shared,
-        pstate,
-        stmt.fromClause.clone(),
-    )
-    .await;
+    crate::backend::parser::parse_clause::transform_from_clause(shared, pstate, from_list).await;
 
     // The target-list / WHERE expression transform is synchronous and resolves
     // operators/functions through the (hit-only) syscache. Over the wire each
     // backend has a cold per-task catcache, so async-warm the operator/function
     // caches the statement references before the sync transform runs.
-    warm_expr_caches(shared, pstate, &stmt.targetList, stmt.whereClause.as_ref()).await;
+    warm_expr_caches(shared, pstate, &stmt.targetList, where_clause.as_ref()).await;
 
     // M5 (step 26): warm the aggregate-resolution caches (PROCNAMEARGSNSP for the
     // aggregate names, AGGFNOID for the resolved aggregate) and the grouping/sort
@@ -364,10 +372,11 @@ async fn transform_select_stmt_async(
     qry.targetList =
         transformTargetList(pstate, stmt.targetList.clone(), ParseExprKind::SelectTarget);
 
-    // Transform the WHERE clause (coerced to boolean) into the jointree qual.
+    // Transform the WHERE clause (coerced to boolean) into the jointree qual. This
+    // is the WHERE plus any flattened INNER-join ON/USING quals (see above).
     let qual = crate::backend::parser::parse_clause::transform_where_clause(
         pstate,
-        stmt.whereClause.clone(),
+        where_clause,
         ParseExprKind::Where,
         "WHERE",
     );
@@ -388,6 +397,46 @@ async fn transform_select_stmt_async(
     }
 
     qry
+}
+
+/// Flatten an INNER `joined_table` FROM item into its base RangeVars + the
+/// equivalent ON/USING quals (which the caller ANDs into WHERE). A plain RangeVar
+/// passes through. M7 handles INNER/CROSS joins; OUTER joins are a grow guard (they
+/// need real join RTEs + NULL-extension, not a flattened cross join).
+fn flatten_inner_joins(item: Node, from_list: &mut Vec<Node>, quals: &mut Vec<Node>) {
+    match item {
+        Node::JoinExpr(j) => {
+            if j.jointype != crate::nodes::nodes::JoinType::INNER {
+                not_yet_reachable("transformFromClause: OUTER join (needs a join RTE)");
+            }
+            // USING needs a real RTE_JOIN with merged columns; flattening to a
+            // cross-join silently duplicates the USING columns and breaks
+            // unqualified refs, so fail loudly until the join RTE exists.
+            if !j.usingClause.is_empty() {
+                not_yet_reachable("transformFromClause: JOIN ... USING (needs a join RTE); use JOIN ... ON");
+            }
+            let larg = j.larg.unwrap_or_else(|| not_yet_reachable("JoinExpr without larg"));
+            let rarg = j.rarg.unwrap_or_else(|| not_yet_reachable("JoinExpr without rarg"));
+            flatten_inner_joins(larg, from_list, quals);
+            flatten_inner_joins(rarg, from_list, quals);
+            if let Some(q) = j.quals {
+                quals.push(q);
+            }
+        }
+        other => from_list.push(other),
+    }
+}
+
+/// AND the WHERE clause with the flattened join quals (an implicit-AND of the ON /
+/// USING conditions). Returns the combined clause, or `None` if both are empty.
+fn combine_quals(where_clause: Option<Node>, join_quals: Vec<Node>) -> Option<Node> {
+    let mut clauses: Vec<Node> = join_quals;
+    if let Some(w) = where_clause {
+        clauses.insert(0, w);
+    }
+    let mut it = clauses.into_iter();
+    let first = it.next()?;
+    Some(it.fold(first, crate::backend::parser::parser::make_and_expr))
 }
 
 /// Transform the GROUP BY / ORDER BY / DISTINCT / LIMIT / OFFSET clauses of a
@@ -1227,6 +1276,34 @@ mod tests {
         }));
         std::panic::set_hook(prev);
         assert!(res.is_err(), "an unsupported node must route to the staging arm");
+    }
+
+    #[test]
+    fn join_using_fails_loudly_not_flatten() {
+        // `JOIN ... USING` cannot be flattened to a cross-join (it would duplicate
+        // the USING columns); it must route to the not-yet-reachable staging arm
+        // rather than silently produce wrong output.
+        use crate::backend::nodes::makefuncs::make_range_var;
+        use crate::backend::parser::parser::make_join_expr;
+        use crate::nodes::nodes::JoinType;
+        let mk_rel =
+            |name: &str| Node::RangeVar(Box::new(make_range_var(None, Some(name.to_string()), -1)));
+        let join = make_join_expr(
+            JoinType::INNER,
+            mk_rel("a"),
+            mk_rel("b"),
+            None,
+            vec!["x".to_string()],
+        );
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut from_list = Vec::new();
+            let mut quals = Vec::new();
+            flatten_inner_joins(join, &mut from_list, &mut quals);
+        }));
+        std::panic::set_hook(prev);
+        assert!(res.is_err(), "JOIN ... USING must fail loudly, not flatten");
     }
 }
 

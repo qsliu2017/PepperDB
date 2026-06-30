@@ -391,17 +391,16 @@ fn push_var(var: &Var) -> Node {
 /// PG `build_joinrel_restrictlist`: the restriction clauses that apply to this
 /// particular pair of input rels -- the join clauses from the inputs' joininfo
 /// that now refer to no rels outside the joinrel, plus EC-derived join
-/// equalities. The structural collection from the inputs' joininfo is
-/// translated; the EC-derived part (`generate_join_implied_equalities`) is
-/// staged (equivclass.rs, a concurrent file). For the M7 single-clause inner
-/// join `a JOIN b ON a.x=b.y` the ON clause is distributed into both inputs'
-/// joininfo and collected here.
+/// equalities. An equijoin `a.x=b.y` is absorbed by the EquivalenceClass machinery
+/// at deconstruct time (`process_equivalence`), so it is NOT in either input's
+/// joininfo; it is regenerated here via `generate_join_implied_equalities` (the
+/// same path PG uses). A non-equivalence join clause is collected from joininfo.
 fn build_joinrel_restrictlist(
-    _root: &mut PlannerInfo,
+    root: &mut PlannerInfo,
     joinrel: &RelOptInfo,
     outer_rel: &RelOptInfo,
     inner_rel: &RelOptInfo,
-    _sjinfo: &SpecialJoinInfo,
+    sjinfo: &SpecialJoinInfo,
 ) -> Vec<Node> {
     let joinrelids = joinrel.relids.clone().unwrap_or_default();
     let both = bms_union(
@@ -413,8 +412,16 @@ fn build_joinrel_restrictlist(
     subbuild_joinrel_restrictlist(&joinrelids, outer_rel, &both, &mut result);
     subbuild_joinrel_restrictlist(&joinrelids, inner_rel, &both, &mut result);
 
-    // EC-derived join equalities (generate_join_implied_equalities) are added
-    // here in PG; that machinery lands with equivclass.rs.
+    // EC-derived join equalities (the equijoin clauses absorbed into ECs).
+    let outer_relids = outer_rel.relids.clone().unwrap_or_default();
+    let ec_clauses = crate::backend::optimizer::path::equivclass::generate_join_implied_equalities(
+        root,
+        joinrelids,
+        outer_relids,
+        inner_rel,
+        sjinfo,
+    );
+    result.extend(ec_clauses.into_iter().map(|ri| Node::RestrictInfo(Box::new(ri))));
     result
 }
 

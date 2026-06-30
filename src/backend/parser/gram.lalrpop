@@ -19,8 +19,9 @@ use crate::backend::parser::parser::{
     make_type_cast, make_case_expr, make_case_when, make_coalesce_expr, make_min_max_expr,
     make_nullif_expr, make_string_const_cast, make_agg_star_call, make_distinct_func_call,
     make_sortby, insert_select_options, make_index_stmt, make_index_elem,
+    make_join_expr, make_alias, apply_rangevar_alias, apply_join_alias,
 };
-use crate::nodes::nodes::Node;
+use crate::nodes::nodes::{JoinType, Node};
 use crate::nodes::parsenodes::{ResTarget, SelectStmt, SortByDir, SortByNulls, TypeName};
 
 grammar;
@@ -89,6 +90,14 @@ extern {
         "ON"       => Token::Keyword("on"),
         "USING"    => Token::Keyword("using"),
         "UNIQUE"   => Token::Keyword("unique"),
+        // M7 (step 32): JOIN syntax keywords.
+        "JOIN"     => Token::Keyword("join"),
+        "INNER"    => Token::Keyword("inner"),
+        "LEFT"     => Token::Keyword("left"),
+        "RIGHT"    => Token::Keyword("right"),
+        "FULL"     => Token::Keyword("full"),
+        "OUTER"    => Token::Keyword("outer"),
+        "CROSS"    => Token::Keyword("cross"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -518,11 +527,75 @@ FromList: Vec<Node> = {
     <mut list:FromList> "," <t:TableRef> => { list.push(t); list },
 };
 
-// gram.y `table_ref`: relation_expr opt_alias_clause | func_table | ... M2 covers
-// a plain (optionally schema-qualified) table name as a RangeVar; joins, subquery
-// FROM items, function FROM items, and aliases grow at their milestones.
+// gram.y `table_ref`: a FROM item. M7 (step 32) covers a plain table (with an
+// optional alias), a parenthesized joined table (with an optional alias), and the
+// left-recursive `joined_table` JOIN chain. Subquery / function FROM items grow at
+// their milestones.
+//
+// To keep the LALR table unambiguous, the JOIN chain (`JoinedTable`) is
+// left-recursive over `TableRef` with a NON-join right operand (`TableAtom`):
+// `a JOIN b JOIN c` parses left-associatively as `(a JOIN b) JOIN c`, matching PG.
 TableRef: Node = {
-    <r:QualifiedName> => make_range_var_table_ref(r),
+    TableAtom,
+    JoinedTable,
+};
+
+// A non-join FROM atom: a plain (aliased) table or a parenthesized join (aliased).
+TableAtom: Node = {
+    <r:QualifiedName> <a:OptAliasClause> => make_range_var_table_ref(apply_rangevar_alias(r, a)),
+    "(" <j:JoinedTable> ")" <a:OptAliasClause> => apply_join_alias(j, a),
+};
+
+// gram.y `joined_table`. M7 reaches the cross join (`a CROSS JOIN b`), the
+// qualified join (`a [INNER] JOIN b ON expr` / `... USING (cols)`), and the outer
+// join spellings (LEFT/RIGHT/FULL [OUTER] JOIN ... ON/USING). The executor only
+// emits INNER joins this milestone; the outer-join parse is accepted so the
+// grammar is complete (the planner/executor outer-join emit grows next). The join
+// type is split into explicit productions rather than an optional nonterminal, so
+// the LALR table has no empty-reduction conflict on the first JOIN keyword.
+JoinedTable: Node = {
+    <l:TableRef> "CROSS" "JOIN" <r:TableAtom> =>
+        make_join_expr(JoinType::INNER, l, r, None, Vec::new()),
+    <l:TableRef> "JOIN" <r:TableAtom> <q:JoinQual> =>
+        make_join_expr(JoinType::INNER, l, r, q.0, q.1),
+    <l:TableRef> "INNER" "JOIN" <r:TableAtom> <q:JoinQual> =>
+        make_join_expr(JoinType::INNER, l, r, q.0, q.1),
+    <l:TableRef> <jt:OuterJoinType> "JOIN" <r:TableAtom> <q:JoinQual> =>
+        make_join_expr(jt, l, r, q.0, q.1),
+};
+
+// gram.y `join_type: LEFT/RIGHT/FULL [OUTER]` (the OUTER noise word is optional).
+OuterJoinType: JoinType = {
+    "LEFT" OptOuter => JoinType::LEFT,
+    "RIGHT" OptOuter => JoinType::RIGHT,
+    "FULL" OptOuter => JoinType::FULL,
+};
+
+OptOuter: () = { "OUTER" => (), => () };
+
+// gram.y `join_qual: ON a_expr | USING '(' name_list ')'`. Returns the ON-quals or
+// the USING column list (mutually exclusive).
+JoinQual: (Option<Node>, Vec<String>) = {
+    "ON" <q:AExpr> => (Some(q), Vec::new()),
+    "USING" "(" <cols:NameList> ")" => (None, cols),
+};
+
+// gram.y `opt_alias_clause`: alias_clause | /*EMPTY*/.
+OptAliasClause: Option<crate::nodes::primnodes::Alias> = {
+    AliasClause => Some(<>),
+    => None,
+};
+
+// gram.y `alias_clause: AS ColId | ColId` (the column-alias-list form grows later).
+AliasClause: crate::nodes::primnodes::Alias = {
+    "AS" <n:ColId> => make_alias(n),
+    <n:ColId> => make_alias(n),
+};
+
+// gram.y `name_list: name | name_list ',' name` (USING column list).
+NameList: Vec<String> = {
+    <n:ColId> => vec![n],
+    <mut list:NameList> "," <n:ColId> => { list.push(n); list },
 };
 
 // gram.y `where_clause: WHERE a_expr | /*EMPTY*/`. The qual expression is

@@ -189,7 +189,12 @@ fn plan_tlist(plan: &Node) -> &[Node] {
 /// has no nestloop params.
 fn set_nestloop_refs(root: &mut PlannerInfo, mut plan: NestLoop, rtoffset: usize) -> NestLoop {
     plan.join.plan.plan_node_id = next_plan_node_id(root);
-    let (outer, inner) = recurse_join_children(root, &mut plan.join.plan, rtoffset);
+    // PG order: index the children's (still base-Var) output tlists and fix the
+    // join's own exprs FIRST, THEN recurse into the children (which rewrites their
+    // tlists to OUTER_VAR/INNER_VAR positions). Doing it the other way breaks a
+    // join-over-join: the lower join's tlist would already be rewritten when the
+    // upper join searches it for a base Var.
+    let (outer, inner) = take_join_children(&mut plan.join.plan);
     let outer_tlist = plan_tlist(&outer).to_vec();
     let inner_tlist = plan_tlist(&inner).to_vec();
 
@@ -198,8 +203,8 @@ fn set_nestloop_refs(root: &mut PlannerInfo, mut plan: NestLoop, rtoffset: usize
     fix_join_qual(&mut plan.join.plan.qual, &outer_tlist, &inner_tlist);
     crate::assert!(plan.nest_params.is_empty(), "set_join_references: nestloop params not yet reachable");
 
-    plan.join.plan.lefttree = Some(outer);
-    plan.join.plan.righttree = Some(inner);
+    plan.join.plan.lefttree = Some(set_plan_refs(root, outer, rtoffset));
+    plan.join.plan.righttree = Some(set_plan_refs(root, inner, rtoffset));
     plan
 }
 
@@ -207,7 +212,7 @@ fn set_nestloop_refs(root: &mut PlannerInfo, mut plan: NestLoop, rtoffset: usize
 /// are rewritten against the outer/inner child outputs.
 fn set_mergejoin_refs(root: &mut PlannerInfo, mut plan: MergeJoin, rtoffset: usize) -> MergeJoin {
     plan.join.plan.plan_node_id = next_plan_node_id(root);
-    let (outer, inner) = recurse_join_children(root, &mut plan.join.plan, rtoffset);
+    let (outer, inner) = take_join_children(&mut plan.join.plan);
     let outer_tlist = plan_tlist(&outer).to_vec();
     let inner_tlist = plan_tlist(&inner).to_vec();
 
@@ -216,8 +221,8 @@ fn set_mergejoin_refs(root: &mut PlannerInfo, mut plan: MergeJoin, rtoffset: usi
     fix_join_exprs(&mut plan.join.plan.targetlist, &outer_tlist, &inner_tlist);
     fix_join_qual(&mut plan.join.plan.qual, &outer_tlist, &inner_tlist);
 
-    plan.join.plan.lefttree = Some(outer);
-    plan.join.plan.righttree = Some(inner);
+    plan.join.plan.lefttree = Some(set_plan_refs(root, outer, rtoffset));
+    plan.join.plan.righttree = Some(set_plan_refs(root, inner, rtoffset));
     plan
 }
 
@@ -227,10 +232,10 @@ fn set_mergejoin_refs(root: &mut PlannerInfo, mut plan: MergeJoin, rtoffset: usi
 /// INNER_VAR against the Hash's input tlist.
 fn set_hashjoin_refs(root: &mut PlannerInfo, mut plan: HashJoin, rtoffset: usize) -> HashJoin {
     plan.join.plan.plan_node_id = next_plan_node_id(root);
-    let (outer, inner) = recurse_join_children(root, &mut plan.join.plan, rtoffset);
+    let (outer, inner) = take_join_children(&mut plan.join.plan);
     let outer_tlist = plan_tlist(&outer).to_vec();
     // The inner child here is the Hash node; the hashclauses reference the Hash's
-    // output (which mirrors its input tlist).
+    // output (which mirrors its still-base-Var input tlist before recursion).
     let inner_tlist = plan_tlist(&inner).to_vec();
 
     fix_join_exprs(&mut plan.join.joinqual, &outer_tlist, &inner_tlist);
@@ -240,8 +245,8 @@ fn set_hashjoin_refs(root: &mut PlannerInfo, mut plan: HashJoin, rtoffset: usize
     fix_join_exprs(&mut plan.join.plan.targetlist, &outer_tlist, &inner_tlist);
     fix_join_qual(&mut plan.join.plan.qual, &outer_tlist, &inner_tlist);
 
-    plan.join.plan.lefttree = Some(outer);
-    plan.join.plan.righttree = Some(inner);
+    plan.join.plan.lefttree = Some(set_plan_refs(root, outer, rtoffset));
+    plan.join.plan.righttree = Some(set_plan_refs(root, inner, rtoffset));
     plan
 }
 
@@ -269,14 +274,12 @@ fn set_hash_refs(
     plan
 }
 
-/// Recurse `set_plan_refs` into a join's outer (lefttree) and inner (righttree)
-/// subplans, returning the rewritten children. The parent join's tlist/quals are
-/// fixed by the caller after this.
-fn recurse_join_children(
-    root: &mut PlannerInfo,
-    plan: &mut crate::nodes::plannodes::Plan,
-    rtoffset: usize,
-) -> (Node, Node) {
+/// Take a join's outer (lefttree) + inner (righttree) subplans out of the node,
+/// WITHOUT recursing. PG's `set_join_references` indexes the children's output
+/// tlists (still in base-Var form) and fixes the join's own exprs before the
+/// children are recursed (which would rewrite those tlists to OUTER/INNER). The
+/// caller recurses into each returned child after fixing the parent.
+fn take_join_children(plan: &mut crate::nodes::plannodes::Plan) -> (Node, Node) {
     let outer = plan
         .lefttree
         .take()
@@ -285,8 +288,6 @@ fn recurse_join_children(
         .righttree
         .take()
         .unwrap_or_else(|| not_yet_reachable("set_join_references: join without inner subplan"));
-    let outer = set_plan_refs(root, outer, rtoffset);
-    let inner = set_plan_refs(root, inner, rtoffset);
     (outer, inner)
 }
 

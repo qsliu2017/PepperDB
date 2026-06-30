@@ -55,6 +55,14 @@ pub fn exec_rescan(shared: &Arc<SharedState>, node: &mut PlanStateNode) {
         PlanStateNode::Unique(u) => crate::backend::executor::nodeUnique::exec_rescan_unique(u),
         PlanStateNode::Group(g) => crate::backend::executor::nodeGroup::exec_rescan_group(g),
         PlanStateNode::Agg(a) => crate::backend::executor::nodeAgg::exec_rescan_agg(a),
+        // The M7 join nodes materialize their inner side once and are not rescanned
+        // (no nestloop params / no join sits below a rescanning parent yet).
+        PlanStateNode::NestLoop(_)
+        | PlanStateNode::HashJoin(_)
+        | PlanStateNode::Hash(_)
+        | PlanStateNode::MergeJoin(_) => {
+            unimplemented!("ExecReScan: join-node rescan not yet reachable")
+        }
         #[cfg(test)]
         PlanStateNode::TupleSource(_) => {
             unimplemented!("ExecReScan: test tuple source is not rescannable")

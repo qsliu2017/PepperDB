@@ -131,8 +131,12 @@ fn query_planner_join(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback
     // or joininfo), and return the joinlist for the search.
     let joinlist = crate::backend::optimizer::plan::initsplan::deconstruct_jointree(root);
 
-    // EC merging is complete before the join search runs.
-    root.ec_merging_done = true;
+    // generate_base_implied_equalities: finalize the ECs (sets ec_merging_done) and
+    // stamp each base rel's `eclass_indexes`/`has_eclass_joins`, so the join search's
+    // `generate_join_implied_equalities` can find the equijoin clauses absorbed into
+    // ECs (e.g. `a.x=b.y`). Without this the joinrel restrictlist is empty -> cross
+    // product.
+    crate::backend::optimizer::path::equivclass::generate_base_implied_equalities(root);
     qp_callback(root);
 
     crate::backend::optimizer::path::allpaths::make_one_rel(root, &joinlist)

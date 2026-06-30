@@ -70,18 +70,24 @@ fn exec_init_expr_rec(node: &Node, state: &mut ExprState) {
             expr_eval_push_step(state, step);
         }
         Node::Var(var) => {
-            // EEOP_SCAN_VAR: read the scan-slot attribute into the scratch. M3
-            // plans only SeqScans, so every Var is a scan Var (OUTER/INNER for join
-            // inputs grow with join nodes). System / whole-row Vars grow later.
+            // EEOP_{SCAN,OUTER,INNER}_VAR: read the source-slot attribute into the
+            // scratch. A scan Var reads `ecxt_scantuple`; a join Var (after setrefs
+            // stamped varno=OUTER_VAR/INNER_VAR) reads `ecxt_outertuple`/
+            // `ecxt_innertuple`. System / whole-row Vars grow later.
             crate::assert!(var.varattno > 0, "system/whole-row Var not yet reachable");
             crate::assert!(
                 var.varreturningtype == VarReturningType::DEFAULT,
                 "OLD/NEW returning Var not yet reachable"
             );
+            let opcode = match var.varno {
+                crate::nodes::primnodes::OUTER_VAR => ExprEvalOp::OUTER_VAR,
+                crate::nodes::primnodes::INNER_VAR => ExprEvalOp::INNER_VAR,
+                _ => ExprEvalOp::SCAN_VAR,
+            };
             expr_eval_push_step(
                 state,
                 ExprEvalStep {
-                    opcode: ExprEvalOp::SCAN_VAR,
+                    opcode,
                     resvalue: None,
                     resnull: None,
                     d: ExprEvalStepData::Var(VarData {
@@ -547,13 +553,17 @@ pub fn exec_build_projection_info(
         ..ExprState::default()
     };
 
-    // Prologue: if any target is a scan Var, deform the scan slot up through the
-    // largest referenced attno (PG emits one EEOP_*_FETCHSOME per slot kind).
+    // Prologue: if any target is a scan Var (varno not OUTER/INNER), deform the
+    // scan slot up through the largest referenced attno (PG emits one
+    // EEOP_*_FETCHSOME per slot kind). Join Vars (OUTER/INNER) read virtual
+    // snapshot slots that need no FETCHSOME, and carry no single input_desc.
     let max_scan_attno = target_list
         .iter()
         .filter_map(|n| match n {
             Node::TargetEntry(tle) => match tle.expr.as_ref() {
-                Some(Node::Var(v)) => Some(i32::from(v.varattno)),
+                Some(Node::Var(v)) if !crate::nodes::primnodes::IS_SPECIAL_VARNO(v.varno) => {
+                    Some(i32::from(v.varattno))
+                }
                 _ => None,
             },
             _ => None,
@@ -639,19 +649,25 @@ pub fn exec_build_projection_info(
     })
 }
 
-/// Emit `EEOP_ASSIGN_SCAN_VAR` for a simple scan `Var`. M2 plans only SeqScans,
-/// so every projection Var is a scan var (OUTER_VAR/INNER_VAR for join inputs
-/// grow with join nodes). `attnum` is the 0-based scan-slot attribute index.
+/// Emit `EEOP_ASSIGN_{SCAN,OUTER,INNER}_VAR` for a simple `Var` projection target.
+/// A scan Var copies from `ecxt_scantuple`; a join Var (varno=OUTER_VAR/INNER_VAR
+/// after setrefs) copies from `ecxt_outertuple`/`ecxt_innertuple`. `attnum` is the
+/// 0-based source-slot attribute index.
 fn push_assign_scan_var(state: &mut ExprState, var: &Var, resultnum: i32) {
     crate::assert!(var.varattno > 0, "system/whole-row Var in projection not yet reachable");
     crate::assert!(
         var.varreturningtype == VarReturningType::DEFAULT,
         "OLD/NEW returning Var not yet reachable"
     );
+    let opcode = match var.varno {
+        crate::nodes::primnodes::OUTER_VAR => ExprEvalOp::ASSIGN_OUTER_VAR,
+        crate::nodes::primnodes::INNER_VAR => ExprEvalOp::ASSIGN_INNER_VAR,
+        _ => ExprEvalOp::ASSIGN_SCAN_VAR,
+    };
     expr_eval_push_step(
         state,
         ExprEvalStep {
-            opcode: ExprEvalOp::ASSIGN_SCAN_VAR,
+            opcode,
             resvalue: None,
             resnull: None,
             d: ExprEvalStepData::AssignVar(AssignVarData {

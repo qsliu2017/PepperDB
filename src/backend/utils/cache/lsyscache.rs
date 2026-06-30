@@ -424,6 +424,41 @@ pub fn get_mergejoin_opfamilies(opno: Oid) -> Vec<Oid> {
     lookup_builtin_eq(opno).map_or_else(Vec::new, |e| vec![e.btree_opfamily])
 }
 
+/// PG `get_opcode`: the operator's implementing function OID (`pg_operator.oprcode`).
+/// Reads the OPEROID syscache when warm; falls back to the builtin "=" table for the
+/// seeded operators (catalog cold / unit tests). Used to fill the `opfuncid` of an
+/// OpExpr the planner synthesizes (the EC-derived join equalities), which the parser
+/// never saw and so never resolved.
+#[must_use]
+pub fn get_opcode(opno: Oid) -> Oid {
+    use crate::access::htup_details::GETSTRUCT;
+    use crate::catalog::pg_operator::{Form_pg_operator, FormData_pg_operator};
+    if let Some(tuple) = search_sys_cache(SysCacheIdentifier::OPEROID, &[ObjectIdGetDatum(opno)]) {
+        // SAFETY: a held OPEROID hit -> a pg_operator row.
+        let out = {
+            let op: Form_pg_operator = GETSTRUCT(unsafe { &*tuple }).cast::<FormData_pg_operator>();
+            Oid(unsafe { &*op }.oprcode.0)
+        };
+        release_sys_cache(tuple);
+        return out;
+    }
+    // Builtin fallback for the seeded "=" operators (the join-key equalities).
+    builtin_eq_opcode(opno).map_or(crate::postgres_ext::InvalidOid, Oid)
+}
+
+/// The implementing function OID of a builtin "=" operator (pg_proc seed OIDs).
+fn builtin_eq_opcode(opno: Oid) -> Option<u32> {
+    Some(match opno.0 {
+        94 => 63,   // int2eq
+        96 => 65,   // int4eq
+        410 => 467, // int8eq
+        91 => 60,   // booleq
+        98 => 67,   // texteq
+        607 => 184, // oideq
+        _ => return None,
+    })
+}
+
 /// PG `op_input_types`: the operator's `(oprleft, oprright)` input types. Reads the
 /// OPEROID syscache when warm; falls back to the builtin "=" table for the seeded
 /// operators (the bootstrap window / unit tests where pg_operator isn't warmed).

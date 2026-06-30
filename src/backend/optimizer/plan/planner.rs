@@ -303,13 +303,20 @@ pub fn subquery_planner(
     // Survey the rangetable. M2 supports an RTE_RELATION (a base rel) and an
     // RTE_RESULT (the empty-FROM placeholder). JOIN/SUBQUERY/FUNCTION/VALUES/GROUP
     // RTEs, lateral refs, and security quals grow with their milestones.
-    for rte in &root.parse.rtable {
+    //
+    // PG `expand_inherited_tables` (folded here): a RELATION RTE's `inh` flag starts
+    // true (the RangeVar default "descend into children"); prep clears it when the
+    // relation `!relhassubclass`. Inheritance/partitioning is unsupported this
+    // milestone, so no table has subclasses -> clear every RELATION's `inh`. This
+    // keeps the multi-rel join path's `get_relation_info(rte.inh)` off the
+    // inheritance-parent grow guard (the single-rel path already passes `false`).
+    for rte in &mut root.parse.rtable {
         let Node::RangeTblEntry(rte) = rte else {
             not_yet_reachable("subquery_planner: rangetable entry is not an RTE");
         };
         match rte.rtekind {
-            crate::nodes::parsenodes::RTEKind::RELATION
-            | crate::nodes::parsenodes::RTEKind::RESULT => {}
+            crate::nodes::parsenodes::RTEKind::RELATION => rte.inh = false,
+            crate::nodes::parsenodes::RTEKind::RESULT => {}
             other => not_yet_reachable(&format!("subquery_planner: RTE kind {other:?}")),
         }
     }

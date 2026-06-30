@@ -116,10 +116,61 @@ pub fn make_column_ref(parts: Vec<String>) -> Node {
 }
 
 /// gram.y `table_ref: relation_expr`: a plain table name in FROM becomes a
-/// RangeVar node (the from_clause/table_ref item). Aliases / joins / subqueries
-/// grow at their milestones.
+/// RangeVar node (the from_clause/table_ref item). Subqueries grow at their
+/// milestones; the optional alias is applied by `apply_rangevar_alias` first.
 pub fn make_range_var_table_ref(relation: RangeVar) -> Node {
     Node::RangeVar(Box::new(relation))
+}
+
+/// gram.y `alias_clause`: build an `Alias` (no column-alias list yet).
+pub fn make_alias(name: String) -> crate::nodes::primnodes::Alias {
+    crate::nodes::primnodes::Alias { aliasname: Some(name), colnames: Vec::new() }
+}
+
+/// Apply an optional alias to a FROM-item RangeVar (sets `RangeVar.alias`).
+pub fn apply_rangevar_alias(
+    mut relation: RangeVar,
+    alias: Option<crate::nodes::primnodes::Alias>,
+) -> RangeVar {
+    relation.alias = alias.map(Box::new);
+    relation
+}
+
+/// gram.y `joined_table`: build a `JoinExpr` from the join type, the two arms, and
+/// the ON-qual or USING column list. A USING list builds the `usingClause`
+/// (resolved to equality quals at analysis time); ON builds `quals`.
+pub fn make_join_expr(
+    jointype: crate::nodes::nodes::JoinType,
+    larg: Node,
+    rarg: Node,
+    quals: Option<Node>,
+    using_cols: Vec<String>,
+) -> Node {
+    use crate::nodes::value::makeString;
+    let using_clause = using_cols
+        .into_iter()
+        .map(|c| Node::String_(makeString(c)))
+        .collect();
+    Node::JoinExpr(Box::new(crate::nodes::primnodes::JoinExpr {
+        jointype,
+        isNatural: false,
+        larg: Some(larg),
+        rarg: Some(rarg),
+        usingClause: using_clause,
+        join_using_alias: None,
+        quals,
+        alias: None,
+        rtindex: 0,
+    }))
+}
+
+/// Apply an optional alias to a parenthesized joined table (`( a JOIN b ... ) x`).
+pub fn apply_join_alias(join: Node, alias: Option<crate::nodes::primnodes::Alias>) -> Node {
+    let Node::JoinExpr(mut j) = join else {
+        return join;
+    };
+    j.alias = alias.map(Box::new);
+    Node::JoinExpr(j)
 }
 
 /// gram.y `a_expr <op> a_expr`: a simple binary operator A_Expr (AEXPR_OP). The

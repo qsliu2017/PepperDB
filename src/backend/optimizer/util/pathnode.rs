@@ -126,7 +126,7 @@ pub fn create_group_result_path(
 
     let path = Path {
         pathtype: PathType::Result,
-        parent: Some(Box::new(rel.clone())),
+        parent: Some(Box::new(rel.parent_snapshot())),
         pathtarget: Some(Box::new(target.clone())),
         param_info: None, // there are no other rels...
         parallel_aware: false,
@@ -165,7 +165,7 @@ pub fn create_seqscan_path(
 
     let mut path = Path {
         pathtype: PathType::SeqScan,
-        parent: Some(Box::new(rel.clone())),
+        parent: Some(Box::new(rel.parent_snapshot())),
         pathtarget: Some(Box::new(target)),
         // get_baserel_parampathinfo(root, rel, NULL) is NULL with no required_outer.
         param_info: None,
@@ -235,7 +235,7 @@ pub fn create_index_path(
 
     let path = Path {
         pathtype: PathType::IndexScan,
-        parent: Some(Box::new(rel.clone())),
+        parent: Some(Box::new(rel.parent_snapshot())),
         pathtarget: Some(Box::new(target)),
         param_info: None,
         parallel_aware: false,
@@ -304,7 +304,7 @@ pub fn create_bitmap_heap_path(
 
     let path = Path {
         pathtype: PathType::BitmapHeapScan,
-        parent: Some(Box::new(rel.clone())),
+        parent: Some(Box::new(rel.parent_snapshot())),
         pathtarget: Some(Box::new(target)),
         param_info: None,
         parallel_aware: false,
@@ -345,7 +345,7 @@ fn make_join_base_path(
     let parallel_workers = outer_path.parallel_workers;
     Path {
         pathtype,
-        parent: Some(Box::new(joinrel.clone())),
+        parent: Some(Box::new(joinrel.parent_snapshot())),
         pathtarget: joinrel.reltarget.clone(),
         param_info: None,
         parallel_aware: false,

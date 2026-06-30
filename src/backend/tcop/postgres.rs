@@ -1686,6 +1686,83 @@ mod wire_tests {
             .expect("supervisor task ok");
     }
 
+    /// THE M7 MILESTONE: two-table INNER joins over the wire (the cost-chosen
+    /// nestloop/hash/merge method). Over a(x int) {1,2,3,4} and b(y int, z int)
+    /// {(2,20),(3,30),(3,31),(5,50)}:
+    ///   - `SELECT a.x, b.z FROM a JOIN b ON a.x = b.y`  (explicit JOIN syntax)
+    ///   - `SELECT a.x, b.z FROM a, b WHERE a.x = b.y`   (comma cross-join + WHERE)
+    /// both return the matched rows {(2,20),(3,30),(3,31)}. A 3-table join chains.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m7_joins_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        simple_query(&mut client, &mut buf, "CREATE TABLE a (x int)").await;
+        simple_query(&mut client, &mut buf, "CREATE TABLE b (y int, z int)").await;
+        for v in [1, 2, 3, 4] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO a VALUES ({v})")).await;
+        }
+        for (y, z) in [(2, 20), (3, 30), (3, 31), (5, 50)] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO b VALUES ({y}, {z})")).await;
+        }
+
+        let texts = |msgs: &[Msg]| -> Vec<Vec<String>> {
+            let mut rows: Vec<Vec<String>> =
+                msgs.iter().filter(|m| m.ty == b'D').map(|m| datarow_texts(&m.body)).collect();
+            rows.sort();
+            rows
+        };
+        let expected = vec![
+            vec!["2".to_owned(), "20".to_owned()],
+            vec!["3".to_owned(), "30".to_owned()],
+            vec!["3".to_owned(), "31".to_owned()],
+        ];
+
+        // Explicit JOIN ... ON syntax.
+        let sel = simple_query(&mut client, &mut buf, "SELECT a.x, b.z FROM a JOIN b ON a.x = b.y").await;
+        let types: Vec<u8> = sel.iter().map(|m| m.ty).collect();
+        assert_eq!(
+            types,
+            vec![b'T', b'D', b'D', b'D', b'C', b'Z'],
+            "RowDescription + 3 join DataRows + CommandComplete + ReadyForQuery"
+        );
+        assert_eq!(texts(&sel), expected, "SELECT a.x, b.z FROM a JOIN b ON a.x = b.y");
+
+        // Comma cross-join + WHERE equivalent (same result set).
+        let sel = simple_query(&mut client, &mut buf, "SELECT a.x, b.z FROM a, b WHERE a.x = b.y").await;
+        assert_eq!(texts(&sel), expected, "SELECT a.x, b.z FROM a, b WHERE a.x = b.y");
+
+        // INNER JOIN spelling.
+        let sel = simple_query(&mut client, &mut buf, "SELECT a.x, b.z FROM a INNER JOIN b ON a.x = b.y").await;
+        assert_eq!(texts(&sel), expected, "INNER JOIN spelling");
+
+        // A 3-table join: a JOIN b JOIN c on the shared key. c(w int) {3}.
+        simple_query(&mut client, &mut buf, "CREATE TABLE c (w int)").await;
+        simple_query(&mut client, &mut buf, "INSERT INTO c VALUES (3)").await;
+        let sel = simple_query(
+            &mut client,
+            &mut buf,
+            "SELECT a.x, b.z FROM a JOIN b ON a.x = b.y JOIN c ON b.y = c.w",
+        )
+        .await;
+        // Only the b.y = 3 rows survive the c.w = 3 join: (3,30) and (3,31).
+        assert_eq!(
+            texts(&sel),
+            vec![vec!["3".to_owned(), "30".to_owned()], vec!["3".to_owned(), "31".to_owned()]],
+            "3-table join a JOIN b JOIN c"
+        );
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
     /// M3 BoolExpr qual over the wire: `WHERE a > 0 AND a < 3` keeps {1,2} -- the
     /// AND short-circuit + per-clause int4 comparison. (Three-valued NULL logic is
     /// unit-tested in execExprInterp; the NULL literal is not yet parseable.)

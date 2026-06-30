@@ -99,6 +99,33 @@ pub fn exec_interp_expr(state: &mut ExprState, econtext: &mut ExprContext, is_nu
                 slot.isnull[resultnum] = n;
                 pc += 1;
             }
+            // Join projection: copy an attr straight from the outer/inner tuple
+            // into the result slot (the simple-Var fast path for OUTER_VAR/
+            // INNER_VAR-resolved projection targets).
+            ExprEvalOp::ASSIGN_OUTER_VAR | ExprEvalOp::ASSIGN_INNER_VAR => {
+                let ExprEvalStepData::AssignVar(a) = &state.steps[pc].d else {
+                    unreachable!("EEOP_ASSIGN_OUTER/INNER_VAR without AssignVar payload");
+                };
+                let (attnum, resultnum) = (a.attnum as usize, a.resultnum as usize);
+                let src = if opcode == ExprEvalOp::ASSIGN_OUTER_VAR {
+                    econtext.ecxt_outertuple.as_ref()
+                } else {
+                    econtext.ecxt_innertuple.as_ref()
+                };
+                let (v, n) = {
+                    let slot = src.unwrap_or_else(|| {
+                        unimplemented!("ASSIGN_OUTER/INNER_VAR with no source tuple")
+                    });
+                    (slot.values[attnum], slot.isnull[attnum])
+                };
+                let slot = state
+                    .resultslot
+                    .as_mut()
+                    .unwrap_or_else(|| unimplemented!("ASSIGN_OUTER/INNER_VAR with no result slot"));
+                slot.values[resultnum] = v;
+                slot.isnull[resultnum] = n;
+                pc += 1;
+            }
             ExprEvalOp::DONE_NO_RETURN => {
                 // Projection terminator: the row is already in the result slot.
                 return Datum(0);
@@ -167,6 +194,40 @@ fn exec_interp_step(
                 .ecxt_scantuple
                 .as_ref()
                 .unwrap_or_else(|| unimplemented!("SCAN_VAR with no scan tuple"));
+            *resvalue = slot.values[attnum];
+            *resnull = slot.isnull[attnum];
+            pc + 1
+        }
+        ExprEvalOp::OUTER_FETCHSOME | ExprEvalOp::INNER_FETCHSOME => {
+            // Force the outer/inner join slot deformed through `last_var`. The join
+            // input slots are virtual (snapshotted from the child), so getsomeattrs
+            // is a no-op, but call it for faithfulness.
+            let ExprEvalStepData::Fetch(f) = &step.d else {
+                unreachable!("EEOP_OUTER/INNER_FETCHSOME without Fetch payload");
+            };
+            let last_var = f.last_var;
+            let slot = if step.opcode == ExprEvalOp::OUTER_FETCHSOME {
+                econtext.ecxt_outertuple.as_mut()
+            } else {
+                econtext.ecxt_innertuple.as_mut()
+            }
+            .unwrap_or_else(|| unimplemented!("OUTER/INNER_FETCHSOME with no source tuple"));
+            slot_getsomeattrs(slot, last_var);
+            pc + 1
+        }
+        ExprEvalOp::OUTER_VAR | ExprEvalOp::INNER_VAR => {
+            // Read tts_values[attnum]/tts_isnull[attnum] from the outer/inner join
+            // slot into the scratch. `attnum` is the 0-based attribute index.
+            let ExprEvalStepData::Var(v) = &step.d else {
+                unreachable!("EEOP_OUTER/INNER_VAR without Var payload");
+            };
+            let attnum = v.attnum as usize;
+            let slot = if step.opcode == ExprEvalOp::OUTER_VAR {
+                econtext.ecxt_outertuple.as_ref()
+            } else {
+                econtext.ecxt_innertuple.as_ref()
+            }
+            .unwrap_or_else(|| unimplemented!("OUTER/INNER_VAR with no source tuple"));
             *resvalue = slot.values[attnum];
             *resnull = slot.isnull[attnum];
             pc + 1
