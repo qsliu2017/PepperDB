@@ -58,6 +58,10 @@ pub struct SeqScanRun<'rel> {
     /// the query snapshot, available by then). Borrows `relation`/`snapshot`; boxed
     /// so the large `vistuples` array stays off the scan future's frame.
     pub scan: Option<Box<HeapScanDescData<'rel, 'rel>>>,
+    /// SubPlan run-states for sub-selects in this scan's qual / projection (M12,
+    /// step 44). Run before each row's qual/projection so the PARAM_EXEC slots the
+    /// SubLinks were replaced by are filled. Empty when the scan references none.
+    pub subplan_runs: Vec<crate::backend::executor::nodeSubplan::SubPlanRun<'rel>>,
 }
 
 /// PG `ExecInitSeqScan`: build the SeqScanState. Opens the scan relation (from the
@@ -127,6 +131,7 @@ pub fn exec_init_seq_scan<'rel>(node: &SeqScan, estate: &mut EState<'rel>, eflag
         relation,
         snapshot,
         scan: None,
+        subplan_runs: Vec::new(),
     })
 }
 
@@ -148,6 +153,11 @@ pub async fn exec_seq_scan<'r>(
         if !got {
             return None;
         }
+        // M12 (step 44): run any sub-selects this scan references, against the current
+        // scan tuple, before the sync qual/projection reads their PARAM_EXEC outputs.
+        if !run.subplan_runs.is_empty() {
+            run_scan_subplans(shared, run).await;
+        }
         // ExecScan: qual-check the scan slot; if it passes, project and stop.
         if exec_scan(&mut run.state.ss).is_some() {
             return run
@@ -159,6 +169,34 @@ pub async fn exec_seq_scan<'r>(
                 .and_then(|p| p.state.resultslot.as_deref_mut());
         }
     }
+}
+
+/// Run the scan's sub-selects against the current scan tuple, depositing each
+/// result into the scan exprcontext's `ecxt_param_exec_vals`. The scan slot is
+/// aliased into `ecxt_scantuple` first so the subplans' correlation args (outer
+/// Vars) read the current row; it is restored afterward for `exec_scan`.
+async fn run_scan_subplans(shared: &Arc<SharedState>, run: &mut SeqScanRun<'_>) {
+    let ss = &mut run.state.ss;
+    let scan_slot = ss
+        .ss_scan_tuple_slot
+        .take()
+        .unwrap_or_else(|| unimplemented!("run_scan_subplans: scan node has no scan tuple slot"));
+    let mut econtext = ss
+        .ps
+        .ps_expr_context
+        .take()
+        .unwrap_or_else(|| unimplemented!("run_scan_subplans: scan node has no exprcontext"));
+    econtext.ecxt_scantuple = Some(scan_slot);
+
+    crate::backend::executor::nodeSubplan::run_subplans_for(
+        Some(shared),
+        &mut run.subplan_runs,
+        &mut econtext,
+    )
+    .await;
+
+    ss.ss_scan_tuple_slot = econtext.ecxt_scantuple.take();
+    ss.ps.ps_expr_context = Some(econtext);
 }
 
 /// PG `SeqNext`: fetch the next tuple from the table AM and store it in the scan
@@ -219,6 +257,10 @@ pub fn exec_end_seq_scan(shared: &Arc<SharedState>, run: &mut SeqScanRun<'_>) {
         table_endscan(shared, scan);
     }
     run.scan = None;
+    // Tear down any sub-select child plan-state trees attached to this scan.
+    for sp in &mut run.subplan_runs {
+        crate::backend::executor::nodeSubplan::exec_end_subplan(Some(shared), sp);
+    }
 }
 
 /// PG `ExecReScanSeqScan`: restart the scan from the beginning. M2: drop the open
@@ -496,6 +538,7 @@ mod tests {
             result_relations,
             append_relations: Vec::new(),
             subplans: Vec::new(),
+            subplan_nodes: Vec::new(),
             rewind_plan_ids: None,
             row_marks: Vec::new(),
             relation_oids: Vec::new(),

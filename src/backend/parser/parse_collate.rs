@@ -229,9 +229,29 @@ fn assign_collations_walker(
             no_collation(context);
             false
         }
-        // CollateExpr / SubLink / ... (collation-bearing) grow per milestone.
+        // M12 (step 44): a SubLink. Descend into the (already-transformed) testexpr
+        // only; the sub-Query was collated when analyzed and is not re-walked.
+        Node::SubLink(sl) => assign_sublink_collations(pstate, sl, context),
+        // CollateExpr / ... (collation-bearing) grow per milestone.
         other => not_yet_reachable(other),
     }
+}
+
+/// PG `assign_collations_walker` SubLink arm (M12, step 44): assign collations to the
+/// SubLink's testexpr (the ANY/ALL left-hand expression + combining op). The
+/// sub-Query in `subselect` is NOT re-walked (PG's query_tree_walker skips
+/// sub-selects). A SubLink's own result is boolean or the EXPR column type -- handled
+/// as uncollatable here.
+fn assign_sublink_collations(
+    pstate: &mut ParseState,
+    sl: &mut crate::nodes::primnodes::SubLink,
+    context: &mut AssignCollationsContext,
+) -> bool {
+    if let Some(testexpr) = sl.testexpr.as_mut() {
+        assign_expr_collations(pstate, testexpr);
+    }
+    no_collation(context);
+    false
 }
 
 /// Set the walker context to "no collation" (an uncollatable result). The M4 node

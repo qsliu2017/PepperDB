@@ -33,7 +33,7 @@ use crate::nodes::pathnodes::{PlannerGlobal, PlannerInfo, UpperRelationKind};
 use crate::nodes::plannodes::PlannedStmt;
 use crate::backend::optimizer::plan::planmain::{create_plan, query_planner};
 use crate::backend::optimizer::plan::setrefs::set_plan_references;
-use crate::backend::optimizer::plan::subselect::ss_finalize_plan;
+use crate::backend::optimizer::plan::subselect::{ss_finalize_plan, ss_process_sublinks};
 use crate::backend::optimizer::prep::preptlist::preprocess_targetlist;
 use crate::backend::optimizer::util::clauses::eval_const_expressions;
 
@@ -60,6 +60,7 @@ fn not_yet_reachable(what: &str) -> ! {
 fn make_planner_global() -> Box<PlannerGlobal> {
     Box::new(PlannerGlobal {
         subplans: Vec::new(),
+        subplan_nodes: Vec::new(),
         subpaths: Vec::new(),
         subroots: Vec::new(),
         rewind_plan_ids: None,
@@ -211,6 +212,7 @@ pub fn standard_planner(
         // its Vec<Box<AppendRelInfo>> -> Vec<Node> conversion grows with that.
         append_relations: Vec::new(),
         subplans: glob.subplans.clone(),
+        subplan_nodes: glob.subplan_nodes.clone(),
         rewind_plan_ids: glob.rewind_plan_ids.clone(),
         row_marks: glob.finalrowmarks.clone(),
         relation_oids: glob.relation_oids.clone(),
@@ -272,6 +274,7 @@ fn plan_set_operations_stmt(parse: &mut Query) -> PlannedStmt {
         result_relations: glob.result_relations.clone(),
         append_relations: Vec::new(),
         subplans: glob.subplans.clone(),
+        subplan_nodes: glob.subplan_nodes.clone(),
         rewind_plan_ids: glob.rewind_plan_ids.clone(),
         row_marks: glob.finalrowmarks.clone(),
         relation_oids: glob.relation_oids.clone(),
@@ -316,6 +319,7 @@ fn plan_with_query_stmt(parse: &mut Query) -> PlannedStmt {
         result_relations: glob.result_relations.clone(),
         append_relations: Vec::new(),
         subplans: glob.subplans.clone(),
+        subplan_nodes: glob.subplan_nodes.clone(),
         rewind_plan_ids: glob.rewind_plan_ids.clone(),
         row_marks: glob.finalrowmarks.clone(),
         relation_oids: glob.relation_oids.clone(),
@@ -567,9 +571,6 @@ pub fn subquery_planner(
     if root.parse.setOperations.is_some() {
         not_yet_reachable("subquery_planner: set-operation plan assembly (prepunion)");
     }
-    if root.parse.hasSubLinks {
-        not_yet_reachable("subquery_planner: sublinks");
-    }
 
     // If the FROM clause is empty, replace it with a dummy RTE_RESULT so that the
     // jointree is never empty (PG: replace_empty_jointree in prepjointree). This
@@ -644,6 +645,16 @@ pub fn subquery_planner(
     // reduce_outer_joins / remove_useless_result_rtes need an actual rangetable;
     // none in M1.
 
+    // M12 (step 44): expand SubLinks in the WHERE qual and target list into SubPlans
+    // (PG preprocess_expression -> SS_process_sublinks). Each SubLink is replaced by a
+    // PARAM_EXEC Param (filled by the subplan at run time); the subplans are planned
+    // (sharing this glob's finalrtable) and registered on glob.subplan_nodes /
+    // glob.subplans. Done before the main planning so the qual that flows into
+    // baserestrictinfo carries Params, not SubLinks.
+    if root.parse.hasSubLinks {
+        process_query_sublinks(&mut root);
+    }
+
     // Do the main planning.
     grouping_planner(&mut root, tuple_fraction, setops);
 
@@ -693,6 +704,28 @@ pub fn plan_subquery(parse: &mut Query, wt_param_id: i32) -> PlannedSubquery {
         rtable: root.glob.finalrtable.clone(),
         perminfos: root.glob.finalrteperminfos.clone(),
     }
+}
+
+/// PG `preprocess_expression` (the SS_process_sublinks part): run sublink->subplan
+/// conversion over the query's WHERE qual (isQual=true) and target list. The Query's
+/// jointree quals + tlist are rewritten in place (each SubLink -> a PARAM_EXEC Param).
+fn process_query_sublinks(root: &mut PlannerInfo) {
+    // WHERE qual.
+    let jointree = root.parse.jointree.take();
+    if let Some(Node::FromExpr(mut f)) = jointree {
+        if let Some(q) = f.quals.take() {
+            f.quals = Some(ss_process_sublinks(root, q, true));
+        }
+        root.parse.jointree = Some(Node::FromExpr(f));
+    } else {
+        root.parse.jointree = jointree;
+    }
+    // Target list.
+    let tlist = std::mem::take(&mut root.parse.targetList);
+    root.parse.targetList = tlist
+        .into_iter()
+        .map(|te| ss_process_sublinks(root, te, false))
+        .collect();
 }
 
 /// PG `makeNode(PlannerInfo)` + the subquery_planner field initialization that

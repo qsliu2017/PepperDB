@@ -58,6 +58,14 @@ pub use fwd::*;
 // `ParamExecData`; both must be the genuine types so Param opcodes evaluate.
 pub use crate::nodes::params::{ParamExecData, ParamListInfo};
 
+/// The executor (PARAM_EXEC) parameter array, shared by all ExprContexts of one
+/// query so a SubPlan's outer-set params (parParam) reach the SubPlan's child scan
+/// and the SubPlan's outputs (setParam) reach the parent qual/projection -- PG's
+/// single `EState.es_param_exec_vals` array (M12, step 44). Shared via `Arc<Mutex>`
+/// because the per-task plan may move across runtime threads at await points; access
+/// is exclusive (no concurrency within one backend task), so the lock is uncontended.
+pub type ParamExecVals = Arc<parking_lot::Mutex<Vec<ParamExecData>>>;
+
 // Executor-spine types wired to their real homes (step 08). The placeholders
 // these replace were stand-ins until the executor was translated; the spine now
 // threads real slots/descriptors/steps/snapshots through EState/PlanState/etc.
@@ -210,8 +218,9 @@ pub struct ExprContext {
     pub ecxt_per_query_memory: MemoryContext,
     pub ecxt_per_tuple_memory: MemoryContext,
     /// values to substitute for Param nodes.
-    /// values to substitute for PARAM_EXEC Param nodes (indexed by paramid).
-    pub ecxt_param_exec_vals: Option<Vec<ParamExecData>>,
+    /// values to substitute for PARAM_EXEC Param nodes (indexed by paramid). Shared
+    /// (Arc) across the query's ExprContexts so SubPlan params thread correctly.
+    pub ecxt_param_exec_vals: Option<ParamExecVals>,
     /// values to substitute for PARAM_EXTERN ($n) Param nodes.
     pub ecxt_param_list_info: Option<ParamListInfo>,
     /// precomputed values/nulls for aggs/windowfuncs.
@@ -474,7 +483,7 @@ pub struct EState<'rel> {
     pub tuple_routing_result_relations: Vec<Box<ResultRelInfo>>,
     pub trig_target_relations: Vec<Box<ResultRelInfo>>,
     pub param_list_info: Option<ParamListInfo>,
-    pub param_exec_vals: Option<Vec<ParamExecData>>,
+    pub param_exec_vals: Option<ParamExecVals>,
     pub query_env: Option<Box<QueryEnvironment>>,
     pub query_cxt: MemoryContext,
     /// List of TupleTableSlots.

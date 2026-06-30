@@ -16,7 +16,7 @@ use crate::nodes::nodes::Node;
 use crate::nodes::parsenodes::{CommonTableExpr, Query, RTEKind, SetOperationStmt};
 use crate::nodes::pathnodes::PlannerInfo;
 use crate::nodes::plannodes::{CteScan, Plan, RecursiveUnion, Scan, WorkTableScan};
-use crate::nodes::primnodes::{Index, OUTER_VAR};
+use crate::nodes::primnodes::{Index, Param, ParamKind, SubLink, SubLinkType, SubPlan, OUTER_VAR};
 use crate::postgres_ext::{InvalidOid, Oid};
 
 /// Panic for a subselect path not yet translated for this milestone
@@ -24,6 +24,17 @@ use crate::postgres_ext::{InvalidOid, Oid};
 #[cold]
 fn not_yet_reachable(what: &str) -> ! {
     unimplemented!("{what}: not yet translated for this milestone");
+}
+
+/// A sub-select nested inside another sub-select is not yet supported (its inner
+/// SubPlan would be discarded -> silently-wrong rows); raise a catchable error.
+#[cold]
+fn nested_sublink_error() -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+            .errmsg("nested sub-selects are not yet supported".to_owned());
+    });
+    unreachable!("ereport(ERROR) diverges");
 }
 
 /// A planned CTE: its name + the finished subplan that produces its rows + the
@@ -83,6 +94,23 @@ fn plan_one_cte(cte: &CommonTableExpr) -> CtePlan {
 
     if cte.cterecursive {
         plan_recursive_cte(&name, ctequery)
+    } else if let Some(Node::SetOperationStmt(sostmt)) = ctequery.setOperations.as_ref() {
+        // A non-recursive CTE whose body is a set operation (e.g. a `WITH RECURSIVE`
+        // CTE that turned out not to self-reference): plan it through the same set-op
+        // machinery the top-level UNION/INTERSECT/EXCEPT path uses.
+        let result = crate::backend::optimizer::prep::prepunion::plan_set_operations(
+            sostmt,
+            &ctequery.targetList,
+        );
+        CtePlan {
+            name,
+            recursive: false,
+            wt_param: -1,
+            plan: result.plan,
+            rtable: result.rtable,
+            perminfos: result.perminfos,
+            col_types: result.col_types,
+        }
     } else {
         let mut body = (**ctequery).clone();
         let PlannedSubquery { plan, rtable, perminfos } = plan_subquery(&mut body, -1);
@@ -518,22 +546,448 @@ fn eq_op(typ: Oid) -> Oid {
 }
 
 /// PG `SS_finalize_plan`: compute the extParam/allParam sets for every node of a
-/// finished plan tree. Called by standard_planner only when Params were
-/// generated; M1 generates none, so this is reached only if a Param appears
-/// (then it grows). The pass-through over a const Result computes empty
-/// param sets. `plan` is the polymorphic top plan node.
-pub fn ss_finalize_plan(_root: &mut PlannerInfo, plan: &mut Node) {
-    // finalize_plan recurses the tree accumulating Param IDs. A childless const
-    // Result references no Params; its ext_param/all_param are empty.
-    let Node::Result(result) = plan else {
-        not_yet_reachable("SS_finalize_plan: non-Result top plan");
+/// finished plan tree. The port's single-level SubPlan execution does not consult
+/// extParam/allParam (each SubPlan run-state carries its own parParam/setParam), so
+/// this is a no-op that leaves the per-node Param sets unset. (When deeper
+/// initplan-attachment / multi-level finalize is needed, this grows.)
+pub fn ss_finalize_plan(_root: &mut PlannerInfo, _plan: &mut Node) {}
+
+// ===========================================================================
+//  SubLink -> SubPlan conversion (M12, step 44). PG: subselect.c
+//  SS_process_sublinks / make_subplan / build_subplan / SS_replace_correlation_vars
+//  / convert_testexpr. The port plans each sub-select as a self-contained subplan
+//  (its own rangetable, offset into glob->finalrtable) registered in glob->subplans,
+//  and replaces each SubLink in the outer qual/tlist with a PARAM_EXEC Param whose
+//  slot the SubPlan fills at run time.
+// ===========================================================================
+
+/// PG `SS_process_sublinks`: walk an expression, converting every SubLink it
+/// contains into a SubPlan (registered on `root.glob`) and returning the rewritten
+/// expression (the SubLink replaced by the SubPlan's output Param, or for a
+/// correlated SubPlan, a `Node::SubPlan` whose execution yields the boolean/scalar).
+pub fn ss_process_sublinks(root: &mut PlannerInfo, node: Node, _is_qual: bool) -> Node {
+    process_sublinks_mutator(root, node)
+}
+
+fn process_sublinks_mutator(root: &mut PlannerInfo, node: Node) -> Node {
+    match node {
+        Node::SubLink(sl) => make_subplan(root, *sl),
+        Node::BoolExpr(mut b) => {
+            b.args = b.args.into_iter().map(|a| process_sublinks_mutator(root, a)).collect();
+            Node::BoolExpr(b)
+        }
+        Node::OpExpr(mut o) => {
+            o.args = o.args.into_iter().map(|a| process_sublinks_mutator(root, a)).collect();
+            Node::OpExpr(o)
+        }
+        Node::NullIfExpr(mut o) => {
+            o.args = o.args.into_iter().map(|a| process_sublinks_mutator(root, a)).collect();
+            Node::NullIfExpr(o)
+        }
+        Node::FuncExpr(mut f) => {
+            f.args = f.args.into_iter().map(|a| process_sublinks_mutator(root, a)).collect();
+            Node::FuncExpr(f)
+        }
+        Node::DistinctExpr(mut o) => {
+            o.args = o.args.into_iter().map(|a| process_sublinks_mutator(root, a)).collect();
+            Node::DistinctExpr(o)
+        }
+        Node::RelabelType(mut r) => {
+            r.arg = r.arg.map(|a| process_sublinks_mutator(root, a));
+            Node::RelabelType(r)
+        }
+        Node::TargetEntry(mut t) => {
+            t.expr = t.expr.map(|e| process_sublinks_mutator(root, e));
+            Node::TargetEntry(t)
+        }
+        other => other,
+    }
+}
+
+/// PG `make_subplan` + `build_subplan` (the port's focused subset): plan the
+/// SubLink's analyzed sub-Query into a self-contained subplan, classify it as an
+/// uncorrelated InitPlan or a correlated SubPlan, allocate its output/correlation
+/// PARAM_EXEC slots, build the SubPlan node, register it on `root.glob`, and return
+/// the replacement expression for the outer tree.
+fn make_subplan(root: &mut PlannerInfo, sublink: SubLink) -> Node {
+    let SubLink { subLinkType, testexpr, subselect, .. } = sublink;
+    let Some(Node::Query(subquery)) = subselect else {
+        not_yet_reachable("make_subplan: sub-select was not analyzed into a Query");
     };
-    if result.plan.lefttree.is_some() {
-        not_yet_reachable("SS_finalize_plan: subplan recursion");
+    let mut subquery = *subquery;
+
+    // A sub-select that itself contains a SubLink would plan its own subplans onto a
+    // throwaway inner PlannerGlobal (inside plan_subquery), which is discarded here --
+    // the inner SubPlan's PARAM_EXEC output would stay NULL at run time (silently wrong
+    // rows). Reject loudly until nested-subplan attachment lands (a later milestone).
+    if subquery.hasSubLinks {
+        nested_sublink_error();
     }
-    if !result.plan.init_plan.is_empty() {
-        not_yet_reachable("SS_finalize_plan: initplans");
+
+    // Replace correlation Vars (varlevelsup > 0) in the sub-Query with PARAM_EXEC
+    // Params, collecting (paramid, outerVar) pairs into plan_params. After this the
+    // sub-Query references only its own (level-0) rangetable.
+    let mut plan_params: Vec<(i32, Node)> = Vec::new();
+    replace_correlation_vars_query(root, &mut subquery, &mut plan_params);
+
+    // Plan the (now self-contained) sub-Query. Its rtable is 1..k local; offset its
+    // scan RT indices into the OUTER query's rangetable (parse.rtable) and append its
+    // rtable there. set_plan_references later flattens parse.rtable (outer + subplan
+    // RTEs) into glob.finalrtable with rtoffset 0; the subplan plan trees are offset
+    // here so their scan nodes index those final positions directly.
+    let PlannedSubquery { mut plan, rtable, perminfos } = plan_subquery(&mut subquery, -1);
+    let rt_offset = i32::try_from(root.parse.rtable.len()).unwrap_or(0);
+    crate::backend::optimizer::prep::prepunion::offset_plan_rt_indices_pub(&mut plan, rt_offset);
+    root.parse.rtable.extend(rtable);
+    root.parse.rteperminfos.extend(perminfos);
+
+    // The first non-junk output column type (PG get_first_col_type).
+    let (first_col_type, first_col_typmod, first_col_collation) = first_col_type(&plan);
+
+    // Register the subplan; its plan_id is its 1-based index in glob.subplans.
+    root.glob.subplans.push(plan);
+    let plan_id = i32::try_from(root.glob.subplans.len()).unwrap_or(0);
+
+    let par_param: Vec<i32> = plan_params.iter().map(|(id, _)| *id).collect();
+    let args: Vec<Node> = plan_params.into_iter().map(|(_, v)| v).collect();
+    let is_correlated = !par_param.is_empty();
+
+    let mut splan = SubPlan {
+        subLinkType,
+        testexpr: None,
+        paramIds: Vec::new(),
+        plan_id,
+        plan_name: Some(format!(
+            "{} {}",
+            if is_correlated { "SubPlan" } else { "InitPlan" },
+            plan_id
+        )),
+        firstColType: first_col_type,
+        firstColTypmod: first_col_typmod,
+        firstColCollation: first_col_collation,
+        useHashTable: false,
+        unknownEqFalse: false,
+        parallel_safe: false,
+        setParam: Vec::new(),
+        parParam: par_param,
+        args,
+        startup_cost: 0.0,
+        per_call_cost: 0.0,
+    };
+
+    match subLinkType {
+        SubLinkType::EXISTS_SUBLINK if !is_correlated => {
+            // Uncorrelated EXISTS -> InitPlan: a single boolean output Param.
+            let prm = generate_new_exec_param(root, BOOLOID());
+            splan.setParam = vec![prm.paramid];
+            register_init_plan(root, splan);
+            Node::Param(Box::new(prm))
+        }
+        SubLinkType::EXPR_SUBLINK if !is_correlated => {
+            // Uncorrelated scalar -> InitPlan: one output Param of the column's type.
+            let prm = generate_new_exec_param(root, first_col_type);
+            splan.setParam = vec![prm.paramid];
+            register_init_plan(root, splan);
+            Node::Param(Box::new(prm))
+        }
+        SubLinkType::EXISTS_SUBLINK | SubLinkType::EXPR_SUBLINK => {
+            // Correlated EXISTS/EXPR -> SubPlan: a per-outer-row boolean/scalar output
+            // Param the SubPlan run-state fills. Mark setParam (its single output).
+            let out_type =
+                if subLinkType == SubLinkType::EXISTS_SUBLINK { BOOLOID() } else { first_col_type };
+            let prm = generate_new_exec_param(root, out_type);
+            splan.setParam = vec![prm.paramid];
+            root.glob.subplan_nodes.push(splan);
+            Node::Param(Box::new(prm))
+        }
+        SubLinkType::ANY_SUBLINK | SubLinkType::ALL_SUBLINK => {
+            // ANY/ALL: build the testexpr with PARAM_SUBLINK placeholders replaced by
+            // fresh PARAM_EXEC params (one per subquery output column = paramIds). The
+            // SubPlan combines the per-row testexpr results (3-valued OR/AND) into a
+            // single boolean output Param.
+            let testexpr = testexpr
+                .unwrap_or_else(|| not_yet_reachable("make_subplan: ANY/ALL without testexpr"));
+            let (testexpr, param_ids) = convert_testexpr(root, testexpr, &plan_output_types(get_subplan(root, plan_id)));
+            splan.testexpr = Some(testexpr);
+            splan.paramIds = param_ids;
+            // The combined boolean result goes in a fresh output Param.
+            let prm = generate_new_exec_param(root, BOOLOID());
+            splan.setParam = vec![prm.paramid];
+            root.glob.subplan_nodes.push(splan);
+            Node::Param(Box::new(prm))
+        }
+        other => not_yet_reachable(&format!("make_subplan: subLinkType {other:?}")),
     }
-    result.plan.ext_param = None;
-    result.plan.all_param = None;
+}
+
+/// Register a SubPlan as an InitPlan (uncorrelated, runs once). Stored on
+/// `root.glob` alongside the correlated SubPlans (the executor distinguishes them by
+/// `parParam` being empty).
+fn register_init_plan(root: &mut PlannerInfo, splan: SubPlan) {
+    root.glob.subplan_nodes.push(splan);
+}
+
+fn get_subplan(root: &PlannerInfo, plan_id: i32) -> &Node {
+    &root.glob.subplans[(plan_id - 1) as usize]
+}
+
+/// The first non-junk output column's (type, typmod, collation) (PG get_first_col_type).
+fn first_col_type(plan: &Node) -> (Oid, i32, Oid) {
+    for n in plan_tlist(plan) {
+        if let Node::TargetEntry(t) = n {
+            if t.resjunk {
+                continue;
+            }
+            if let Some(e) = t.expr.as_ref() {
+                use crate::backend::nodes::nodeFuncs::{exprCollation, exprType, exprTypmod};
+                return (exprType(e), exprTypmod(e), exprCollation(e));
+            }
+        }
+    }
+    (InvalidOid, -1, InvalidOid)
+}
+
+#[allow(non_snake_case)]
+fn BOOLOID() -> Oid {
+    crate::catalog::genbki::BOOLOID
+}
+
+/// PG `generate_new_exec_param`: allocate a fresh PARAM_EXEC slot of `paramtype`,
+/// returning a PARAM_EXEC Param referencing it. The slot index is the current length
+/// of glob.param_exec_types (and that vector is extended).
+fn generate_new_exec_param(root: &mut PlannerInfo, paramtype: Oid) -> Param {
+    let paramid = i32::try_from(root.glob.param_exec_types.len()).unwrap_or(0);
+    root.glob.param_exec_types.push(paramtype);
+    Param {
+        paramkind: ParamKind::EXEC,
+        paramid,
+        paramtype,
+        paramtypmod: -1,
+        paramcollid: InvalidOid,
+        location: -1,
+    }
+}
+
+/// PG `convert_testexpr`: replace the PARAM_SUBLINK placeholders (one per subquery
+/// output column, paramid = column resno) in `testexpr` with fresh PARAM_EXEC params
+/// (the SubPlan loads the subquery's current-row column values into these before
+/// evaluating the testexpr). Returns the rewritten testexpr + the new param ids.
+fn convert_testexpr(root: &mut PlannerInfo, testexpr: Node, col_types: &[Oid]) -> (Node, Vec<i32>) {
+    // Allocate one PARAM_EXEC per output column (resno 1..n).
+    let params: Vec<Param> = col_types
+        .iter()
+        .map(|&t| generate_new_exec_param(root, t))
+        .collect();
+    let param_ids = params.iter().map(|p| p.paramid).collect();
+    (convert_testexpr_mutator(testexpr, &params), param_ids)
+}
+
+fn convert_testexpr_mutator(node: Node, params: &[Param]) -> Node {
+    match node {
+        Node::Param(p) if p.paramkind == ParamKind::SUBLINK => {
+            // paramid is the subquery column resno (1-based).
+            let idx = (p.paramid - 1) as usize;
+            let np = params
+                .get(idx)
+                .unwrap_or_else(|| not_yet_reachable("convert_testexpr: PARAM_SUBLINK id out of range"));
+            Node::Param(Box::new(np.clone()))
+        }
+        Node::OpExpr(mut o) => {
+            o.args = o.args.into_iter().map(|a| convert_testexpr_mutator(a, params)).collect();
+            Node::OpExpr(o)
+        }
+        Node::BoolExpr(mut b) => {
+            b.args = b.args.into_iter().map(|a| convert_testexpr_mutator(a, params)).collect();
+            Node::BoolExpr(b)
+        }
+        Node::FuncExpr(mut f) => {
+            f.args = f.args.into_iter().map(|a| convert_testexpr_mutator(a, params)).collect();
+            Node::FuncExpr(f)
+        }
+        Node::RelabelType(mut r) => {
+            r.arg = r.arg.map(|a| convert_testexpr_mutator(a, params));
+            Node::RelabelType(r)
+        }
+        // A nested SubLink in the testexpr is left as-is (its own PARAM_SUBLINKs).
+        other => other,
+    }
+}
+
+/// PG `SS_replace_correlation_vars` (over a sub-Query): replace every Var with
+/// `varlevelsup > 0` (a reference to an outer query level) with a PARAM_EXEC Param,
+/// collecting (paramid, level-0 outer Var) into `plan_params`. The outer Var (with
+/// varlevelsup decremented to 0) becomes the SubPlan's arg, evaluated in the parent.
+fn replace_correlation_vars_query(
+    root: &mut PlannerInfo,
+    query: &mut Query,
+    plan_params: &mut Vec<(i32, Node)>,
+) {
+    // Target list.
+    let tlist = std::mem::take(&mut query.targetList);
+    query.targetList = tlist
+        .into_iter()
+        .map(|n| replace_correlation_vars(root, n, plan_params))
+        .collect();
+    // WHERE qual (jointree).
+    if let Some(Node::FromExpr(mut f)) = query.jointree.take() {
+        f.quals = f.quals.map(|q| replace_correlation_vars(root, q, plan_params));
+        query.jointree = Some(Node::FromExpr(f));
+    }
+
+    // PG replaces correlation Vars in havingQual / group / sort exprs too. Those
+    // clauses are not yet rewritten here, so a correlation Var in HAVING/GROUP BY/
+    // ORDER BY of the sub-select would be left un-Param'd: parParam stays empty and
+    // the subplan is misclassified as a run-once InitPlan (stale for every outer row,
+    // silently wrong). Reject loudly until those clauses are rewritten too.
+    let mut has_uplevel = false;
+    if let Some(h) = query.havingQual.as_ref() {
+        contains_uplevel_var(h, &mut has_uplevel);
+    }
+    for n in query.groupClause.iter().chain(query.sortClause.iter()) {
+        contains_uplevel_var(n, &mut has_uplevel);
+    }
+    if has_uplevel {
+        correlated_having_error();
+    }
+}
+
+/// Set `found` if `node` contains a Var with `varlevelsup > 0` (a correlation
+/// reference to an outer query level).
+fn contains_uplevel_var(node: &Node, found: &mut bool) {
+    if *found {
+        return;
+    }
+    match node {
+        Node::Var(v) if v.varlevelsup > 0 => *found = true,
+        Node::TargetEntry(t) => {
+            if let Some(e) = t.expr.as_ref() {
+                contains_uplevel_var(e, found);
+            }
+        }
+        Node::OpExpr(o) | Node::DistinctExpr(o) | Node::NullIfExpr(o) => {
+            for a in &o.args {
+                contains_uplevel_var(a, found);
+            }
+        }
+        Node::BoolExpr(b) => {
+            for a in &b.args {
+                contains_uplevel_var(a, found);
+            }
+        }
+        Node::FuncExpr(f) => {
+            for a in &f.args {
+                contains_uplevel_var(a, found);
+            }
+        }
+        Node::Aggref(a) => {
+            for n in &a.args {
+                contains_uplevel_var(n, found);
+            }
+        }
+        Node::RelabelType(r) => {
+            if let Some(a) = r.arg.as_ref() {
+                contains_uplevel_var(a, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A correlation reference in the HAVING/GROUP BY/ORDER BY of a sub-select is not
+/// yet supported (it would be misclassified as an uncorrelated InitPlan -> stale
+/// result); raise a catchable error.
+#[cold]
+fn correlated_having_error() -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED).errmsg(
+            "correlated reference in HAVING/GROUP BY/ORDER BY of a sub-select is not yet supported"
+                .to_owned(),
+        );
+    });
+    unreachable!("ereport(ERROR) diverges");
+}
+
+fn replace_correlation_vars(
+    root: &mut PlannerInfo,
+    node: Node,
+    plan_params: &mut Vec<(i32, Node)>,
+) -> Node {
+    match node {
+        Node::Var(v) if v.varlevelsup > 0 => {
+            // Decrement the level so the arg is evaluated in the parent (level 0).
+            let mut outer = (*v).clone();
+            outer.varlevelsup -= 1;
+            let paramid = assign_param_for_var(root, &outer, plan_params);
+            Node::Param(Box::new(Param {
+                paramkind: ParamKind::EXEC,
+                paramid,
+                paramtype: v.vartype,
+                paramtypmod: v.vartypmod,
+                paramcollid: v.varcollid,
+                location: v.location,
+            }))
+        }
+        Node::Var(v) => Node::Var(v),
+        Node::TargetEntry(mut t) => {
+            t.expr = t.expr.map(|e| replace_correlation_vars(root, e, plan_params));
+            Node::TargetEntry(t)
+        }
+        Node::OpExpr(mut o) => {
+            o.args = o.args.into_iter().map(|a| replace_correlation_vars(root, a, plan_params)).collect();
+            Node::OpExpr(o)
+        }
+        Node::NullIfExpr(mut o) => {
+            o.args = o.args.into_iter().map(|a| replace_correlation_vars(root, a, plan_params)).collect();
+            Node::NullIfExpr(o)
+        }
+        Node::BoolExpr(mut b) => {
+            b.args = b.args.into_iter().map(|a| replace_correlation_vars(root, a, plan_params)).collect();
+            Node::BoolExpr(b)
+        }
+        Node::FuncExpr(mut f) => {
+            f.args = f.args.into_iter().map(|a| replace_correlation_vars(root, a, plan_params)).collect();
+            Node::FuncExpr(f)
+        }
+        Node::DistinctExpr(mut o) => {
+            o.args = o.args.into_iter().map(|a| replace_correlation_vars(root, a, plan_params)).collect();
+            Node::DistinctExpr(o)
+        }
+        Node::RelabelType(mut r) => {
+            r.arg = r.arg.map(|a| replace_correlation_vars(root, a, plan_params));
+            Node::RelabelType(r)
+        }
+        Node::Aggref(mut a) => {
+            a.args = a.args.into_iter().map(|n| replace_correlation_vars(root, n, plan_params)).collect();
+            Node::Aggref(a)
+        }
+        Node::FromExpr(mut f) => {
+            f.fromlist = f.fromlist.into_iter().map(|n| replace_correlation_vars(root, n, plan_params)).collect();
+            f.quals = f.quals.map(|q| replace_correlation_vars(root, q, plan_params));
+            Node::FromExpr(f)
+        }
+        other => other,
+    }
+}
+
+/// PG `assign_param_for_var`: find or create the PARAM_EXEC slot for an outer Var,
+/// returning its paramid. Dedups on (varno, varattno, vartype) so the same outer
+/// column shared by multiple correlation references reuses one slot/arg.
+fn assign_param_for_var(
+    root: &mut PlannerInfo,
+    var: &crate::nodes::primnodes::Var,
+    plan_params: &mut Vec<(i32, Node)>,
+) -> i32 {
+    for (id, item) in plan_params.iter() {
+        if let Node::Var(v) = item
+            && v.varno == var.varno
+            && v.varattno == var.varattno
+            && v.vartype == var.vartype
+        {
+            return *id;
+        }
+    }
+    let paramid = i32::try_from(root.glob.param_exec_types.len()).unwrap_or(0);
+    root.glob.param_exec_types.push(var.vartype);
+    plan_params.push((paramid, Node::Var(Box::new(var.clone()))));
+    paramid
 }

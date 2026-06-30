@@ -740,6 +740,75 @@ fn merge_child_pstate_flags(pstate: &mut ParseState, child: &ParseState) {
     pstate.p_has_modifying_cte |= child.p_has_modifying_cte;
 }
 
+// ===========================================================================
+//  Sub-SELECT pre-analysis (M12, step 44).
+//
+//  PG analyzes a SubLink's sub-select inside the synchronous transformSubLink
+//  (parse_sub_analyze). The port's expression transform is synchronous but a
+//  sub-select's FROM clause must open relations asynchronously, so we run a
+//  separate ASYNC pass over the raw target/WHERE expressions BEFORE the sync
+//  transform: it finds every raw SubLink, analyzes its sub-select with a
+//  correlated child ParseState (parent = the current pstate, whose FROM/namespace
+//  is already in place), and replaces the SubLink's raw `subselect` with the
+//  analyzed Query. The later sync transformSubLink only validates + builds the
+//  testexpr from that Query.
+// ===========================================================================
+
+/// Recursively analyze every SubLink sub-select reachable from the raw `exprs`,
+/// replacing each `SubLink.subselect` with its analyzed Query. Runs after the FROM
+/// clause so correlation references resolve to uplevel Vars.
+async fn pre_analyze_sublinks(shared: &Arc<SharedState>, pstate: &mut ParseState, exprs: &mut [Node]) {
+    for e in exprs.iter_mut() {
+        Box::pin(pre_analyze_sublinks_node(shared, pstate, e)).await;
+    }
+}
+
+async fn pre_analyze_sublinks_node(shared: &Arc<SharedState>, pstate: &mut ParseState, node: &mut Node) {
+    match node {
+        Node::SubLink(sl) => {
+            // First, recurse into the left-hand expression (ANY/ALL testexpr) -- it may
+            // itself contain nested sublinks.
+            if let Some(lhs) = sl.testexpr.as_mut() {
+                Box::pin(pre_analyze_sublinks_node(shared, pstate, lhs)).await;
+            }
+            // Analyze the sub-select with a correlated child ParseState.
+            let Some(Node::SelectStmt(stmt)) = sl.subselect.as_ref() else {
+                // Already analyzed (a Query) or absent: nothing to do.
+                return;
+            };
+            let stmt = (**stmt).clone();
+            let mut child =
+                crate::backend::parser::parse_node::make_correlated_child_parsestate(pstate);
+            let qtree = Box::pin(transform_select_stmt_async(shared, &mut child, &stmt)).await;
+            // A correlated sub-select makes the OUTER query reference sub-links too.
+            pstate.p_has_sub_links = true;
+            sl.subselect = Some(Node::Query(qtree));
+        }
+        Node::A_Expr(a) => {
+            if let Some(l) = a.lexpr.as_mut() {
+                Box::pin(pre_analyze_sublinks_node(shared, pstate, l)).await;
+            }
+            if let Some(r) = a.rexpr.as_mut() {
+                Box::pin(pre_analyze_sublinks_node(shared, pstate, r)).await;
+            }
+        }
+        Node::BoolExpr(b) => {
+            pre_analyze_sublinks(shared, pstate, &mut b.args).await;
+        }
+        Node::FuncCall(f) => {
+            pre_analyze_sublinks(shared, pstate, &mut f.args).await;
+        }
+        Node::ResTarget(rt) => {
+            if let Some(v) = rt.val.as_mut() {
+                Box::pin(pre_analyze_sublinks_node(shared, pstate, v)).await;
+            }
+        }
+        // Other raw node kinds (consts, column refs, params) carry no sub-selects to
+        // pre-analyze; their own transform handles them.
+        _ => {}
+    }
+}
+
 /// Set the reconciled `colTypes` on every SetOperationStmt node in the tree.
 fn stamp_set_op_coltypes(so: &mut crate::nodes::parsenodes::SetOperationStmt, col_types: &[Oid]) {
     so.colTypes = col_types.to_vec();
@@ -859,13 +928,23 @@ async fn transform_select_stmt_async(
     // pstate->p_windowdefs = stmt->windowClause up front).
     pstate.p_windowdefs.clone_from(&stmt.windowClause);
 
+    // M12 (step 44): async pre-analyze any SubLinks in the target list / WHERE before
+    // the sync transform. Each SubLink's raw sub-select becomes an analyzed Query
+    // (correlation references resolve against the now-populated outer namespace).
+    let mut target_list = stmt.targetList.clone();
+    pre_analyze_sublinks(shared, pstate, &mut target_list).await;
+    let mut where_clause = where_clause;
+    if let Some(w) = where_clause.as_mut() {
+        pre_analyze_sublinks_node(shared, pstate, w).await;
+    }
+
     // Transform the target list (now that the namespace is populated, `*` and
     // column refs resolve). Aggregate calls in the target list resolve to Aggref
     // nodes here (transformAggregateCall, which sets pstate.p_has_aggs); window
     // calls resolve to WindowFunc nodes (transformWindowFuncCall, which appends any
     // inline OVER definition to pstate.p_windowdefs and sets p_has_window_funcs).
     qry.targetList =
-        transformTargetList(pstate, stmt.targetList.clone(), ParseExprKind::SelectTarget);
+        transformTargetList(pstate, target_list, ParseExprKind::SelectTarget);
 
     // Transform the WHERE clause (coerced to boolean) into the jointree qual. This
     // is the WHERE plus any flattened INNER-join ON/USING quals (see above).

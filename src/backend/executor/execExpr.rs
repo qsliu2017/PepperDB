@@ -791,8 +791,12 @@ fn expr_typlen(expr: &Node) -> i32 {
     let typlen = |oid: Oid| i32::from(crate::backend::utils::cache::lsyscache::get_typlenbyval(oid).0);
     match expr {
         Node::Const(con) => con.constlen,
-        Node::OpExpr(op) | Node::NullIfExpr(op) => typlen(op.opresulttype),
+        Node::Var(v) => typlen(v.vartype),
+        Node::Param(p) => typlen(p.paramtype),
+        Node::OpExpr(op) | Node::NullIfExpr(op) | Node::DistinctExpr(op) => typlen(op.opresulttype),
         Node::FuncExpr(f) => typlen(f.funcresulttype),
+        Node::Aggref(a) => typlen(a.aggtype),
+        Node::BoolExpr(_) => typlen(crate::catalog::genbki::BOOLOID),
         Node::RelabelType(r) => typlen(r.resulttype),
         Node::CoerceViaIO(c) => typlen(c.resulttype),
         Node::CaseExpr(c) => typlen(c.casetype),

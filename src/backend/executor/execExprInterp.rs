@@ -538,7 +538,7 @@ fn eval_param_exec(
         .ecxt_param_exec_vals
         .as_ref()
         .unwrap_or_else(|| unimplemented!("PARAM_EXEC with no ecxt_param_exec_vals"));
-    let prm = &prms[p.paramid as usize];
+    let prm = prms.lock()[p.paramid as usize].clone();
     if prm.exec_plan != 0 {
         unimplemented!("PARAM_EXEC lazy subplan evaluation (ExecSetParamPlan) not yet reachable");
     }
@@ -1025,7 +1025,10 @@ mod tests {
 
     /// An ExprContext carrying the given executor-param array.
     fn econtext_with_exec(vals: Vec<ParamExecData>) -> ExprContext {
-        ExprContext { ecxt_param_exec_vals: Some(vals), ..ExprContext::default() }
+        ExprContext {
+            ecxt_param_exec_vals: Some(std::sync::Arc::new(parking_lot::Mutex::new(vals))),
+            ..ExprContext::default()
+        }
     }
 
     /// PARAM_EXTERN: `$1 + 1` with a ParamListInfo {$1 = 41} evaluates to 42.

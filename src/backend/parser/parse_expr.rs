@@ -65,8 +65,12 @@ fn transform_expr_recurse(pstate: &mut ParseState, expr: Option<Node>) -> Option
         Node::CoalesceExpr(c) => Some(transform_coalesce_expr(pstate, *c)),
         Node::MinMaxExpr(m) => Some(transform_min_max_expr(pstate, *m)),
         Node::ParamRef(pref) => Some(transform_param_ref(pstate, *pref)),
-        // SubLink / ... arms are filled by later milestones; for now they route
-        // here cleanly.
+        // M12 (step 44): a sub-SELECT expression (EXISTS / IN / ANY / ALL / scalar).
+        // The raw sub-select was analyzed into a Query by the async pre-analyze pass
+        // (see analyze::pre_analyze_sublinks) so this sync transform only validates +
+        // builds the testexpr.
+        Node::SubLink(sl) => Some(transformSubLink(pstate, *sl)),
+        // ... arms are filled by later milestones; for now they route here cleanly.
         other => not_yet_reachable(&other),
     }
 }
@@ -366,6 +370,104 @@ fn not_yet_reachable_msg(msg: &str) -> ! {
     unimplemented!("{msg}");
 }
 
+/// PG `transformSubLink`: finish analyzing a sub-SELECT expression. The raw
+/// sub-select was already analyzed into a `Query` by the async pre-analyze pass
+/// (`analyze::pre_analyze_sublinks`), which runs after the FROM clause is in place
+/// so correlation (outer) column references resolve to uplevel Vars. Here we set
+/// `p_has_sub_links`, validate the column count, and (for ANY/ALL/ROWCOMPARE) build
+/// the row-comparison testexpr using PARAM_SUBLINK placeholders for the subquery's
+/// output columns. EXISTS/EXPR carry no testexpr.
+#[allow(non_snake_case)]
+pub fn transformSubLink(pstate: &mut ParseState, mut sublink: crate::nodes::primnodes::SubLink) -> Node {
+    use crate::nodes::nodeFuncs::{exprCollation, exprType, exprTypmod};
+    use crate::nodes::primnodes::{Param, ParamKind, SubLinkType};
+
+    pstate.p_has_sub_links = true;
+
+    let Some(Node::Query(qtree)) = sublink.subselect.as_ref() else {
+        not_yet_reachable_msg("transformSubLink: sub-select was not pre-analyzed into a Query");
+    };
+    if qtree.commandType != crate::nodes::nodes::CmdType::SELECT {
+        not_yet_reachable_msg("transformSubLink: non-SELECT command in SubLink");
+    }
+
+    // The non-junk output columns of the subquery's target list.
+    let nonjunk: Vec<&crate::nodes::primnodes::TargetEntry> = qtree
+        .targetList
+        .iter()
+        .filter_map(|n| match n {
+            Node::TargetEntry(te) if !te.resjunk => Some(&**te),
+            _ => None,
+        })
+        .collect();
+
+    match sublink.subLinkType {
+        SubLinkType::EXISTS_SUBLINK => {
+            sublink.testexpr = None;
+            sublink.operName = Vec::new();
+        }
+        SubLinkType::EXPR_SUBLINK => {
+            if nonjunk.len() != 1 {
+                subquery_one_column_error(pstate, sublink.location);
+            }
+            sublink.testexpr = None;
+            sublink.operName = Vec::new();
+        }
+        SubLinkType::ANY_SUBLINK | SubLinkType::ALL_SUBLINK => {
+            // The parser stored the raw left-hand expression in `testexpr`; transform
+            // it now (it is no longer top-level). For our single-column support the
+            // lhs is a scalar expression.
+            let lefthand = transform_expr_recurse(pstate, sublink.testexpr.take());
+            let lefthand = lefthand.unwrap_or_else(|| {
+                not_yet_reachable_msg("transformSubLink: ANY/ALL with no left-hand expression")
+            });
+
+            // Build a PARAM_SUBLINK Param per non-junk output column. Single-column
+            // only here (multi-column row comparison grows with RowExpr).
+            if nonjunk.len() != 1 {
+                subquery_one_column_error(pstate, sublink.location);
+            }
+            let tent = nonjunk[0];
+            let texpr = tent.expr.as_ref().unwrap_or_else(|| {
+                not_yet_reachable_msg("transformSubLink: subquery target has no expression")
+            });
+            let param = Node::Param(Box::new(Param {
+                paramkind: ParamKind::SUBLINK,
+                paramid: i32::from(tent.resno),
+                paramtype: exprType(texpr),
+                paramtypmod: exprTypmod(texpr),
+                paramcollid: exprCollation(texpr),
+                location: -1,
+            }));
+
+            // make_row_comparison_op single-column case: `lefthand <op> PARAM_SUBLINK`.
+            let testexpr = crate::backend::parser::parse_oper::make_op(
+                pstate,
+                &sublink.operName,
+                Some(lefthand),
+                Some(param),
+                pstate.p_last_srf.clone().as_ref(),
+                sublink.location,
+            );
+            sublink.testexpr = Some(testexpr);
+        }
+        other => {
+            not_yet_reachable_msg(&format!("transformSubLink: subLinkType {other:?} not yet reachable"));
+        }
+    }
+
+    Node::SubLink(Box::new(sublink))
+}
+
+#[cold]
+fn subquery_one_column_error(_pstate: &ParseState, _location: i32) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_SYNTAX_ERROR)
+            .errmsg("subquery must return only one column".to_owned());
+    });
+    unreachable!("ereport(ERROR) diverges");
+}
+
 /// PG `transformParamRef`: the core parser knows nothing about Params; if a
 /// paramref hook is set, call it. If not, or it returns NULL, raise "there is no
 /// parameter $n". (The hooks are installed by parse_param's setup functions.)
@@ -399,10 +501,21 @@ fn transform_column_ref(pstate: &mut ParseState, cref: &ColumnRef) -> Node {
         [ColumnRefField::String(field1), ColumnRefField::String(field2)] => {
             let relname = &field1.sval;
             let colname = &field2.sval;
-            let idx = refname_namespace_item(pstate, relname)
-                .unwrap_or_else(|| missing_from_entry(relname));
-            scan_ns_item_for_column(&pstate.p_namespace[idx], 0, colname, cref.location)
-                .unwrap_or_else(|| undefined_column(colname))
+            // PG `transformColumnRef`: a table-qualified column searches the current
+            // level first, then walks up the parent ParseStates (a correlated
+            // sub-select reference), incrementing sublevels_up so the Var carries the
+            // right varlevelsup (M12, step 44).
+            let mut levels_up: crate::c::Index = 0;
+            let mut cur: Option<&ParseState> = Some(pstate);
+            while let Some(ps) = cur {
+                if let Some(idx) = refname_namespace_item(ps, relname) {
+                    return scan_ns_item_for_column(&ps.p_namespace[idx], levels_up, colname, cref.location)
+                        .unwrap_or_else(|| undefined_column(colname));
+                }
+                cur = ps.parent_parse_state.as_deref();
+                levels_up += 1;
+            }
+            missing_from_entry(relname)
         }
         [.., ColumnRefField::Star(_)] => {
             unimplemented!("transformColumnRef: whole-row (table.*) reference not yet translated for this milestone");

@@ -41,6 +41,7 @@ pub mod nodeResult;
 pub mod nodeSeqscan;
 pub mod nodeSetOp;
 pub mod nodeSort;
+pub mod nodeSubplan;
 pub mod nodeTidscan;
 pub mod nodeUnique;
 pub mod nodeWindowAgg;

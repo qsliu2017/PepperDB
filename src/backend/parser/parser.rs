@@ -135,6 +135,92 @@ pub fn make_param_ref(number: i32, location: i32) -> Node {
     Node::ParamRef(Box::new(crate::nodes::parsenodes::ParamRef { number, location }))
 }
 
+/// gram.y `c_expr: select_with_parens` (a scalar sub-SELECT used as an expression):
+/// a SubLink of type EXPR_SUBLINK with no testexpr/operName.
+pub fn make_expr_sublink(subselect: Node) -> Node {
+    make_sublink(crate::nodes::primnodes::SubLinkType::EXPR_SUBLINK, None, Vec::new(), subselect)
+}
+
+/// gram.y `a_expr: EXISTS select_with_parens`: a SubLink of type EXISTS_SUBLINK.
+pub fn make_exists_sublink(subselect: Node) -> Node {
+    make_sublink(crate::nodes::primnodes::SubLinkType::EXISTS_SUBLINK, None, Vec::new(), subselect)
+}
+
+/// gram.y `a_expr IN_P in_expr` where in_expr is `select_with_parens`: `x IN (sub)`
+/// becomes `x = ANY (sub)` (ANY_SUBLINK, operName "="), and `x NOT IN (sub)` becomes
+/// `NOT (x = ANY (sub))`.
+pub fn make_in_sublink(lexpr: Node, subselect: Node, negate: bool) -> Node {
+    let sl = make_sublink(
+        crate::nodes::primnodes::SubLinkType::ANY_SUBLINK,
+        Some(lexpr),
+        vec![makeString("=".to_string())],
+        subselect,
+    );
+    if negate {
+        make_not_expr(sl)
+    } else {
+        sl
+    }
+}
+
+/// gram.y `a_expr subquery_Op sub_type select_with_parens`: `x op ANY/SOME (sub)`
+/// (ANY_SUBLINK) or `x op ALL (sub)` (ALL_SUBLINK), with the comparison operator name.
+pub fn make_any_all_sublink(
+    lexpr: Node,
+    op: &str,
+    any: bool,
+    subselect: Node,
+) -> Node {
+    let kind = if any {
+        crate::nodes::primnodes::SubLinkType::ANY_SUBLINK
+    } else {
+        crate::nodes::primnodes::SubLinkType::ALL_SUBLINK
+    };
+    make_sublink(kind, Some(lexpr), vec![makeString(op.to_string())], subselect)
+}
+
+/// Build a SubLink node. `testexpr` is the left-hand expression for ANY/ALL (the
+/// parser stores the raw lhs here; transformSubLink builds the row-comparison
+/// testexpr later). `operName` is the combining operator name list.
+fn make_sublink(
+    sub_link_type: crate::nodes::primnodes::SubLinkType,
+    testexpr: Option<Node>,
+    oper_name: Vec<crate::nodes::value::String_>,
+    subselect: Node,
+) -> Node {
+    let oper_name = oper_name.into_iter().map(Node::String_).collect();
+    Node::SubLink(Box::new(crate::nodes::primnodes::SubLink {
+        subLinkType: sub_link_type,
+        subLinkId: 0,
+        testexpr,
+        operName: oper_name,
+        subselect: Some(subselect),
+        location: -1,
+    }))
+}
+
+/// gram.y `a_expr IN_P '(' expr_list ')'`: the non-subquery IN-list. `x IN (a,b,c)`
+/// expands to `x = a OR x = b OR x = c`; `x NOT IN (...)` to the AND of `<>`. (PG's
+/// transformAExprIn builds a ScalarArrayOpExpr when the elements are all the same
+/// type, else this OR/AND chain; the OR/AND chain is always correct.)
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "lexpr is duplicated (cloned) into each comparison of the expanded OR/AND chain"
+)]
+pub fn make_in_list(lexpr: Node, exprs: Vec<Node>, negate: bool) -> Node {
+    let (cmp, combine_or) = if negate { ("<>", false) } else { ("=", true) };
+    let mut acc: Option<Node> = None;
+    for r in exprs {
+        let cmp_expr = make_a_expr(cmp, lexpr.clone(), r);
+        acc = Some(match acc {
+            None => cmp_expr,
+            Some(prev) if combine_or => make_or_expr(prev, cmp_expr),
+            Some(prev) => make_and_expr(prev, cmp_expr),
+        });
+    }
+    acc.unwrap_or_else(make_null_const)
+}
+
 /// gram.y `PrepareStmt: PREPARE name prep_type_clause AS PreparableStmt`. The
 /// argtype Typenames are each wrapped as a `Node::TypeName` (the parse-list element
 /// currency); the query is the preparable statement node.

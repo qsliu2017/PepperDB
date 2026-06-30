@@ -151,9 +151,71 @@ fn fire_rir_rules(mut parsetree: Query, active_rirs: &mut Vec<crate::postgres_ex
     }
 
     if parsetree.hasSubLinks {
-        not_yet_reachable("fireRIRrules: sublink RIR recursion");
+        // PG `fireRIRonSubLink`: recurse RIR-rule application into every SubLink's
+        // sub-Query (so views referenced inside a sub-select are expanded too). Walk
+        // the target list + jointree quals (where SubLinks live after analysis).
+        let mut tlist = std::mem::take(&mut parsetree.targetList);
+        for n in &mut tlist {
+            fire_rir_on_sublinks_node(n, active_rirs);
+        }
+        parsetree.targetList = tlist;
+        let jointree = parsetree.jointree.take();
+        if let Some(Node::FromExpr(mut f)) = jointree {
+            if let Some(q) = f.quals.as_mut() {
+                fire_rir_on_sublinks_node(q, active_rirs);
+            }
+            parsetree.jointree = Some(Node::FromExpr(f));
+        } else {
+            parsetree.jointree = jointree;
+        }
     }
     parsetree
+}
+
+/// PG `fireRIRonSubLink` (the recursion part): descend an expression, and for each
+/// SubLink, apply RIR rules to its sub-Query. Other node kinds recurse into their
+/// children. Base-table sub-selects are unaffected (no view -> no rule).
+fn fire_rir_on_sublinks_node(
+    node: &mut crate::nodes::nodes::Node,
+    active_rirs: &mut Vec<crate::postgres_ext::Oid>,
+) {
+    use crate::nodes::nodes::Node;
+    match node {
+        Node::SubLink(sl) => {
+            if let Some(lhs) = sl.testexpr.as_mut() {
+                fire_rir_on_sublinks_node(lhs, active_rirs);
+            }
+            if let Some(Node::Query(q)) = sl.subselect.take() {
+                sl.subselect = Some(Node::Query(Box::new(fire_rir_rules(*q, active_rirs))));
+            }
+        }
+        Node::TargetEntry(t) => {
+            if let Some(e) = t.expr.as_mut() {
+                fire_rir_on_sublinks_node(e, active_rirs);
+            }
+        }
+        Node::BoolExpr(b) => {
+            for a in &mut b.args {
+                fire_rir_on_sublinks_node(a, active_rirs);
+            }
+        }
+        Node::OpExpr(o) | Node::DistinctExpr(o) | Node::NullIfExpr(o) => {
+            for a in &mut o.args {
+                fire_rir_on_sublinks_node(a, active_rirs);
+            }
+        }
+        Node::FuncExpr(f) => {
+            for a in &mut f.args {
+                fire_rir_on_sublinks_node(a, active_rirs);
+            }
+        }
+        Node::RelabelType(r) => {
+            if let Some(a) = r.arg.as_mut() {
+                fire_rir_on_sublinks_node(a, active_rirs);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The view query stored as relation `relid`'s ON SELECT `_RETURN` rule action, or

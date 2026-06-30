@@ -335,29 +335,43 @@ pub fn add_ns_item_to_query(
 }
 
 /// PG `colNameToVar`: resolve an unqualified column name against the namespace,
-/// building a `Var`. M2 searches only the current level's namespace (no parent
-/// levels; `localonly` is effectively always true here).
+/// building a `Var`. Searches the current level's namespace first; if `localonly`
+/// is false and no match is found, walks up the parent ParseStates (a correlated
+/// sub-select reference), incrementing `sublevels_up` so the resulting Var carries
+/// the right `varlevelsup` (M12, step 44).
 pub fn col_name_to_var(
     pstate: &mut ParseState,
     colname: &str,
-    _localonly: bool,
+    localonly: bool,
     location: i32,
 ) -> Option<Node> {
-    let mut result: Option<Node> = None;
-    // Snapshot the visible nsitems (borrow ends before building the Var).
-    for idx in 0..pstate.p_namespace.len() {
-        if !pstate.p_namespace[idx].cols_visible {
-            continue;
-        }
-        let found = scan_ns_item_for_column(&pstate.p_namespace[idx], 0, colname, location);
-        if let Some(var) = found {
-            if result.is_some() {
-                ambiguous_column(colname);
+    let mut levels_up: crate::c::Index = 0;
+    let mut cur: Option<&ParseState> = Some(pstate);
+    while let Some(ps) = cur {
+        let mut result: Option<Node> = None;
+        for nsitem in &ps.p_namespace {
+            // Ignore columns that aren't visible at the current query level, and
+            // those whose RTE is laterally-restricted at this point.
+            if !nsitem.cols_visible || (nsitem.lateral_only && !ps.p_lateral_active) {
+                continue;
             }
-            result = Some(var);
+            if let Some(var) = scan_ns_item_for_column(nsitem, levels_up, colname, location) {
+                if result.is_some() {
+                    ambiguous_column(colname);
+                }
+                result = Some(var);
+            }
         }
+        if result.is_some() {
+            return result;
+        }
+        if localonly {
+            break;
+        }
+        cur = ps.parent_parse_state.as_deref();
+        levels_up += 1;
     }
-    result
+    None
 }
 
 /// PG `scanNSItemForColumn`: match `colname` in the nsitem and, on a hit, build the

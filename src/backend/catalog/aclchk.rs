@@ -538,6 +538,7 @@ mod tests {
             result_relations: Vec::new(),
             append_relations: Vec::new(),
             subplans: Vec::new(),
+            subplan_nodes: Vec::new(),
             rewind_plan_ids: None,
             row_marks: Vec::new(),
             relation_oids: Vec::new(),

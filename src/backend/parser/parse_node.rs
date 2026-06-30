@@ -79,6 +79,30 @@ pub fn make_child_parsestate(parent: &ParseState) -> Box<ParseState> {
     })
 }
 
+/// A namespace-only snapshot of a ParseState, used as the `parent_parse_state` link
+/// of a correlated sub-select's child ParseState (M12, step 44). Carries the donor's
+/// visible namespace (so `colNameToVar` resolves an outer column to an uplevel Var)
+/// and chains to the donor's own parent snapshot, but holds none of the donor's
+/// mutable per-query workspace. PG keeps a live `parentParseState` pointer; the port
+/// snapshots the parts correlation reads (the namespace is already final once the
+/// FROM clause is in place, when the pre-analyze pass runs).
+fn snapshot_parent_parsestate(donor: &ParseState) -> Box<ParseState> {
+    let mut snap = make_child_parsestate(donor);
+    snap.p_namespace.clone_from(&donor.p_namespace);
+    snap.p_lateral_active = donor.p_lateral_active;
+    snap.parent_parse_state = donor.parent_parse_state.as_deref().map(snapshot_parent_parsestate);
+    snap
+}
+
+/// Build a child ParseState for a correlated sub-select: like `make_child_parsestate`
+/// but with `parent_parse_state` set to a namespace snapshot of `parent`, so the
+/// sub-select's column references can resolve to uplevel (correlation) Vars.
+pub fn make_correlated_child_parsestate(parent: &ParseState) -> Box<ParseState> {
+    let mut child = make_child_parsestate(parent);
+    child.parent_parse_state = Some(snapshot_parent_parsestate(parent));
+    child
+}
+
 pub fn make_parsestate(parent_parse_state: Option<Box<ParseState>>) -> Box<ParseState> {
     // Inherited-from-parent fields (copied before the parent is moved into the
     // stack link). All None/default at top level. The query environment is shared

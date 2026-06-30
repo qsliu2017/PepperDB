@@ -47,6 +47,10 @@ pub struct PlannedStmt {
     pub result_relations: Vec<i32>,
     pub append_relations: Vec<Node>,
     pub subplans: Vec<Node>,
+    /// The SubPlan expression nodes (testexpr/setParam/parParam/args), parallel to
+    /// `subplans` by plan_id. The executor builds a SubPlan run-state for each so the
+    /// referencing PARAM_EXEC reads its result (M12, step 44).
+    pub subplan_nodes: Vec<crate::nodes::primnodes::SubPlan>,
     pub rewind_plan_ids: Option<Bitmapset>,
     pub row_marks: Vec<Node>,
     pub relation_oids: Vec<Oid>,

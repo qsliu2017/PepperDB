@@ -444,3 +444,248 @@ async fn cte_recursive_two_relation_term_staged_cleanly() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cte_recursive_declared_but_not_self_referential_executes() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        init_db(&shared).await;
+        // WITH RECURSIVE merely PERMITS self-reference; a body that never references
+        // itself is a plain (non-recursive) CTE and must execute, not panic.
+        let rows = run_sql(
+            &shared,
+            "WITH RECURSIVE a AS (SELECT 1 UNION ALL SELECT 2) SELECT * FROM a",
+        )
+        .await
+        .unwrap();
+        assert_eq!(col0_sorted(&rows), vec![1, 2]);
+    })
+    .await;
+}
+
+// ===========================================================================
+//  Subquery / SubLink tests (M12, step 44). Seed: t = {1,2,3,3}, u = {3,4,5}.
+// ===========================================================================
+
+#[tokio::test(flavor = "multi_thread")]
+async fn exists_correlated_filters() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        seed(&shared).await;
+        // EXISTS over a correlated subquery: keep t rows whose `a` is present in u.
+        let rows = run_sql(
+            &shared,
+            "SELECT a FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.a = t.a)",
+        )
+        .await
+        .unwrap();
+        // Only a=3 exists in u; t has two 3s.
+        assert_eq!(col0_sorted(&rows), vec![3, 3]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn not_exists_correlated_filters() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        seed(&shared).await;
+        let rows = run_sql(
+            &shared,
+            "SELECT a FROM t WHERE NOT EXISTS (SELECT 1 FROM u WHERE u.a = t.a)",
+        )
+        .await
+        .unwrap();
+        // t rows NOT in u: 1, 2.
+        assert_eq!(col0_sorted(&rows), vec![1, 2]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn in_subquery() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        seed(&shared).await;
+        let rows = run_sql(&shared, "SELECT a FROM t WHERE a IN (SELECT a FROM u)").await.unwrap();
+        // a in u = {3,4,5} -> only 3 (twice).
+        assert_eq!(col0_sorted(&rows), vec![3, 3]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn not_in_subquery_no_nulls() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        seed(&shared).await;
+        let rows = run_sql(&shared, "SELECT a FROM t WHERE a NOT IN (SELECT a FROM u)").await.unwrap();
+        // t not in u -> 1, 2.
+        assert_eq!(col0_sorted(&rows), vec![1, 2]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn not_in_subquery_with_null_is_three_valued() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        init_db(&shared).await;
+        run_sql(&shared, "CREATE TABLE n (a int)").await.unwrap();
+        run_sql(&shared, "CREATE TABLE m (a int)").await.unwrap();
+        run_sql(&shared, "INSERT INTO n VALUES (1)").await.unwrap();
+        run_sql(&shared, "INSERT INTO n VALUES (2)").await.unwrap();
+        run_sql(&shared, "INSERT INTO m VALUES (2)").await.unwrap();
+        // m also contains a NULL -> `a NOT IN (m)` is never TRUE (NULL/UNKNOWN), so
+        // no rows qualify (SQL three-valued semantics).
+        run_sql(&shared, "INSERT INTO m VALUES (NULL)").await.unwrap();
+        let rows = run_sql(&shared, "SELECT a FROM n WHERE a NOT IN (SELECT a FROM m)").await.unwrap();
+        assert!(rows.is_empty(), "NOT IN over a NULL-containing subquery yields no rows, got {rows:?}");
+        // The positive IN still works: only 2 is present.
+        let rows2 = run_sql(&shared, "SELECT a FROM n WHERE a IN (SELECT a FROM m)").await.unwrap();
+        assert_eq!(col0_sorted(&rows2), vec![2]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn eq_any_subquery() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        seed(&shared).await;
+        let rows = run_sql(&shared, "SELECT a FROM t WHERE a = ANY (SELECT a FROM u)").await.unwrap();
+        assert_eq!(col0_sorted(&rows), vec![3, 3]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gt_all_subquery() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        init_db(&shared).await;
+        run_sql(&shared, "CREATE TABLE t (a int)").await.unwrap();
+        run_sql(&shared, "CREATE TABLE u (a int)").await.unwrap();
+        for v in [1, 5, 9] {
+            run_sql(&shared, &format!("INSERT INTO t VALUES ({v})")).await.unwrap();
+        }
+        for v in [2, 3, 4] {
+            run_sql(&shared, &format!("INSERT INTO u VALUES ({v})")).await.unwrap();
+        }
+        // a > ALL (2,3,4) -> a > 4 -> {5,9}.
+        let rows = run_sql(&shared, "SELECT a FROM t WHERE a > ALL (SELECT a FROM u)").await.unwrap();
+        assert_eq!(col0_sorted(&rows), vec![5, 9]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn correlated_scalar_subquery_in_target_list() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        init_db(&shared).await;
+        run_sql(&shared, "CREATE TABLE t (a int)").await.unwrap();
+        run_sql(&shared, "CREATE TABLE u (a int, b int)").await.unwrap();
+        for v in [1, 2] {
+            run_sql(&shared, &format!("INSERT INTO t VALUES ({v})")).await.unwrap();
+        }
+        // u: (1,10),(1,20),(2,30)
+        run_sql(&shared, "INSERT INTO u VALUES (1, 10)").await.unwrap();
+        run_sql(&shared, "INSERT INTO u VALUES (1, 20)").await.unwrap();
+        run_sql(&shared, "INSERT INTO u VALUES (2, 30)").await.unwrap();
+        // For each t.a, the max(u.b) where u.a = t.a: a=1 -> 20, a=2 -> 30.
+        let rows = run_sql(
+            &shared,
+            "SELECT a, (SELECT max(b) FROM u WHERE u.a = t.a) FROM t",
+        )
+        .await
+        .unwrap();
+        let mut got: Vec<(i32, i32)> = rows.iter().map(|r| (r[0].0, r[1].0)).collect();
+        got.sort_unstable();
+        assert_eq!(got, vec![(1, 20), (2, 30)]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uncorrelated_scalar_initplan_in_where() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        init_db(&shared).await;
+        run_sql(&shared, "CREATE TABLE t (a int)").await.unwrap();
+        for v in [1, 2, 3, 4] {
+            run_sql(&shared, &format!("INSERT INTO t VALUES ({v})")).await.unwrap();
+        }
+        // min(a) over {1,2,3,4} = 1; a > 1 -> {2,3,4}. The uncorrelated scalar
+        // sub-select is an InitPlan: run once, its result cached for every outer row.
+        let rows = run_sql(&shared, "SELECT a FROM t WHERE a > (SELECT min(a) FROM t)").await.unwrap();
+        assert_eq!(col0_sorted(&rows), vec![2, 3, 4]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn in_value_list_non_subquery_stages_cleanly() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        seed(&shared).await;
+        // `x IN (expr_list)` parses + analyzes to an OR-chain of `=`. The general
+        // OR-clause-in-WHERE planning path (make_sub_restrictinfos) is not yet
+        // translated, so this stages cleanly (catchable error), not a crash. The
+        // SUBQUERY forms of IN (the step-44 deliverable) execute; this non-subquery
+        // list form rides the OR-clause path, which arrives with that milestone.
+        let res = run_sql(&shared, "SELECT a FROM t WHERE a IN (1, 3)").await;
+        assert!(res.is_err(), "non-subquery IN-list stages (OR clause), got {res:?}");
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn nested_sublink_stages_cleanly() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        seed(&shared).await;
+        // A sub-select nested inside another sub-select would discard the inner
+        // SubPlan (silently-wrong rows). It must stage cleanly (catchable error),
+        // and the transaction must recover.
+        let res = run_sql(
+            &shared,
+            "SELECT a FROM t WHERE EXISTS (SELECT 1 FROM u WHERE EXISTS (SELECT 1 FROM t WHERE t.a = u.a))",
+        )
+        .await;
+        assert!(res.is_err(), "nested sub-select must stage cleanly, got {res:?}");
+        // The transaction recovered: a plain single-level sublink still works.
+        let rows = run_sql(
+            &shared,
+            "SELECT a FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.a = t.a)",
+        )
+        .await
+        .unwrap();
+        assert_eq!(col0_sorted(&rows), vec![3, 3]);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn correlated_having_stages_cleanly() {
+    let shared = new_shared();
+    in_scopes(Arc::clone(&shared), |shared| async move {
+        seed(&shared).await;
+        // A correlation reference in a sub-select's HAVING would be misclassified as a
+        // run-once InitPlan (stale for every outer row). HAVING is not yet in the
+        // grammar, so this currently stages at parse time; the replace_correlation_vars
+        // guard (subselect.rs) catches it once HAVING parses. Either way it must stage
+        // cleanly (catchable error), never return silently-wrong rows.
+        let res = run_sql(
+            &shared,
+            "SELECT a FROM t WHERE (SELECT count(*) FROM u GROUP BY u.a HAVING count(*) > t.a) > 0",
+        )
+        .await;
+        assert!(res.is_err(), "correlated HAVING must stage cleanly, got {res:?}");
+        // The transaction recovered: a plain uncorrelated scalar sub-select still works.
+        let rows = run_sql(&shared, "SELECT a FROM t WHERE a > (SELECT min(a) FROM u)").await.unwrap();
+        // min(u)=3; a>3 -> none of t={1,2,3,3}.
+        assert!(rows.is_empty(), "post-recovery query works, got {rows:?}");
+    })
+    .await;
+}

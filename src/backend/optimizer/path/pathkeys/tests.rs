@@ -90,7 +90,8 @@ fn planner() -> PlannerInfo {
     };
     let glob = PlannerGlobal {
         subplans: Vec::new(),
-        subpaths: Vec::new(),
+        subplan_nodes: Vec::new(),
+            subpaths: Vec::new(),
         subroots: Vec::new(),
         rewind_plan_ids: None,
         finalrtable: Vec::new(),

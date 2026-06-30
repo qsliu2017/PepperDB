@@ -44,6 +44,8 @@ use crate::backend::parser::parser::{
     frame_defaults, frameopt_range, frameopt_rows, frameopt_groups,
     frameopt_exclude_current_row, frameopt_exclude_group, frameopt_exclude_ties,
     FrameBoundTok,
+    make_expr_sublink, make_exists_sublink, make_in_sublink, make_any_all_sublink,
+    make_in_list,
 };
 use crate::nodes::parsenodes::{CursorOptions, FetchDirection, FETCH_ALL};
 use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
@@ -211,6 +213,10 @@ extern {
         "CASCADE"    => Token::Keyword("cascade"),
         "RESTRICT"   => Token::Keyword("restrict"),
         "EXISTS"     => Token::Keyword("exists"),
+        // M12 (step 44): subquery-expression keywords (EXISTS already above).
+        "IN"         => Token::Keyword("in"),
+        "ANY"        => Token::Keyword("any"),
+        "SOME"       => Token::Keyword("some"),
         "IF"         => Token::Keyword("if"),
         "CONSTRAINT" => Token::Keyword("constraint"),
         "NULL"       => Token::Keyword("null"),
@@ -1682,6 +1688,16 @@ SelectStmt: Node = {
     SelectNoParens,
 };
 
+// gram.y `select_with_parens: '(' select_no_parens ')'`. The parenthesized select
+// form, used as the scalar/EXISTS/IN/ANY/ALL subquery body in an expression. LALR(1)
+// disambiguates `( SELECT ... )` (this rule) from the expression `( a_expr )`
+// (c_expr) by the token after `(`. The `'(' select_with_parens ')'` self-nesting
+// (extra parens around a sub-select) and the set-op-leaf use are omitted to keep the
+// LALR table small (they are not needed by the supported subquery forms).
+SelectWithParens: Node = {
+    "(" <s:SelectNoParens> ")" => s,
+};
+
 // gram.y `select_no_parens`: an optional `with_clause`, a `select_clause` (the
 // set-operation tier), optionally followed by ORDER BY / LIMIT/OFFSET / FOR-locking
 // (PG's insertSelectOptions). The sort/limit/locking wrappers and the WITH clause
@@ -1731,8 +1747,8 @@ IntersectClause: Node = {
         make_set_op(SetOperation::INTERSECT, q, l, r),
 };
 
-// A set-op leaf: a `simple_select` (the parenthesized-select leaf is staged; see
-// the SelectStmt note above).
+// A set-op leaf: a `simple_select` (the parenthesized-select set-op leaf is omitted
+// to keep the LALR table small; the two-tier cascade already gives the precedence).
 SelectAtom: Node = {
     SimpleSelect,
 };
@@ -2194,7 +2210,36 @@ CompareExpr: Node = {
     <l:AddExpr> "<=" <r:AddExpr> => make_a_expr("<=", l, r),
     <l:AddExpr> ">=" <r:AddExpr> => make_a_expr(">=", l, r),
     <l:AddExpr> "<>" <r:AddExpr> => make_a_expr("<>", l, r),
+    // gram.y `a_expr IN_P in_expr` (%nonassoc IN_P). The RHS is either a sub-SELECT
+    // (`x IN (SELECT ...)` -> `x = ANY (sub)`) or a parenthesized expr_list
+    // (`x IN (a,b,c)` -> OR-chain of `=`). NOT IN negates.
+    <l:AddExpr> "IN" <s:SelectWithParens> => make_in_sublink(l, s, false),
+    <l:AddExpr> "IN" "(" <e:ExprList> ")" => make_in_list(l, e, false),
+    <l:AddExpr> "NOT" "IN" <s:SelectWithParens> => make_in_sublink(l, s, true),
+    <l:AddExpr> "NOT" "IN" "(" <e:ExprList> ")" => make_in_list(l, e, true),
+    // gram.y `a_expr subquery_Op sub_type select_with_parens` (%nonassoc): the
+    // ANY/SOME/ALL quantified comparison against a sub-SELECT.
+    <l:AddExpr> <op:SubqueryOp> <a:SubType> <s:SelectWithParens> =>
+        make_any_all_sublink(l, op, a, s),
     AddExpr,
+};
+
+// gram.y `sub_type: ANY | SOME | ALL`. ANY/SOME -> ANY_SUBLINK (the bool is `any`),
+// ALL -> ALL_SUBLINK.
+SubType: bool = {
+    "ANY"  => true,
+    "SOME" => true,
+    "ALL"  => false,
+};
+
+// gram.y `subquery_Op` (the comparison-operator subset usable before ANY/ALL).
+SubqueryOp: &'static str = {
+    "<"  => "<",
+    ">"  => ">",
+    "="  => "=",
+    "<=" => "<=",
+    ">=" => ">=",
+    "<>" => "<>",
 };
 
 // gram.y `a_expr '+'/'-' a_expr` (%left '+' '-').
@@ -2245,6 +2290,12 @@ CExpr: Node = {
     CaseExpr,
     // gram.y `c_expr: NULL_P` (the SQL NULL literal -> a null A_Const).
     "NULL" => make_null_const(),
+    // gram.y `c_expr: select_with_parens %prec UMINUS` -- a scalar sub-SELECT as an
+    // expression (EXPR_SUBLINK). LALR(1) picks this over `( a_expr )` by the
+    // token after `(` (SELECT/WITH/`(`-select).
+    <s:SelectWithParens> => make_expr_sublink(s),
+    // gram.y `c_expr: EXISTS select_with_parens` (EXISTS_SUBLINK).
+    "EXISTS" <s:SelectWithParens> => make_exists_sublink(s),
 };
 
 // gram.y `func_expr: func_application within_group_clause filter_clause over_clause

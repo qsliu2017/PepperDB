@@ -138,14 +138,80 @@ fn init_plan(query_desc: &mut QueryDesc<'_>, eflags: i32) {
         "InitPlan: data-modifying command without a result relation"
     );
 
-    let planstate = exec_init_node(Some(&plan_tree), estate, eflags)
+    // PG `ExecInitParamExecVals`: size the shared PARAM_EXEC array to the plan's
+    // paramExecTypes so SubPlan params (parParam/setParam) have backing slots. The
+    // array is shared (Arc) across every ExprContext CreateExprContext builds below
+    // (M12, step 44).
+    let n_params = plannedstmt.param_exec_types.len();
+    if n_params > 0 {
+        let vals = vec![
+            crate::nodes::execnodes::ParamExecData {
+                exec_plan: 0,
+                value: crate::postgres::Datum(0),
+                isnull: true,
+            };
+            n_params
+        ];
+        estate.param_exec_vals = Some(std::sync::Arc::new(parking_lot::Mutex::new(vals)));
+    }
+
+    let mut planstate = exec_init_node(Some(&plan_tree), estate, eflags)
         .unwrap_or_else(|| unimplemented!("InitPlan: null plan tree"));
+
+    // M12 (step 44): build the SubPlan run-states for every sub-select the plan
+    // references and attach them to the scan node that bears the qual/projection.
+    // PG keeps es_subplanstates on the EState; the port attaches them to the bearing
+    // node so its async loop can run them before its sync qual/projection.
+    let subplan_nodes = plannedstmt.subplan_nodes.clone();
+    if !subplan_nodes.is_empty() {
+        let subplan_trees = plannedstmt.subplans.clone();
+        init_subplans(&mut planstate, &subplan_nodes, &subplan_trees, estate, eflags);
+    }
 
     // ExecGetResultType: the root node's result tupdesc (an Arc clone the
     // QueryDesc co-owns alongside the planstate's slot). A non-RETURNING
     // ModifyTable yields no tuples, hence no result descriptor.
     query_desc.tupDesc = result_type_of(&planstate);
     query_desc.planstate = Some(Box::new(planstate));
+}
+
+/// Build a `SubPlanRun` per planned SubPlan and attach the whole set to the scan
+/// node that bears the qual/projection referencing them (M12, step 44). For the
+/// supported plan shapes the bearing node is the SeqScan; locate it by descending
+/// the plan-state tree.
+fn init_subplans<'rel>(
+    planstate: &mut crate::backend::executor::execProcnode::PlanStateNode<'rel>,
+    subplan_nodes: &[crate::nodes::primnodes::SubPlan],
+    subplan_trees: &[Node],
+    estate: &mut EState<'rel>,
+    eflags: i32,
+) {
+    let runs: Vec<crate::backend::executor::nodeSubplan::SubPlanRun<'rel>> = subplan_nodes
+        .iter()
+        .map(|sp| {
+            let tree = &subplan_trees[(sp.plan_id - 1) as usize];
+            crate::backend::executor::nodeSubplan::exec_init_subplan(sp, tree, estate, eflags)
+        })
+        .collect();
+    attach_subplans_to_scan(planstate, runs);
+}
+
+/// Descend to the SeqScan node and move the subplan run-states onto it.
+fn attach_subplans_to_scan<'rel>(
+    node: &mut crate::backend::executor::execProcnode::PlanStateNode<'rel>,
+    runs: Vec<crate::backend::executor::nodeSubplan::SubPlanRun<'rel>>,
+) {
+    use crate::backend::executor::execProcnode::PlanStateNode as PSN;
+    match node {
+        PSN::SeqScan(ss) => ss.subplan_runs = runs,
+        PSN::Limit(l) => attach_subplans_to_scan(&mut l.child, runs),
+        PSN::Sort(s) => attach_subplans_to_scan(&mut s.child, runs),
+        PSN::Material(m) => attach_subplans_to_scan(&mut m.child, runs),
+        PSN::Unique(u) => attach_subplans_to_scan(&mut u.child, runs),
+        PSN::Group(g) => attach_subplans_to_scan(&mut g.child, runs),
+        PSN::Agg(a) => attach_subplans_to_scan(&mut a.child, runs),
+        _ => unimplemented!("InitPlan: subplans not attachable to this plan shape yet"),
+    }
 }
 
 /// The result TupleDesc of a plan-state node (PG `ExecGetResultType`).

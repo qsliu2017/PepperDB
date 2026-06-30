@@ -169,6 +169,13 @@ async fn analyze_cte(shared: &Arc<SharedState>, pstate: &mut ParseState, idx: us
     let r_query = Box::pin(transform_stmt_async_pub(shared, &mut rchild, &Node::SelectStmt(rarg.clone()))).await;
     propagate_child_flags(pstate, &rchild);
 
+    // A WITH RECURSIVE CTE is only actually recursive when its body self-references;
+    // RECURSIVE merely permits self-reference (PG makeDependencyGraph treats a
+    // non-self-referencing CTE as plain). If neither term references the CTE, mark it
+    // non-recursive so it plans through the ordinary (set-op) CTE path.
+    cte.cterecursive = query_self_references(&nr_query, cte.ctename.as_deref())
+        || query_self_references(&r_query, cte.ctename.as_deref());
+
     // 4) Assemble the CTE Query's SetOperationStmt over the two leaf Querys (the
     //    port's set-op representation: embedded Node::Query leaves).
     let col_types: Vec<Oid> = cte.ctecoltypes.clone();
@@ -187,6 +194,21 @@ async fn analyze_cte(shared: &Arc<SharedState>, pstate: &mut ParseState, idx: us
     cte_query.canSetTag = false;
     cte.ctequery = Some(Node::Query(cte_query));
     pstate.p_ctenamespace[idx] = cte;
+}
+
+/// True if `query`'s rangetable contains a self-reference CTE RTE for `ctename`
+/// (i.e. the CTE actually references itself). Used to decide whether a
+/// `WITH RECURSIVE` CTE is genuinely recursive.
+fn query_self_references(query: &Query, ctename: Option<&str>) -> bool {
+    let Some(name) = ctename else { return false };
+    query.rtable.iter().any(|n| match n {
+        Node::RangeTblEntry(rte) => {
+            rte.rtekind == crate::nodes::parsenodes::RTEKind::CTE
+                && rte.self_reference
+                && rte.ctename.as_deref() == Some(name)
+        }
+        _ => false,
+    })
 }
 
 /// Build the CTE's wrapping set-op Query (mirrors analyze.rs

@@ -34,6 +34,34 @@ fn not_yet_reachable(what: &str, node: &Node) -> ! {
     clippy::match_same_arms,
     reason = "1:1 with PG's per-nodetag switch; merging same-valued arms loses the mapping"
 )]
+/// PG `exprType` for a SubLink: boolean for EXISTS/ANY/ALL/ROWCOMPARE; the single
+/// output column's type for EXPR (read off the analyzed sub-Query).
+fn sublink_expr_type(sl: &crate::nodes::primnodes::SubLink) -> Oid {
+    use crate::nodes::primnodes::SubLinkType;
+    match sl.subLinkType {
+        SubLinkType::EXPR_SUBLINK => {
+            let Some(Node::Query(q)) = sl.subselect.as_ref() else {
+                return InvalidOid;
+            };
+            q.targetList
+                .iter()
+                .find_map(|n| match n {
+                    Node::TargetEntry(t) if !t.resjunk => {
+                        Some(t.expr.as_ref().map_or(InvalidOid, exprType))
+                    }
+                    _ => None,
+                })
+                .unwrap_or(InvalidOid)
+        }
+        _ => BOOLOID,
+    }
+}
+
+#[allow(
+    clippy::match_same_arms,
+    reason = "1:1 PG exprType: several distinct node kinds independently yield BOOLOID; \
+              merging them loses the per-node mapping"
+)]
 pub fn exprType(expr: &Node) -> Oid {
     match expr {
         Node::Var(v) => v.vartype,
@@ -80,11 +108,16 @@ pub fn exprType(expr: &Node) -> Oid {
         Node::InferenceElem(i) => i.expr.as_ref().map_or(InvalidOid, exprType),
         Node::ReturningExpr(r) => r.retexpr.as_ref().map_or(InvalidOid, exprType),
         Node::PlaceHolderVar(p) => exprType(&p.phexpr),
-        // SubLink/SubPlan/AlternativeSubPlan need Query typing or array-type
-        // promotion (get_promoted_array_type / format_type_be) not translated yet.
-        Node::SubLink(_) | Node::SubPlan(_) | Node::AlternativeSubPlan(_) => {
-            not_yet_reachable("exprType", expr)
-        }
+        // PG `exprType` SubLink arm (M12, step 44): EXISTS/ANY/ALL/ROWCOMPARE are
+        // boolean; an EXPR sub-select's type is its single output column's type
+        // (read off the analyzed sub-Query's targetlist). ARRAY/CTE/MULTIEXPR and the
+        // SubPlan/AlternativeSubPlan typing (firstColType / record) grow later.
+        Node::SubLink(sl) => sublink_expr_type(sl),
+        Node::SubPlan(sp) => match sp.subLinkType {
+            crate::nodes::primnodes::SubLinkType::EXPR_SUBLINK => sp.firstColType,
+            _ => BOOLOID,
+        },
+        Node::AlternativeSubPlan(_) => not_yet_reachable("exprType", expr),
         other => {
             crate::elog!(
                 crate::utils::elog::ERROR,

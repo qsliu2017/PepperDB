@@ -76,6 +76,11 @@ pub struct PlannerGlobal {
     // and not Clone/Eq); dropped from the skeleton.
     /// Plans for SubPlan nodes.
     pub subplans: Vec<Node>,
+    /// The SubPlan expression nodes themselves (testexpr/setParam/parParam/args),
+    /// parallel to `subplans` by `plan_id`. PG keeps these in the expression tree /
+    /// init_plans list; the port collects them here so the executor can build the
+    /// SubPlan run-states for every subplan referenced by the plan (M12, step 44).
+    pub subplan_nodes: Vec<crate::nodes::primnodes::SubPlan>,
     /// Paths from which the SubPlan Plans were made.
     pub subpaths: Vec<Box<Path>>,
     /// PlannerInfos for SubPlan nodes.
