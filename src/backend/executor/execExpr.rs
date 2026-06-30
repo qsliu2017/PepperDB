@@ -110,6 +110,7 @@ fn exec_init_expr_rec(node: &Node, state: &mut ExprState) {
             let step = exec_init_func(node, &func.args, func.funcid, func.inputcollid);
             expr_eval_push_step(state, step);
         }
+        Node::Param(param) => exec_init_param(param, state),
         Node::BoolExpr(b) => exec_init_boolexpr(b, state),
         // M4 (step 23): NULLIF is an OpExpr-shaped node; the interp special-cases it
         // (NULL when args compare equal). Compiled like a strict 2-arg function over
@@ -147,6 +148,37 @@ fn exec_init_expr_rec(node: &Node, state: &mut ExprState) {
         }
         other => not_yet_reachable(&format!("ExecInitExprRec: {other:?}")),
     }
+}
+
+/// PG `ExecInitExprRec` T_Param arm: emit the param-read opcode.
+///  - PARAM_EXEC (subplan / EPQ executor params): `EEOP_PARAM_EXEC` reads from the
+///    EState's `ecxt_param_exec_vals[paramid]`.
+///  - PARAM_EXTERN ($n external params): if a relevant `ParamCompileHook` is set on
+///    `ext_params` (or the parent EState's param list), it would compile a custom
+///    step; M9 has no such hook, so emit the standard `EEOP_PARAM_EXTERN`, which
+///    reads from the portal's `ParamListInfo`. (The paramCompile fast path is
+///    staged for when plancache custom plans install one.)
+fn exec_init_param(param: &crate::nodes::primnodes::Param, state: &mut ExprState) {
+    use crate::executor::execExpr::ParamData;
+    use crate::nodes::primnodes::ParamKind;
+
+    let opcode = match param.paramkind {
+        ParamKind::EXEC => ExprEvalOp::PARAM_EXEC,
+        ParamKind::EXTERN => ExprEvalOp::PARAM_EXTERN,
+        other => not_yet_reachable(&format!("ExecInitExprRec: paramkind {other:?}")),
+    };
+    expr_eval_push_step(
+        state,
+        ExprEvalStep {
+            opcode,
+            resvalue: None,
+            resnull: None,
+            d: ExprEvalStepData::Param(ParamData {
+                paramid: param.paramid,
+                paramtype: param.paramtype,
+            }),
+        },
+    );
 }
 
 /// PG `ExecInitExprRec` T_CoerceViaIO arm: out-func(source) then in-func(target).

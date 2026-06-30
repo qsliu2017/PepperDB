@@ -77,6 +77,53 @@ pub async fn standard_process_utility(
             let name = stmt.name.as_deref().unwrap_or("");
             crate::backend::utils::misc::guc_funcs::GetPGVariable(name, dest);
         }
+        // --- Prepared statements (prepare.rs) ---
+        Node::PrepareStmt(stmt) => {
+            let mut pstate = crate::backend::parser::parse_node::make_parsestate(None);
+            pstate.p_sourcetext = Some(query_string.to_string());
+            crate::backend::commands::prepare::prepare_query(
+                shared,
+                &mut pstate,
+                stmt,
+                pstmt.stmt_location,
+                pstmt.stmt_len,
+            )
+            .await;
+        }
+        Node::ExecuteStmt(stmt) => {
+            let mut pstate = crate::backend::parser::parse_node::make_parsestate(None);
+            pstate.p_sourcetext = Some(query_string.to_string());
+            let mut local_qc = QueryCompletion { command_tag: CommandTag::Unknown, nprocessed: 0 };
+            crate::backend::commands::prepare::execute_query(
+                shared,
+                &mut pstate,
+                stmt,
+                dest.mydest(),
+                &mut local_qc,
+            )
+            .await;
+            if let Some(qc) = qc {
+                qc.copy_from(&local_qc);
+            }
+        }
+        Node::DeallocateStmt(stmt) => {
+            crate::backend::commands::prepare::deallocate_query(stmt);
+        }
+        // --- Cursors / portals (portalcmds.rs) ---
+        Node::DeclareCursorStmt(stmt) => {
+            let mut pstate = crate::backend::parser::parse_node::make_parsestate(None);
+            pstate.p_sourcetext = Some(query_string.to_string());
+            crate::backend::commands::portalcmds::perform_cursor_open(
+                shared, &mut pstate, stmt, is_top_level,
+            )
+            .await;
+        }
+        Node::FetchStmt(stmt) => {
+            crate::backend::commands::portalcmds::perform_portal_fetch(stmt, dest, qc);
+        }
+        Node::ClosePortalStmt(stmt) => {
+            crate::backend::commands::portalcmds::perform_portal_close(stmt.portalname.as_deref());
+        }
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
     }
 }
@@ -219,6 +266,13 @@ async fn process_utility_slow(
 pub fn create_command_tag(parsetree: &Node) -> CommandTag {
     use crate::nodes::parsenodes::{TransactionStmtKind as TxKind, VariableSetKind};
     match parsetree {
+        // Plannable (optimizable) raw statements: their result tag. These are
+        // reached via PREPARE / extended-protocol Parse, which tag the inner query.
+        Node::SelectStmt(_) => CommandTag::Select,
+        Node::InsertStmt(_) => CommandTag::Insert,
+        Node::UpdateStmt(_) => CommandTag::Update,
+        Node::DeleteStmt(_) => CommandTag::Delete,
+        Node::MergeStmt(_) => CommandTag::Merge,
         Node::CreateStmt(_) => CommandTag::CreateTable,
         Node::IndexStmt(_) => CommandTag::CreateIndex,
         Node::TransactionStmt(stmt) => match stmt.kind {
@@ -237,6 +291,30 @@ pub fn create_command_tag(parsetree: &Node) -> CommandTag {
             _ => CommandTag::Set,
         },
         Node::VariableShowStmt(_) => CommandTag::Show,
+        Node::PrepareStmt(_) => CommandTag::Prepare,
+        Node::ExecuteStmt(_) => CommandTag::Execute,
+        Node::DeallocateStmt(stmt) => {
+            if stmt.isall {
+                CommandTag::DeallocateAll
+            } else {
+                CommandTag::Deallocate
+            }
+        }
+        Node::DeclareCursorStmt(_) => CommandTag::DeclareCursor,
+        Node::FetchStmt(stmt) => {
+            if stmt.ismove {
+                CommandTag::Move
+            } else {
+                CommandTag::Fetch
+            }
+        }
+        Node::ClosePortalStmt(stmt) => {
+            if stmt.portalname.is_some() {
+                CommandTag::CloseCursor
+            } else {
+                CommandTag::CloseCursorAll
+            }
+        }
         other => not_yet_reachable(&format!("CreateCommandTag: {other:?}")),
     }
 }

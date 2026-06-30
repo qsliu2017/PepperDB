@@ -111,7 +111,7 @@ fn assign_collations_walker(
         // Its result-type collation (if any) propagates to its parent with implicit
         // strength; an uncollatable leaf (int/bool, collation InvalidOid) is a
         // no-op. PG handles a Var/Const this way in the walker's leaf default.
-        Node::Const(_) | Node::Var(_) => {
+        Node::Const(_) | Node::Var(_) | Node::Param(_) => {
             let collation = exprCollation(node);
             if collation == InvalidOid {
                 context.collation = InvalidOid;

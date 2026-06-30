@@ -25,7 +25,10 @@ use crate::backend::parser::parser::{
     make_transaction_stmt, make_def_elem_str, make_def_elem_bool, set_variable_local,
     make_set_value, make_set_default, make_set_current, make_set_multi, make_set_timezone,
     make_set_transaction_snapshot, make_reset, make_reset_all, make_variable_show,
+    make_param_ref, make_prepare_stmt, make_execute_stmt, make_deallocate_stmt,
+    make_declare_cursor_stmt, make_close_portal_stmt, make_fetch_stmt, set_fetch_ismove,
 };
+use crate::nodes::parsenodes::{CursorOptions, FetchDirection, FETCH_ALL};
 use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
 use crate::nodes::nodes::{CmdType, JoinType, Node};
 use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
@@ -160,11 +163,35 @@ extern {
         "AUTHORIZATION" => Token::Keyword("authorization"),
         "TRUE"     => Token::Keyword("true"),
         "FALSE"    => Token::Keyword("false"),
+        // M9 (step 37): PREPARE/EXECUTE/DEALLOCATE/DECLARE CURSOR/FETCH/MOVE/CLOSE.
+        "EXECUTE"    => Token::Keyword("execute"),
+        "DEALLOCATE" => Token::Keyword("deallocate"),
+        "DECLARE"    => Token::Keyword("declare"),
+        "CURSOR"     => Token::Keyword("cursor"),
+        "FETCH"      => Token::Keyword("fetch"),
+        "MOVE"       => Token::Keyword("move"),
+        "CLOSE"      => Token::Keyword("close"),
+        "SCROLL"     => Token::Keyword("scroll"),
+        "BINARY"     => Token::Keyword("binary"),
+        "INSENSITIVE" => Token::Keyword("insensitive"),
+        "ASENSITIVE" => Token::Keyword("asensitive"),
+        "HOLD"       => Token::Keyword("hold"),
+        "WITH"       => Token::Keyword("with"),
+        "WITHOUT"    => Token::Keyword("without"),
+        "IN"         => Token::Keyword("in"),
+        "NEXT"       => Token::Keyword("next"),
+        "PRIOR"      => Token::Keyword("prior"),
+        "ABSOLUTE"   => Token::Keyword("absolute"),
+        "RELATIVE"   => Token::Keyword("relative"),
+        "BACKWARD"   => Token::Keyword("backward"),
+        "FORWARD"    => Token::Keyword("forward"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
         "FCONST"  => Token::FConst(<String>),
         "SCONST"  => Token::SConst(<String>),
+        // PARAM ($n) - carries the parameter number (M9, step 37).
+        "PARAM"   => Token::Param(<i32>),
         // punctuation
         ";"       => Token::Semi,
         ","       => Token::Comma,
@@ -225,6 +252,12 @@ Stmt: Option<Node> = {
     <s:TransactionStmt> => Some(s),
     <s:VariableSetStmt> => Some(s),
     <s:VariableShowStmt> => Some(s),
+    <s:PrepareStmt> => Some(s),
+    <s:ExecuteStmt> => Some(s),
+    <s:DeallocateStmt> => Some(s),
+    <s:DeclareCursorStmt> => Some(s),
+    <s:ClosePortalStmt> => Some(s),
+    <s:FetchStmt> => Some(s),
     => None,            // empty statement (e.g. trailing ';')
 };
 
@@ -697,6 +730,153 @@ VariableShowStmt: Node = {
 };
 
 // ===========================================================================
+//  PREPARE / EXECUTE / DEALLOCATE  (M9, step 37): gram.y `PrepareStmt`,
+//  `ExecuteStmt`, `DeallocateStmt`.
+// ===========================================================================
+
+// gram.y `PrepareStmt: PREPARE name prep_type_clause AS PreparableStmt`. The
+// `CREATE TABLE AS EXECUTE` form is staged (deferred) for this milestone.
+PrepareStmt: Node = {
+    "PREPARE" <n:ColId> <argtypes:PrepTypeClause> "AS" <q:PreparableStmt> =>
+        make_prepare_stmt(n, argtypes, q),
+};
+
+// gram.y `prep_type_clause: '(' type_list ')' | /*EMPTY*/`.
+PrepTypeClause: Vec<TypeName> = {
+    "(" <l:TypeList> ")" => l,
+    => Vec::new(),
+};
+
+// gram.y `type_list: Typename (',' Typename)*`.
+TypeList: Vec<TypeName> = {
+    <t:Typename> => vec![t],
+    <mut l:TypeList> "," <t:Typename> => { l.push(t); l },
+};
+
+// gram.y `PreparableStmt: SelectStmt | InsertStmt | UpdateStmt | DeleteStmt | MergeStmt`.
+PreparableStmt: Node = {
+    SelectStmt,
+    InsertStmt,
+    UpdateStmt,
+    DeleteStmt,
+    MergeStmt,
+};
+
+// gram.y `ExecuteStmt: EXECUTE name execute_param_clause`. The `CREATE TABLE AS
+// EXECUTE` form is staged (deferred) for this milestone.
+ExecuteStmt: Node = {
+    "EXECUTE" <n:ColId> <params:ExecuteParamClause> => make_execute_stmt(n, params),
+};
+
+// gram.y `execute_param_clause: '(' expr_list ')' | /*EMPTY*/`.
+ExecuteParamClause: Vec<Node> = {
+    "(" <l:ExprList> ")" => l,
+    => Vec::new(),
+};
+
+// gram.y `DeallocateStmt`: DEALLOCATE [PREPARE] name | DEALLOCATE [PREPARE] ALL.
+DeallocateStmt: Node = {
+    "DEALLOCATE" <l:@L> <n:ColId> => make_deallocate_stmt(Some(n), l),
+    "DEALLOCATE" "PREPARE" <l:@L> <n:ColId> => make_deallocate_stmt(Some(n), l),
+    "DEALLOCATE" "ALL" => make_deallocate_stmt(None, -1),
+    "DEALLOCATE" "PREPARE" "ALL" => make_deallocate_stmt(None, -1),
+};
+
+// ===========================================================================
+//  DECLARE CURSOR / CLOSE / FETCH / MOVE  (M9, step 37): gram.y
+//  `DeclareCursorStmt`, `ClosePortalStmt`, `FetchStmt`.
+// ===========================================================================
+
+// gram.y `DeclareCursorStmt: DECLARE cursor_name cursor_options CURSOR opt_hold
+// FOR SelectStmt`. PG always folds in CURSOR_OPT_FAST_PLAN.
+DeclareCursorStmt: Node = {
+    "DECLARE" <n:ColId> <opts:CursorOptions> "CURSOR" <hold:OptHold> "FOR" <q:SelectStmt> =>
+        make_declare_cursor_stmt(n, opts | hold | CursorOptions::FAST_PLAN.bits(), q),
+};
+
+// gram.y `cursor_options`: accumulating left-recursive option list (NO SCROLL /
+// SCROLL / BINARY / ASENSITIVE / INSENSITIVE).
+CursorOptions: i32 = {
+    => 0,
+    <o:CursorOptions> "NO" "SCROLL" => o | CursorOptions::NO_SCROLL.bits(),
+    <o:CursorOptions> "SCROLL" => o | CursorOptions::SCROLL.bits(),
+    <o:CursorOptions> "BINARY" => o | CursorOptions::BINARY.bits(),
+    <o:CursorOptions> "ASENSITIVE" => o | CursorOptions::ASENSITIVE.bits(),
+    <o:CursorOptions> "INSENSITIVE" => o | CursorOptions::INSENSITIVE.bits(),
+};
+
+// gram.y `opt_hold: /*EMPTY*/ | WITH HOLD | WITHOUT HOLD`.
+OptHold: i32 = {
+    => 0,
+    "WITH" "HOLD" => CursorOptions::HOLD.bits(),
+    "WITHOUT" "HOLD" => 0,
+};
+
+// gram.y `ClosePortalStmt: CLOSE cursor_name | CLOSE ALL`.
+ClosePortalStmt: Node = {
+    "CLOSE" <n:ColId> => make_close_portal_stmt(Some(n)),
+    "CLOSE" "ALL" => make_close_portal_stmt(None),
+};
+
+// gram.y `FetchStmt: FETCH fetch_args | MOVE fetch_args`. The fetch_args build a
+// FetchStmt with ismove=false; the MOVE wrapper flips ismove. The grammar uses
+// `opt_from_in` (FROM/IN/empty) after the direction keyword.
+//
+// STAGED (dropped) fetch_args forms vs PG gram.y, to keep the LALR table
+// conflict-free for M9: none -- every PG fetch_args alternative is reachable here.
+// (SignedIconst is ICONST-only; a negative-count `FETCH -1 c` is staged with the
+// signed-iconst minus, matching the task's M9 scope.)
+FetchStmt: Node = {
+    "FETCH" <f:FetchArgs> => f,
+    "MOVE" <f:FetchArgs> => set_fetch_ismove(f),
+};
+
+FetchArgs: Node = {
+    <n:ColId> => make_fetch_stmt(FetchDirection::FORWARD, 1, n, false),
+    FromIn <n:ColId> => make_fetch_stmt(FetchDirection::FORWARD, 1, n, false),
+    "NEXT" OptFromIn <n:ColId> => make_fetch_stmt(FetchDirection::FORWARD, 1, n, false),
+    "PRIOR" OptFromIn <n:ColId> => make_fetch_stmt(FetchDirection::BACKWARD, 1, n, false),
+    "FIRST" OptFromIn <n:ColId> => make_fetch_stmt(FetchDirection::ABSOLUTE, 1, n, false),
+    "LAST" OptFromIn <n:ColId> => make_fetch_stmt(FetchDirection::ABSOLUTE, -1, n, false),
+    "ABSOLUTE" <i:SignedIconst> OptFromIn <n:ColId> =>
+        make_fetch_stmt(FetchDirection::ABSOLUTE, i, n, false),
+    "RELATIVE" <i:SignedIconst> OptFromIn <n:ColId> =>
+        make_fetch_stmt(FetchDirection::RELATIVE, i, n, false),
+    <i:SignedIconst> OptFromIn <n:ColId> =>
+        make_fetch_stmt(FetchDirection::FORWARD, i, n, false),
+    "ALL" OptFromIn <n:ColId> => make_fetch_stmt(FetchDirection::FORWARD, FETCH_ALL, n, false),
+    "FORWARD" OptFromIn <n:ColId> => make_fetch_stmt(FetchDirection::FORWARD, 1, n, false),
+    "FORWARD" <i:SignedIconst> OptFromIn <n:ColId> =>
+        make_fetch_stmt(FetchDirection::FORWARD, i, n, false),
+    "FORWARD" "ALL" OptFromIn <n:ColId> =>
+        make_fetch_stmt(FetchDirection::FORWARD, FETCH_ALL, n, false),
+    "BACKWARD" OptFromIn <n:ColId> => make_fetch_stmt(FetchDirection::BACKWARD, 1, n, false),
+    "BACKWARD" <i:SignedIconst> OptFromIn <n:ColId> =>
+        make_fetch_stmt(FetchDirection::BACKWARD, i, n, false),
+    "BACKWARD" "ALL" OptFromIn <n:ColId> =>
+        make_fetch_stmt(FetchDirection::BACKWARD, FETCH_ALL, n, false),
+};
+
+// gram.y `from_in: FROM | IN_P`.
+FromIn: () = {
+    "FROM" => (),
+    "IN" => (),
+};
+
+// gram.y `opt_from_in: from_in | /*EMPTY*/`.
+OptFromIn: () = {
+    FromIn => (),
+    => (),
+};
+
+// gram.y `SignedIconst: Iconst | '+' Iconst | '-' Iconst`. M9 reaches the plain
+// ICONST (a leading sign is staged: `FETCH -1 c` is deferred to keep the count an
+// i64 without a sign-prefix conflict against the unary-minus expression path).
+SignedIconst: i64 = {
+    <i:"ICONST"> => i64::from(i),
+};
+
+// ===========================================================================
 //  SELECT
 // ===========================================================================
 
@@ -1085,6 +1265,9 @@ TypecastExpr: Node = {
 
 CExpr: Node = {
     AexprConst,
+    // gram.y `c_expr: PARAM opt_indirection`. A `$n` positional parameter; the
+    // opt_indirection (subscript/field on the param) grows with A_Indirection.
+    <l:@L> <n:"PARAM"> => make_param_ref(n, l),
     // gram.y `c_expr: columnref`. A bare or table-qualified column reference.
     ColumnRef,
     // gram.y `c_expr: '(' a_expr ')'`.

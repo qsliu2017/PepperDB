@@ -40,7 +40,6 @@ macro_rules! opaque_forward {
 mod fwd {
     opaque_forward! {
         FmgrInfo, FunctionCallInfo, MemoryContext, Tuplestorestate,
-        ParamListInfo, ParamExecData,
         QueryEnvironment, PartitionDirectory, HeapTuple, MinimalTuple,
         ItemPointerData, OffsetNumber, Buffer, TriggerDesc, Instrumentation,
         WorkerInstrumentation, ErrorSaveContext, SortSupport,
@@ -53,6 +52,11 @@ mod fwd {
 }
 
 pub use fwd::*;
+
+// Param carriers wired to their real home (nodes/params.h). The executor reads
+// external $n values from `ParamListInfo` and internal subplan params from
+// `ParamExecData`; both must be the genuine types so Param opcodes evaluate.
+pub use crate::nodes::params::{ParamExecData, ParamListInfo};
 
 // Executor-spine types wired to their real homes (step 08). The placeholders
 // these replace were stand-ins until the executor was translated; the spine now
@@ -132,7 +136,7 @@ pub struct ExprState {
     pub steps_alloc: i32,
     /// parent PlanState node, if any.
     pub parent: Option<Box<PlanState>>,
-    pub ext_params: Option<Box<ParamListInfo>>,
+    pub ext_params: Option<ParamListInfo>,
     pub innermost_caseval: Option<Box<Datum>>,
     pub innermost_casenull: Option<Box<bool>>,
     pub innermost_domainval: Option<Box<Datum>>,
@@ -206,8 +210,10 @@ pub struct ExprContext {
     pub ecxt_per_query_memory: MemoryContext,
     pub ecxt_per_tuple_memory: MemoryContext,
     /// values to substitute for Param nodes.
-    pub ecxt_param_exec_vals: Option<Box<ParamExecData>>,
-    pub ecxt_param_list_info: Option<Box<ParamListInfo>>,
+    /// values to substitute for PARAM_EXEC Param nodes (indexed by paramid).
+    pub ecxt_param_exec_vals: Option<Vec<ParamExecData>>,
+    /// values to substitute for PARAM_EXTERN ($n) Param nodes.
+    pub ecxt_param_list_info: Option<ParamListInfo>,
     /// precomputed values/nulls for aggs/windowfuncs.
     pub ecxt_aggvalues: Vec<Datum>,
     pub ecxt_aggnulls: Vec<bool>,
@@ -467,8 +473,8 @@ pub struct EState<'rel> {
     pub partition_directory: PartitionDirectory,
     pub tuple_routing_result_relations: Vec<Box<ResultRelInfo>>,
     pub trig_target_relations: Vec<Box<ResultRelInfo>>,
-    pub param_list_info: Option<Box<ParamListInfo>>,
-    pub param_exec_vals: Option<Box<ParamExecData>>,
+    pub param_list_info: Option<ParamListInfo>,
+    pub param_exec_vals: Option<Vec<ParamExecData>>,
     pub query_env: Option<Box<QueryEnvironment>>,
     pub query_cxt: MemoryContext,
     /// List of TupleTableSlots.

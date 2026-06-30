@@ -674,7 +674,10 @@ fn fix_scan_qual_identity(qual: &[Node], rtoffset: usize) {
 fn fix_scan_expr_identity(expr: Option<&Node>) {
     let Some(expr) = expr else { return };
     match expr {
-        Node::Const(_) | Node::Var(_) | Node::CaseTestExpr(_) => {}
+        // A Param ($n) is a leaf that does not reference the rangetable, so it is
+        // left unchanged (like a Const); the value is supplied at execute time via
+        // the ParamListInfo / ecxt_param_exec_vals (EEOP_PARAM_EXTERN/EXEC).
+        Node::Const(_) | Node::Var(_) | Node::CaseTestExpr(_) | Node::Param(_) => {}
         Node::OpExpr(op) | Node::NullIfExpr(op) => {
             op.args.iter().for_each(|a| fix_scan_expr_identity(Some(a)));
         }

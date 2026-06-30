@@ -161,6 +161,12 @@ where
     // the pins on the origin worker -> the buffer-pin assertions trip).
     let inner = with_private_refcount(|| inner);
 
+    // Per-backend named-portal table (portalmem.c PortalHashTable) and prepared-
+    // statement table (prepare.c prepared_queries dynahash): both per-task, holding
+    // non-Send plans/stores, so they bracket the command loop here.
+    let inner = crate::backend::tcop::pquery::portal_scope_async(inner);
+    let inner = crate::backend::commands::prepare::prepared_scope_async(inner);
+
     let body = Box::pin(catalog_index_scope(Box::pin(inner)));
     let body = Box::pin(relcache_scope(body));
     let body = Box::pin(catcache_scope(body));
@@ -347,13 +353,43 @@ async fn dispatch_command(shared: &Arc<SharedState>, firstchar: u8, body: &[u8])
             exec_simple_query(shared, query_string).await;
             CommandResult::Continue { ready: true }
         }
-        PQMSG_PARSE | PQMSG_BIND | PQMSG_EXECUTE | PQMSG_DESCRIBE | PQMSG_CLOSE => {
-            unimplemented!("extended query protocol (Parse/Bind/Execute/Describe/Close) deferred")
+        PQMSG_PARSE => {
+            exec_parse_message(shared, body).await;
+            CommandResult::Continue { ready: false }
+        }
+        PQMSG_BIND => {
+            exec_bind_message(shared, body).await;
+            CommandResult::Continue { ready: false }
+        }
+        PQMSG_EXECUTE => {
+            exec_execute_message(body);
+            CommandResult::Continue { ready: false }
+        }
+        PQMSG_DESCRIBE => {
+            // Body: subtype byte ('S' statement / 'P' portal) + name.
+            let mut r = std::io::Cursor::new(body);
+            let subtype = crate::backend::libpq::pqformat::pq_getmsgbyte(&mut r) as u8;
+            let name = crate::backend::libpq::pqformat::pq_getmsgstring(&mut r).to_owned();
+            match subtype {
+                b'S' => exec_describe_statement_message(&name),
+                b'P' => exec_describe_portal_message(&name),
+                other => {
+                    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                        e.errcode(crate::utils::errcodes::ERRCODE_PROTOCOL_VIOLATION)
+                            .errmsg(format!("invalid DESCRIBE message subtype {}", other as char));
+                    });
+                }
+            }
+            CommandResult::Continue { ready: false }
+        }
+        PQMSG_CLOSE => {
+            exec_close_message(body);
+            CommandResult::Continue { ready: false }
         }
         PQMSG_FUNCTION_CALL => unimplemented!("fastpath function call deferred"),
         PQMSG_FLUSH => CommandResult::Continue { ready: false },
         PQMSG_SYNC => {
-            finish_xact_command();
+            finish_xact_command_async(shared).await;
             CommandResult::Continue { ready: true }
         }
         // Terminate or EOF: the frontend is closing the socket. Normal exit.
@@ -532,6 +568,362 @@ async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Extended query protocol (Parse / Bind / Describe / Execute / Close / Sync).
+//
+// Parse ('P') analyzes a query (with declared $n type OIDs) into a
+// CachedPlanSource, stored in the per-backend prepared-statement table (unnamed
+// statement = ""). Bind ('B') decodes the parameter values (text format), gets
+// the cached plan, and MATERIALIZES the bound result into a named portal's store
+// (mirroring the cursor path, so Execute/Describe/repeat-Execute work). Describe
+// ('D') sends ParameterDescription + RowDescription (statement) or RowDescription
+// (portal). Execute ('E') replays the portal's store as DataRows + CommandComplete
+// (or PortalSuspended if a row limit cut it short). Close ('C') drops a statement
+// or portal; Sync ('S') closes the implicit transaction + ReadyForQuery.
+//
+// STAGED: binary parameter/result formats (text is wired); the streaming
+// (non-materialized) Execute with true PortalSuspended/resume across separate
+// Execute messages beyond the materialized store; multi-statement Parse.
+// ---------------------------------------------------------------------------
+
+/// PG `exec_parse_message`: handle a Parse ('P') message. Body is the statement
+/// name, the query string, and a count of parameter type OIDs. Analyzes the query
+/// with those types (deducing unknowns) and stores a CachedPlanSource.
+async fn exec_parse_message(shared: &Arc<SharedState>, body: &[u8]) {
+    use crate::backend::libpq::pqformat::{pq_getmsgint, pq_getmsgstring};
+    use crate::backend::parser::analyze::parse_analyze_varparams_async;
+    use crate::backend::parser::parser::raw_parser;
+    use crate::backend::rewrite::rewriteHandler::query_rewrite;
+    use crate::backend::utils::cache::plancache::{CompleteCachedPlan, CreateCachedPlan};
+    use crate::nodes::nodes::{CmdType, Node};
+    use crate::nodes::parsenodes::RawStmt;
+    use crate::parser::parser::RawParseMode;
+
+    let mut r = std::io::Cursor::new(body);
+    let stmt_name = pq_getmsgstring(&mut r).to_owned();
+    let query_string = pq_getmsgstring(&mut r).to_owned();
+    let num_param_types = pq_getmsgint(&mut r, 2) as usize;
+    let mut param_types: Vec<crate::postgres_ext::Oid> = (0..num_param_types)
+        .map(|_| crate::postgres_ext::Oid(pq_getmsgint(&mut r, 4)))
+        .collect();
+
+    // start_xact_command + raw parse. An empty query string yields an empty
+    // CachedPlanSource (the Execute later sends EmptyQueryResponse). M9 reaches a
+    // single statement.
+    ensure_xact_started(shared).await;
+    push_statement_snapshot(shared);
+
+    let mut parsetrees = raw_parser(&query_string, RawParseMode::Default);
+    let (command_tag, query_list) = if parsetrees.is_empty() {
+        (CommandTag::Unknown, Vec::new())
+    } else {
+        if parsetrees.len() != 1 {
+            unimplemented!("exec_parse_message: multi-statement Parse deferred");
+        }
+        let Node::RawStmt(raw) = parsetrees.remove(0) else {
+            unreachable!("raw_parser yields RawStmt nodes");
+        };
+        let raw: RawStmt = *raw;
+        let inner = raw
+            .stmt
+            .clone()
+            .unwrap_or_else(|| unreachable!("a non-empty RawStmt carries its statement"));
+        let command_tag = crate::backend::tcop::utility::create_command_tag(&inner);
+        let analyzed =
+            parse_analyze_varparams_async(shared, &raw, &query_string, &mut param_types).await;
+        let qlist = if matches!(
+            analyzed.commandType,
+            CmdType::INSERT | CmdType::UPDATE | CmdType::DELETE | CmdType::MERGE
+        ) {
+            vec![*analyzed]
+        } else {
+            query_rewrite(*analyzed)
+        };
+        (command_tag, qlist)
+    };
+
+    crate::backend::utils::time::snapmgr::PopActiveSnapshot();
+
+    // Build + complete the CachedPlanSource, then store it under the statement name.
+    let raw_for_source = RawStmt { stmt: None, stmt_location: -1, stmt_len: 0 };
+    let mut plansource = CreateCachedPlan(raw_for_source, &query_string, command_tag);
+    let num_params = i32::try_from(param_types.len()).unwrap_or(0);
+    CompleteCachedPlan(&mut plansource, query_list, &param_types, num_params, None, 0, true);
+    crate::backend::commands::prepare::store_or_replace_prepared_statement(&stmt_name, plansource, false);
+
+    // ParseComplete ('1').
+    crate::backend::libpq::pqcomm::pq_putmessage_sync(
+        crate::libpq::protocol::PQMSG_PARSE_COMPLETE,
+        &[],
+    );
+}
+
+/// PG `exec_bind_message`: handle a Bind ('B') message. Body: portal name,
+/// statement name, parameter format codes, parameter values, result format codes.
+/// Decodes the params (text format), gets the cached plan, materializes the bound
+/// result into the named portal, and replies BindComplete ('2').
+async fn exec_bind_message(shared: &Arc<SharedState>, body: &[u8]) {
+    use crate::backend::libpq::pqformat::{pq_getmsgbytes, pq_getmsgint, pq_getmsgstring};
+    use crate::nodes::params::{makeParamList, ParamFlags};
+
+    let mut r = std::io::Cursor::new(body);
+    let portal_name = pq_getmsgstring(&mut r).to_owned();
+    let stmt_name = pq_getmsgstring(&mut r).to_owned();
+
+    // Parameter format codes.
+    let num_pformats = pq_getmsgint(&mut r, 2) as usize;
+    let pformats: Vec<i16> =
+        (0..num_pformats).map(|_| pq_getmsgint(&mut r, 2) as i16).collect();
+
+    // Parameter values.
+    let num_params = pq_getmsgint(&mut r, 2) as usize;
+    let mut raw_params: Vec<Option<Vec<u8>>> = Vec::with_capacity(num_params);
+    for _ in 0..num_params {
+        let len = pq_getmsgint(&mut r, 4) as i32;
+        if len == -1 {
+            raw_params.push(None);
+        } else {
+            raw_params.push(Some(pq_getmsgbytes(&mut r, len).to_vec()));
+        }
+    }
+    // Result format codes (consumed; text-only output for M9).
+    let result_format_count = pq_getmsgint(&mut r, 2) as usize;
+    for _ in 0..result_format_count {
+        let _ = pq_getmsgint(&mut r, 2);
+    }
+
+    ensure_xact_started(shared).await;
+    push_statement_snapshot(shared);
+
+    // Decode the params + clone the plan under the plansource borrow (sync); the
+    // RefCell borrow must NOT be held across the async materialization below.
+    let (query_string, plan, command_tag, param_li) =
+        crate::backend::commands::prepare::with_plansource(&stmt_name, |src| {
+            let param_types = src.param_types.clone();
+            let mut param_li = makeParamList(i32::try_from(param_types.len()).unwrap_or(0));
+            for (i, ptype) in param_types.iter().enumerate() {
+                let fmt = param_format_code(&pformats, i, num_params);
+                let prm = &mut param_li.params[i];
+                prm.ptype = *ptype;
+                prm.pflags = ParamFlags::CONST;
+                match raw_params.get(i).and_then(Option::as_ref) {
+                    None => {
+                        prm.isnull = true;
+                        prm.value = crate::postgres::Datum(0);
+                    }
+                    Some(bytes) if fmt == 0 => {
+                        let text = String::from_utf8_lossy(bytes);
+                        prm.value = type_input(*ptype, &text);
+                        prm.isnull = false;
+                    }
+                    Some(_) => {
+                        unimplemented!("Bind: binary parameter format (format code 1) deferred");
+                    }
+                }
+            }
+            let cplan =
+                crate::backend::utils::cache::plancache::GetCachedPlan(src, Some(&param_li), None);
+            let plan = cplan.stmt_list.first().cloned();
+            (src.query_string.clone(), plan, src.commandTag, param_li)
+        });
+
+    // Materialize the bound result into the named portal (mirrors the cursor path)
+    // so Execute / Describe / repeated Execute navigate the store.
+    let (store, tupdesc, _processed) = match &plan {
+        Some(plan) => {
+            crate::backend::tcop::pquery::run_plan_into_store(
+                shared,
+                plan,
+                &query_string,
+                Some(&param_li),
+            )
+            .await
+        }
+        // An empty-query statement: an empty store + no descriptor.
+        None => (
+            crate::backend::utils::sort::tuplestore::tuplestore_begin_heap(true, false, 1024),
+            None,
+            0,
+        ),
+    };
+
+    crate::backend::utils::time::snapmgr::PopActiveSnapshot();
+
+    install_bound_portal(&portal_name, &query_string, command_tag, store, tupdesc);
+
+    // BindComplete ('2').
+    crate::backend::libpq::pqcomm::pq_putmessage_sync(
+        crate::libpq::protocol::PQMSG_BIND_COMPLETE,
+        &[],
+    );
+}
+
+/// Install a freshly-materialized bound portal into the per-task portal table.
+fn install_bound_portal(
+    portal_name: &str,
+    query_string: &str,
+    command_tag: CommandTag,
+    store: Box<crate::utils::tuplestore::Tuplestorestate>,
+    tupdesc: Option<crate::access::tupdesc::TupleDesc>,
+) {
+    use crate::backend::tcop::pquery::{create_named_portal, with_named_portal};
+    use crate::utils::portal::PortalStatus;
+    // Bind replaces an existing portal of the same name (allow_dup, silent).
+    create_named_portal(portal_name, true, true);
+    with_named_portal(portal_name, |portal| {
+        portal.source_text = query_string.to_string();
+        portal.command_tag = command_tag;
+        portal.tup_desc = tupdesc;
+        portal.hold_store = Some(store);
+        portal.status = PortalStatus::Ready;
+        portal.at_start = true;
+        portal.at_end = false;
+        portal.portal_pos = 0;
+    })
+    .unwrap_or_else(|| unreachable!("bound portal just created"));
+}
+
+/// PG `exec_describe_statement_message`: handle Describe ('D') of a prepared
+/// statement. Sends ParameterDescription ('t') then RowDescription ('T') or
+/// NoData ('n').
+fn exec_describe_statement_message(stmt_name: &str) {
+    use crate::backend::libpq::pqcomm::pq_putmessage_sync;
+    use crate::backend::libpq::pqformat::PqMsg;
+
+    let (param_types, tupdesc) = crate::backend::commands::prepare::statement_describe(stmt_name);
+
+    // ParameterDescription: int16 count, then one int32 type OID per parameter.
+    let mut msg = PqMsg::default();
+    msg.begin_message(crate::libpq::protocol::PQMSG_PARAMETER_DESCRIPTION);
+    msg.send_int16(u16::try_from(param_types.len()).unwrap_or(0));
+    for ptype in &param_types {
+        msg.send_int32(ptype.0);
+    }
+    pq_putmessage_sync(msg.msgtype, &msg.data);
+
+    send_row_description_or_nodata(tupdesc.as_ref());
+}
+
+/// PG `exec_describe_portal_message`: handle Describe ('D') of a portal. Sends
+/// RowDescription ('T') or NoData ('n') for the portal's result.
+fn exec_describe_portal_message(portal_name: &str) {
+    let tupdesc = crate::backend::tcop::pquery::with_named_portal(portal_name, |p| p.tup_desc.clone());
+    let Some(tupdesc) = tupdesc else {
+        portal_not_found(portal_name);
+    };
+    send_row_description_or_nodata(tupdesc.as_ref());
+}
+
+/// Send a RowDescription ('T') for `tupdesc`, or NoData ('n') if the statement
+/// returns no rows. Text format for every column (M9 wire mode).
+fn send_row_description_or_nodata(tupdesc: Option<&crate::access::tupdesc::TupleDesc>) {
+    match tupdesc {
+        Some(td) => {
+            crate::backend::access::common::printtup::send_row_description_message(td, &[]);
+        }
+        None => {
+            crate::backend::libpq::pqcomm::pq_putmessage_sync(crate::libpq::protocol::PQMSG_NO_DATA, &[]);
+        }
+    }
+}
+
+/// PG `exec_execute_message`: handle Execute ('E'). Body: portal name + max row
+/// count (0 = all). Replays the portal's materialized store as DataRows, then
+/// sends CommandComplete (all rows fetched) or PortalSuspended (row limit hit).
+fn exec_execute_message(body: &[u8]) {
+    use crate::backend::libpq::pqformat::{pq_getmsgint, pq_getmsgstring};
+    use crate::nodes::parsenodes::{FetchDirection, FETCH_ALL};
+
+    let mut r = std::io::Cursor::new(body);
+    let portal_name = pq_getmsgstring(&mut r).to_owned();
+    let max_rows = i64::from(pq_getmsgint(&mut r, 4));
+    let count = if max_rows == 0 { FETCH_ALL } else { max_rows };
+
+    if !crate::backend::tcop::pquery::portal_exists(&portal_name) {
+        portal_not_found(&portal_name);
+    }
+
+    // DestRemoteExecute: a printtup receiver that does NOT send a RowDescription
+    // (Execute relies on a prior Describe for that, per the protocol).
+    let mut receiver = crate::backend::tcop::dest::create_dest_receiver(CommandDest::DestRemoteExecute);
+    crate::backend::access::common::printtup::set_remote_dest_receiver_params(receiver.as_mut(), &[]);
+
+    let (fetched, completed, command_tag) = crate::backend::tcop::pquery::with_named_portal(
+        &portal_name,
+        |portal| {
+            let n = crate::backend::tcop::pquery::portal_run_fetch(
+                portal,
+                FetchDirection::FORWARD,
+                count,
+                Some(receiver.as_mut()),
+            );
+            (n, portal.at_end, portal.command_tag)
+        },
+    )
+    .unwrap_or_else(|| unreachable!("portal existence checked above"));
+
+    if completed || count == FETCH_ALL {
+        // CommandComplete with the tag + row count.
+        let qc = crate::tcop::cmdtag::QueryCompletion { command_tag, nprocessed: fetched };
+        crate::backend::tcop::dest::end_command(&qc, CommandDest::DestRemoteExecute, false);
+    } else {
+        // PortalSuspended: more rows remain, the row limit was hit.
+        crate::backend::libpq::pqcomm::pq_putmessage_sync(
+            crate::libpq::protocol::PQMSG_PORTAL_SUSPENDED,
+            &[],
+        );
+    }
+}
+
+#[cold]
+fn portal_not_found(name: &str) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_CURSOR)
+            .errmsg(format!("portal \"{name}\" does not exist"));
+    });
+    unreachable!("ereport(ERROR) diverges");
+}
+
+/// PG `exec_close_message`: handle Close ('C'). Drops a statement ('S') or portal
+/// ('P') and replies CloseComplete ('3').
+fn exec_close_message(body: &[u8]) {
+    use crate::backend::libpq::pqformat::{pq_getmsgbyte, pq_getmsgstring};
+    let mut r = std::io::Cursor::new(body);
+    let kind = pq_getmsgbyte(&mut r) as u8;
+    let name = pq_getmsgstring(&mut r).to_owned();
+    match kind {
+        b'S' => crate::backend::commands::prepare::drop_prepared_statement(&name, false),
+        b'P' => crate::backend::tcop::pquery::drop_named_portal(&name),
+        other => {
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_PROTOCOL_VIOLATION)
+                    .errmsg(format!("invalid CLOSE message subtype {}", other as char));
+            });
+        }
+    }
+    crate::backend::libpq::pqcomm::pq_putmessage_sync(crate::libpq::protocol::PQMSG_CLOSE_COMPLETE, &[]);
+}
+
+/// The format code for parameter `i` (PG's per-param vs single-code-for-all
+/// convention): 0 codes -> all text; 1 code -> that code for all; else per-param.
+fn param_format_code(pformats: &[i16], i: usize, _num_params: usize) -> i16 {
+    match pformats.len() {
+        0 => 0,
+        1 => pformats[0],
+        _ => pformats.get(i).copied().unwrap_or(0),
+    }
+}
+
+/// Run a type's input function over `text` to produce its internal Datum (the
+/// text-format parameter decode). PG calls the type's `typinput` via
+/// `OidInputFunctionCall` after `getTypeInputInfo`.
+fn type_input(type_oid: crate::postgres_ext::Oid, text: &str) -> crate::postgres::Datum {
+    let (typinput, typioparam) =
+        crate::backend::utils::cache::lsyscache::get_type_input_info(type_oid);
+    crate::backend::utils::fmgr::fmgr::OidInputFunctionCall(typinput, text, typioparam, -1)
+        .unwrap_or_else(|| unreachable!("text-format param input produced a value"))
+}
+
 /// PG `IsTransactionExitStmt`: a transaction-control statement that ends (or can
 /// end) the current block -- COMMIT / PREPARE / ROLLBACK / ROLLBACK TO. These are
 /// the only statements allowed to run while the block is in the aborted state.
@@ -552,7 +944,10 @@ fn is_transaction_exit_stmt(stmt: Option<&crate::nodes::nodes::Node>) -> bool {
 /// advancing the shared variable cache directly reproduces the visible effect that
 /// makes committed work observable across the autocommit transaction boundary. A
 /// read-only statement assigns no xid (`None`) and needs no advance.
-fn publish_committed_xid(shared: &Arc<SharedState>, committed: Option<crate::c::TransactionId>) {
+pub(crate) fn publish_committed_xid(
+    shared: &Arc<SharedState>,
+    committed: Option<crate::c::TransactionId>,
+) {
     use crate::access::transam::{
         full_transaction_id_from_u64, u64_from_full_transaction_id, xid_from_full_transaction_id,
     };
@@ -584,6 +979,36 @@ async fn run_plan_over_wire(
     dest: CommandDest,
     qc: &mut crate::tcop::cmdtag::QueryCompletion,
 ) {
+    // Build a DestRemote printtup receiver (text format for every column in simple
+    // Query mode), run the plan, and report the row count.
+    let mut receiver = crate::backend::tcop::dest::create_dest_receiver(dest);
+    if dest == CommandDest::DestRemote {
+        crate::backend::access::common::printtup::set_remote_dest_receiver_params(
+            receiver.as_mut(),
+            &[],
+        );
+    }
+    let processed = execute_plan_into(shared, plan, query_string, None, receiver, 0).await;
+    qc.command_tag = command_tag;
+    qc.nprocessed = processed;
+}
+
+/// Run a planned SELECT / INSERT / UPDATE / DELETE to completion (or `count` rows)
+/// into `receiver`, returning the number of rows processed. Opens the plan's
+/// range-table + index relations (the `'rel` ownership root is this frame), runs
+/// ExecutorStart/Run/Finish/End against the active snapshot, then closes them.
+///
+/// This is the shared executor frame behind the simple-Query wire path, EXECUTE,
+/// cursor materialization (portalcmds), and SPI. `bound_params` carries the $n
+/// values for a parameterized plan (PG `queryDesc->params`).
+pub(crate) async fn execute_plan_into(
+    shared: &Arc<SharedState>,
+    plan: &crate::nodes::plannodes::PlannedStmt,
+    query_string: &str,
+    bound_params: Option<&crate::nodes::params::ParamListInfoData>,
+    receiver: Box<dyn crate::tcop::dest::DestReceiver>,
+    count: u64,
+) -> u64 {
     use crate::access::sdir::ScanDirection;
     use crate::backend::executor::execMain::{
         standard_executor_end, standard_executor_finish, standard_executor_run,
@@ -610,20 +1035,16 @@ async fn run_plan_over_wire(
         range_table_rels[*rti - 1] = Some(&**rel);
     }
 
-    // Build the QueryDesc with the active snapshot + a DestRemote printtup receiver
-    // (text format for every column in simple Query mode).
-    let mut receiver = crate::backend::tcop::dest::create_dest_receiver(dest);
-    if dest == CommandDest::DestRemote {
-        crate::backend::access::common::printtup::set_remote_dest_receiver_params(
-            receiver.as_mut(),
-            &[],
-        );
-    }
     let snap = crate::backend::utils::time::snapmgr::GetActiveSnapshot();
     // The snapshot `Arc` is owned here (the command frame), so the scan can borrow
     // `&*snap` across its `.await`s.
     let snapshot_ref = snap.as_deref();
     let mut query_desc = make_query_desc(plan, query_string, snap.clone(), receiver);
+    // Thread the bound $n params (PG `queryDesc->params`); ExecutorStart copies them
+    // onto the EState and CreateExprContext threads them to EEOP_PARAM_EXTERN.
+    if let Some(params) = bound_params {
+        query_desc.params = Some(Box::new(Box::new(params.clone())));
+    }
 
     // Borrowed index-relation slice (PG es_index_rels): the executor's
     // ExecGetIndexRelation finds the open index by OID among these.
@@ -637,11 +1058,9 @@ async fn run_plan_over_wire(
         snapshot_ref,
         0,
     );
-    standard_executor_run(Some(shared), &mut query_desc, ScanDirection::Forward, 0).await;
+    standard_executor_run(Some(shared), &mut query_desc, ScanDirection::Forward, count).await;
     standard_executor_finish(&mut query_desc);
     let processed = query_desc.estate.as_ref().map_or(0, |e| e.processed);
-    qc.command_tag = command_tag;
-    qc.nprocessed = processed;
     standard_executor_end(Some(shared), &mut query_desc);
 
     // Drop the borrows before closing the owners.
@@ -655,6 +1074,8 @@ async fn run_plan_over_wire(
     }
     // The index Arcs are registry clones; dropping them just releases the refcount.
     drop(opened_indexes);
+
+    processed
 }
 
 /// Open the index relations a plan's IndexScan / IndexOnlyScan / BitmapIndexScan
@@ -777,7 +1198,9 @@ fn make_query_desc<'rel>(
 /// PG `pg_plan_query`'s utility shortcut: wrap a CMD_UTILITY `Query`'s utilityStmt
 /// in a trivial `PlannedStmt` (no plan tree, no range table) that ProcessUtility
 /// consumes. The planner is never invoked for a utility statement.
-fn wrap_utility_stmt(query: &crate::nodes::parsenodes::Query) -> crate::nodes::plannodes::PlannedStmt {
+pub(crate) fn wrap_utility_stmt(
+    query: &crate::nodes::parsenodes::Query,
+) -> crate::nodes::plannodes::PlannedStmt {
     use crate::nodes::nodes::CmdType;
     let utility_stmt = query
         .utilityStmt
@@ -843,16 +1266,20 @@ async fn start_xact_command_async(shared: &Arc<SharedState>) {
     crate::backend::access::transam::xact::StartTransactionCommand(shared).await;
 }
 
+/// PG `start_xact_command`'s idempotent guard for the extended protocol: start a
+/// transaction only if one is not already open. Across a Parse/Bind/Describe/
+/// Execute pipeline the transaction stays open until Sync commits it, so the
+/// per-message handlers must not re-issue StartTransactionCommand from the
+/// `Started` state (which the block-state machine rejects).
+async fn ensure_xact_started(shared: &Arc<SharedState>) {
+    if !crate::backend::access::transam::xact::IsTransactionState() {
+        crate::backend::access::transam::xact::StartTransactionCommand(shared).await;
+    }
+}
+
 /// PG `finish_xact_command`: commit the per-statement (autocommit) transaction.
 async fn finish_xact_command_async(shared: &Arc<SharedState>) {
     crate::backend::access::transam::xact::CommitTransactionCommand(shared).await;
-}
-
-/// Sync `finish_xact_command` for the Sync-message path (extended protocol, M1
-/// near-no-op): nothing to commit when no statement transaction is open.
-fn finish_xact_command() {
-    // Sync between extended-protocol commands: the autocommit transaction is opened
-    // and committed per simple-Query statement, so there is nothing to do here yet.
 }
 
 /// Push the active snapshot the statement runs under (PG's portal/transaction
@@ -2258,6 +2685,190 @@ mod wire_tests {
             b"I",
             "stray COMMIT leaves the session idle, not failed"
         );
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// THE M9 MILESTONE (prepared statements): PREPARE / EXECUTE / DEALLOCATE over
+    /// the wire. `PREPARE p(int) AS SELECT $1 + 1` then `EXECUTE p(41)` -> 42,
+    /// `EXECUTE p(7)` -> 8; `DEALLOCATE p` then `EXECUTE p(1)` -> the prepared
+    /// statement no longer exists (failed-transaction status on the RFQ).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m9_prepare_execute_deallocate_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+        let c = &mut client;
+        let b = &mut buf;
+
+        let prep = simple_query(c, b, "PREPARE p(int) AS SELECT $1 + 1").await;
+        assert_eq!(complete_tag(&prep), "PREPARE", "PREPARE completion tag");
+
+        // EXECUTE p(41) -> 42.
+        let ex = simple_query(c, b, "EXECUTE p(41)").await;
+        assert_eq!(reply_single_col(&ex), vec!["42"], "EXECUTE p(41) = 42");
+
+        // EXECUTE p(7) -> 8 (re-execute the same prepared statement).
+        let ex = simple_query(c, b, "EXECUTE p(7)").await;
+        assert_eq!(reply_single_col(&ex), vec!["8"], "EXECUTE p(7) = 8");
+
+        // DEALLOCATE p.
+        let dealloc = simple_query(c, b, "DEALLOCATE p").await;
+        assert_eq!(complete_tag(&dealloc), "DEALLOCATE", "DEALLOCATE completion tag");
+
+        // EXECUTE p again -> error: the prepared statement no longer exists. The
+        // errored statement leaves the (implicit) command in the failed state; no
+        // DataRow / CommandComplete is produced for the rejected EXECUTE.
+        let gone = simple_query(c, b, "EXECUTE p(1)").await;
+        assert!(!gone.iter().any(|m| m.ty == b'D'), "deallocated EXECUTE returns no rows");
+        assert!(!gone.iter().any(|m| m.ty == b'C'), "deallocated EXECUTE has no CommandComplete");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// THE M9 MILESTONE (cursors): DECLARE / FETCH / MOVE / CLOSE over the wire,
+    /// inside a transaction block, over a multi-row table.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m9_declare_fetch_close_cursor_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+        let c = &mut client;
+        let b = &mut buf;
+
+        simple_query(c, b, "CREATE TABLE t (a int)").await;
+        for v in [1, 2, 3, 4, 5] {
+            simple_query(c, b, &format!("INSERT INTO t VALUES ({v})")).await;
+        }
+
+        // A cursor requires a transaction block.
+        simple_query(c, b, "BEGIN").await;
+        let decl = simple_query(c, b, "DECLARE cur CURSOR FOR SELECT a FROM t ORDER BY a").await;
+        assert_eq!(complete_tag(&decl), "DECLARE CURSOR", "DECLARE CURSOR tag");
+
+        // FETCH 2 -> the first two rows.
+        let f2 = simple_query(c, b, "FETCH 2 FROM cur").await;
+        assert_eq!(reply_single_col(&f2), vec!["1", "2"], "FETCH 2 -> first two rows");
+        assert_eq!(complete_tag(&f2), "FETCH 2", "FETCH 2 row count");
+
+        // FETCH ALL -> the remaining three rows.
+        let fall = simple_query(c, b, "FETCH ALL FROM cur").await;
+        assert_eq!(reply_single_col(&fall), vec!["3", "4", "5"], "FETCH ALL -> remainder");
+        assert_eq!(complete_tag(&fall), "FETCH 3", "FETCH ALL row count");
+
+        // FETCH past end -> zero rows.
+        let fend = simple_query(c, b, "FETCH 2 FROM cur").await;
+        assert!(!fend.iter().any(|m| m.ty == b'D'), "FETCH past end -> no rows");
+        assert_eq!(complete_tag(&fend), "FETCH 0", "FETCH past end -> 0");
+
+        // MOVE BACKWARD then FETCH re-reads (scrollable materialized store). After
+        // FETCH ALL the cursor sits past row 5; MOVE BACKWARD 2 lands on row 4, and
+        // FETCH FORWARD 1 returns the next row -> row 5 (PG cursor semantics).
+        let mv = simple_query(c, b, "MOVE BACKWARD 2 FROM cur").await;
+        assert_eq!(complete_tag(&mv), "MOVE 2", "MOVE BACKWARD 2");
+        let refetch = simple_query(c, b, "FETCH 1 FROM cur").await;
+        assert_eq!(reply_single_col(&refetch), vec!["5"], "FETCH FORWARD after MOVE BACKWARD 2 -> row 5");
+
+        // CLOSE the cursor; a later FETCH errors (cursor does not exist) and the
+        // block enters the failed state.
+        let close = simple_query(c, b, "CLOSE cur").await;
+        assert_eq!(complete_tag(&close), "CLOSE CURSOR", "CLOSE CURSOR tag");
+        let after = simple_query(c, b, "FETCH 1 FROM cur").await;
+        assert!(!after.iter().any(|m| m.ty == b'D'), "FETCH on a closed cursor -> no rows");
+        assert!(!after.iter().any(|m| m.ty == b'C'), "FETCH on a closed cursor -> no CommandComplete");
+
+        simple_query(c, b, "ROLLBACK").await;
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// THE M9 MILESTONE (extended protocol): a Parse / Bind / Describe / Execute /
+    /// Sync sequence for a parameterized `SELECT $1 + 1` over the wire. Asserts the
+    /// ParseComplete / BindComplete / RowDescription / DataRow(42) / CommandComplete
+    /// / ReadyForQuery sequence.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m9_extended_protocol_parse_bind_execute_over_the_wire() {
+        use crate::libpq::protocol::{
+            PQMSG_BIND, PQMSG_DESCRIBE, PQMSG_EXECUTE, PQMSG_PARSE, PQMSG_SYNC,
+        };
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        // --- Parse ('P'): statement "" / query "SELECT $1 + 1" / 1 param type int4.
+        let mut parse_body = Vec::new();
+        parse_body.extend_from_slice(b"\0"); // unnamed statement
+        parse_body.extend_from_slice(b"SELECT $1 + 1\0");
+        parse_body.extend_from_slice(&1u16.to_be_bytes()); // 1 param type
+        parse_body.extend_from_slice(&23u32.to_be_bytes()); // int4 OID
+
+        // --- Bind ('B'): portal "" / statement "" / 0 pformats / 1 param "41" / 0 rformats.
+        let mut bind_body = Vec::new();
+        bind_body.extend_from_slice(b"\0"); // unnamed portal
+        bind_body.extend_from_slice(b"\0"); // unnamed statement
+        bind_body.extend_from_slice(&0u16.to_be_bytes()); // 0 param format codes (all text)
+        bind_body.extend_from_slice(&1u16.to_be_bytes()); // 1 param value
+        bind_body.extend_from_slice(&2u32.to_be_bytes()); // length 2
+        bind_body.extend_from_slice(b"41");
+        bind_body.extend_from_slice(&0u16.to_be_bytes()); // 0 result format codes
+
+        // --- Describe ('D'): portal "".
+        let mut describe_body = Vec::new();
+        describe_body.push(b'P');
+        describe_body.extend_from_slice(b"\0");
+
+        // --- Execute ('E'): portal "" / max 0 (all rows).
+        let mut execute_body = Vec::new();
+        execute_body.extend_from_slice(b"\0");
+        execute_body.extend_from_slice(&0u32.to_be_bytes());
+
+        let mut msgs = Vec::new();
+        msgs.extend_from_slice(&framed(PQMSG_PARSE, &parse_body));
+        msgs.extend_from_slice(&framed(PQMSG_BIND, &bind_body));
+        msgs.extend_from_slice(&framed(PQMSG_DESCRIBE, &describe_body));
+        msgs.extend_from_slice(&framed(PQMSG_EXECUTE, &execute_body));
+        msgs.extend_from_slice(&framed(PQMSG_SYNC, &[]));
+
+        let target_z = decode(&buf).iter().filter(|m| m.ty == b'Z').count() + 1;
+        client.write_all(&msgs).await.expect("write extended-protocol batch");
+        client.flush().await.expect("flush");
+        let before = decode(&buf).len();
+        let all = read_until(&mut client, &mut buf, |m| {
+            m.iter().filter(|x| x.ty == b'Z').count() >= target_z
+        })
+        .await;
+        let reply = &all[before..];
+        let types: Vec<u8> = reply.iter().map(|m| m.ty).collect();
+        // ParseComplete '1', BindComplete '2', RowDescription 'T', DataRow 'D',
+        // CommandComplete 'C', ReadyForQuery 'Z'.
+        assert_eq!(
+            types,
+            vec![b'1', b'2', b'T', b'D', b'C', b'Z'],
+            "Parse/Bind/Describe/Execute/Sync reply sequence"
+        );
+        let datarow = reply.iter().find(|m| m.ty == b'D').expect("a DataRow");
+        assert_eq!(datarow_single_text(&datarow.body), "42", "SELECT $1 + 1 with $1 = 41 -> 42");
 
         drop(client);
         sup.shutdown.trigger();

@@ -21,6 +21,7 @@ bitflags! {
 }
 
 /// Static per-parameter data for EXTERN parameters.
+#[derive(Clone)]
 pub struct ParamExternData {
     pub value: Datum,         // parameter value
     pub isnull: bool,         // is it NULL?
@@ -49,6 +50,12 @@ pub type ParamCompileHook =
 /// In-memory; the C FLEXIBLE_ARRAY_MEMBER `params[]` becomes a `Vec`. The
 /// dynamic-access hooks (paramFetch/paramCompile) are runtime-NULL-checkable
 /// fn pointers; their void* `arg` fields disappear (function-mapping 6.3).
+///
+/// `Clone` mirrors PG `copyParamList`: ExprContext gets its own handle to the
+/// EState's param list (CreateExprContextInternal copies the pointer; here, with
+/// owned data, we clone the cheap by-value param array). The const $n path holds
+/// only by-value Datums.
+#[derive(Clone)]
 pub struct ParamListInfoData {
     pub param_fetch: Option<ParamFetchHook>,
     pub param_compile: Option<ParamCompileHook>,
@@ -62,6 +69,7 @@ pub struct ParamListInfoData {
 pub type ParamListInfo = Box<ParamListInfoData>; // TODO(ptr)
 
 /// Executor internal parameters (EXEC).
+#[derive(Clone)]
 pub struct ParamExecData {
     pub exec_plan: usize, // should be "SubPlanState *" (void *) TODO(ptr)
     pub value: Datum,
@@ -75,11 +83,36 @@ pub struct ParamsErrorCbData {
 }
 
 // Functions in src/backend/nodes/params.c.
-pub fn makeParamList(_num_params: i32) -> ParamListInfo {
-    unimplemented!()
+
+/// PG `makeParamList`: allocate a `ParamListInfo` with `num_params` slots, each
+/// zero-initialized (value 0, NULL, no flags, invalid type). The dynamic hooks
+/// are left unset (a static param array).
+#[must_use]
+pub fn makeParamList(num_params: i32) -> ParamListInfo {
+    let n = usize::try_from(num_params.max(0)).unwrap_or(0);
+    let params = (0..n)
+        .map(|_| ParamExternData {
+            value: Datum(0),
+            isnull: true,
+            pflags: ParamFlags::empty(),
+            ptype: crate::postgres_ext::InvalidOid,
+        })
+        .collect();
+    Box::new(ParamListInfoData {
+        param_fetch: None,
+        param_compile: None,
+        parser_setup: None,
+        param_values_str: None,
+        num_params,
+        params,
+    })
 }
-pub fn copyParamList(_from: &ParamListInfoData) -> ParamListInfo {
-    unimplemented!()
+
+/// PG `copyParamList`: deep-copy a parameter list (only the static params[] array
+/// is meaningful here; a dynamic paramFetch list copies as the resolved slots).
+#[must_use]
+pub fn copyParamList(from: &ParamListInfoData) -> ParamListInfo {
+    Box::new(from.clone())
 }
 pub fn EstimateParamListSpace(_param_li: &ParamListInfoData) -> usize {
     unimplemented!()

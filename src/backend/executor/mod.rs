@@ -39,3 +39,4 @@ pub mod nodeSeqscan;
 pub mod nodeSort;
 pub mod nodeTidscan;
 pub mod nodeUnique;
+pub mod spi;

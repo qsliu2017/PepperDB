@@ -41,6 +41,8 @@ pub enum Token {
     FConst(String),
     /// SCONST - a single-quoted string literal (contents, quotes stripped).
     SConst(String),
+    /// PARAM - a `$n` positional parameter reference (PG scan.l `{param}`).
+    Param(i32),
 
     // Punctuation / single-char operators (PG returns the char code; we name them).
     Semi,    // ;
@@ -93,6 +95,12 @@ enum Raw {
     #[regex(r"'([^']|'')*'", |lex| unquote_sconst(lex.slice()))]
     String(String),
 
+    // PARAM: PG `\${decdigit}+`. The digits after `$` are the parameter number;
+    // overflowing i32 is a lex failure (PG's process_integer_literal errors on a
+    // `$n` that exceeds int range).
+    #[regex(r"\$[0-9]+", |lex| lex.slice()[1..].parse::<i32>().ok())]
+    Param(i32),
+
     #[token(";")] Semi,
     #[token(",")] Comma,
     #[token("*")] Star,
@@ -142,6 +150,7 @@ pub fn lex(src: &str) -> impl Iterator<Item = Result<(Loc, Token, Loc), LexError
             Raw::Integer(s) => integer_token(&s),
             Raw::Float(s) => Token::FConst(s),
             Raw::String(s) => Token::SConst(s),
+            Raw::Param(n) => Token::Param(n),
             Raw::Semi => Token::Semi,
             Raw::Comma => Token::Comma,
             Raw::Star => Token::Star,
@@ -242,6 +251,16 @@ mod tests {
     #[test]
     fn string_literal_unquotes() {
         assert_eq!(toks("'it''s'"), vec![Token::SConst("it's".to_string())]);
+    }
+
+    #[test]
+    fn param_lexes_to_number() {
+        assert_eq!(toks("$1 $42"), vec![Token::Param(1), Token::Param(42)]);
+    }
+
+    #[test]
+    fn param_overflow_is_lex_error() {
+        assert_eq!(lex("$99999999999").filter_map(Result::err).count(), 1);
     }
 
     #[test]

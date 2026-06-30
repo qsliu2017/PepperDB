@@ -2,5 +2,7 @@
 
 pub mod define;
 pub mod indexcmds;
+pub mod portalcmds;
+pub mod prepare;
 pub mod tablecmds;
 pub mod variable;

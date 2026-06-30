@@ -118,6 +118,84 @@ pub fn make_column_ref(parts: Vec<String>) -> Node {
     Node::ColumnRef(Box::new(ColumnRef { fields, location: -1 }))
 }
 
+/// gram.y `c_expr: PARAM opt_indirection`: a `$n` positional parameter reference.
+/// The opt_indirection (subscripts/field selection on the param) grows with the
+/// A_Indirection machinery; M9 reaches the bare `$n`.
+pub fn make_param_ref(number: i32, location: i32) -> Node {
+    Node::ParamRef(Box::new(crate::nodes::parsenodes::ParamRef { number, location }))
+}
+
+/// gram.y `PrepareStmt: PREPARE name prep_type_clause AS PreparableStmt`. The
+/// argtype Typenames are each wrapped as a `Node::TypeName` (the parse-list element
+/// currency); the query is the preparable statement node.
+pub fn make_prepare_stmt(name: String, argtypes: Vec<TypeName>, query: Node) -> Node {
+    let argtypes = argtypes.into_iter().map(|t| Node::TypeName(Box::new(t))).collect();
+    Node::PrepareStmt(Box::new(crate::nodes::parsenodes::PrepareStmt {
+        name: Some(name),
+        argtypes,
+        query: Some(query),
+    }))
+}
+
+/// gram.y `ExecuteStmt: EXECUTE name execute_param_clause`.
+pub fn make_execute_stmt(name: String, params: Vec<Node>) -> Node {
+    Node::ExecuteStmt(Box::new(crate::nodes::parsenodes::ExecuteStmt {
+        name: Some(name),
+        params,
+    }))
+}
+
+/// gram.y `DeallocateStmt`: DEALLOCATE [PREPARE] name | DEALLOCATE [PREPARE] ALL.
+pub fn make_deallocate_stmt(name: Option<String>, location: i32) -> Node {
+    let isall = name.is_none();
+    Node::DeallocateStmt(Box::new(crate::nodes::parsenodes::DeallocateStmt {
+        name,
+        isall,
+        location,
+    }))
+}
+
+/// gram.y `DeclareCursorStmt`. `options` already folds cursor_options | opt_hold |
+/// CURSOR_OPT_FAST_PLAN (PG always sets FAST_PLAN).
+pub fn make_declare_cursor_stmt(portalname: String, options: i32, query: Node) -> Node {
+    Node::DeclareCursorStmt(Box::new(crate::nodes::parsenodes::DeclareCursorStmt {
+        portalname: Some(portalname),
+        options,
+        query: Some(query),
+    }))
+}
+
+/// gram.y `ClosePortalStmt`: CLOSE cursor_name | CLOSE ALL (`None` portalname).
+pub fn make_close_portal_stmt(portalname: Option<String>) -> Node {
+    Node::ClosePortalStmt(Box::new(crate::nodes::parsenodes::ClosePortalStmt { portalname }))
+}
+
+/// gram.y `FetchStmt`: build the FetchStmt for a `fetch_args` form. `ismove` is
+/// stamped by the FETCH vs MOVE wrapper.
+pub fn make_fetch_stmt(
+    direction: crate::nodes::parsenodes::FetchDirection,
+    how_many: i64,
+    portalname: String,
+    ismove: bool,
+) -> Node {
+    Node::FetchStmt(Box::new(crate::nodes::parsenodes::FetchStmt {
+        direction,
+        howMany: how_many,
+        portalname: Some(portalname),
+        ismove,
+    }))
+}
+
+/// gram.y `FetchStmt: MOVE fetch_args`: flip a `fetch_args`-built FetchStmt to a
+/// MOVE (`ismove = true`).
+pub fn set_fetch_ismove(stmt: Node) -> Node {
+    let Node::FetchStmt(mut f) = stmt else {
+        unreachable!("set_fetch_ismove on a non-FetchStmt");
+    };
+    f.ismove = true;
+    Node::FetchStmt(f)
+}
+
 /// gram.y `table_ref: relation_expr`: a plain table name in FROM becomes a
 /// RangeVar node (the from_clause/table_ref item). Subqueries grow at their
 /// milestones; the optional alias is applied by `apply_rangevar_alias` first.
@@ -1374,5 +1452,201 @@ mod tests {
         assert_eq!(names("SHOW ALL"), "all");
         assert_eq!(names("SHOW TIME ZONE"), "timezone");
         assert_eq!(names("SHOW TRANSACTION ISOLATION LEVEL"), "transaction_isolation");
+    }
+
+    // --- M9 step 37: PREPARE/EXECUTE/DEALLOCATE/DECLARE/FETCH/MOVE/CLOSE + $n ---
+
+    /// Search a node tree for any ParamRef and return its `number`.
+    fn find_param(node: &Node) -> Option<i32> {
+        match node {
+            Node::ParamRef(p) => Some(p.number),
+            Node::SelectStmt(s) => s.targetList.iter().find_map(find_param),
+            Node::ResTarget(rt) => rt.val.as_ref().and_then(find_param),
+            Node::A_Expr(a) => a
+                .lexpr
+                .as_ref()
+                .and_then(find_param)
+                .or_else(|| a.rexpr.as_ref().and_then(find_param)),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn param_ref_in_select() {
+        let list = parse("SELECT $1");
+        let sel = one_select(&list);
+        let Node::ResTarget(rt) = &sel.targetList[0] else { panic!("not a ResTarget") };
+        let Some(Node::ParamRef(p)) = &rt.val else { panic!("target not a ParamRef") };
+        assert_eq!(p.number, 1);
+        assert_eq!(p.location, 7, "ParamRef carries the @L byte offset of $1");
+    }
+
+    #[test]
+    fn prepare_with_argtypes_and_param() {
+        let list = parse("PREPARE p (int) AS SELECT $1");
+        let Node::PrepareStmt(s) = one_stmt(&list) else { panic!("not a PrepareStmt") };
+        assert_eq!(s.name.as_deref(), Some("p"));
+        assert_eq!(s.argtypes.len(), 1, "one declared argtype");
+        assert!(matches!(&s.argtypes[0], Node::TypeName(_)), "argtype is a TypeName node");
+        let q = s.query.as_ref().expect("query present");
+        assert_eq!(find_param(q), Some(1), "query body contains $1");
+    }
+
+    #[test]
+    fn prepare_no_argtypes() {
+        let list = parse("PREPARE p AS SELECT 1");
+        let Node::PrepareStmt(s) = one_stmt(&list) else { panic!("not a PrepareStmt") };
+        assert_eq!(s.name.as_deref(), Some("p"));
+        assert!(s.argtypes.is_empty(), "no argtypes");
+    }
+
+    #[test]
+    fn prepare_multi_argtypes() {
+        let list = parse("PREPARE p (int, text) AS SELECT $1, $2");
+        let Node::PrepareStmt(s) = one_stmt(&list) else { panic!("not a PrepareStmt") };
+        assert_eq!(s.argtypes.len(), 2);
+    }
+
+    #[test]
+    fn execute_with_and_without_params() {
+        let list = parse("EXECUTE p (1)");
+        let Node::ExecuteStmt(s) = one_stmt(&list) else { panic!("not an ExecuteStmt") };
+        assert_eq!(s.name.as_deref(), Some("p"));
+        assert_eq!(s.params.len(), 1);
+
+        let list = parse("EXECUTE p");
+        let Node::ExecuteStmt(s) = one_stmt(&list) else { panic!("not an ExecuteStmt") };
+        assert!(s.params.is_empty(), "no param clause");
+    }
+
+    #[test]
+    fn deallocate_forms() {
+        let list = parse("DEALLOCATE p");
+        let Node::DeallocateStmt(s) = one_stmt(&list) else { panic!("not a DeallocateStmt") };
+        assert_eq!(s.name.as_deref(), Some("p"));
+        assert!(!s.isall);
+
+        let list = parse("DEALLOCATE PREPARE p");
+        let Node::DeallocateStmt(s) = one_stmt(&list) else { panic!("not a DeallocateStmt") };
+        assert_eq!(s.name.as_deref(), Some("p"));
+        assert!(!s.isall);
+
+        let list = parse("DEALLOCATE ALL");
+        let Node::DeallocateStmt(s) = one_stmt(&list) else { panic!("not a DeallocateStmt") };
+        assert!(s.name.is_none());
+        assert!(s.isall);
+        assert_eq!(s.location, -1);
+
+        let list = parse("DEALLOCATE PREPARE ALL");
+        let Node::DeallocateStmt(s) = one_stmt(&list) else { panic!("not a DeallocateStmt") };
+        assert!(s.isall);
+    }
+
+    #[test]
+    fn declare_cursor_options_and_hold() {
+        use crate::nodes::parsenodes::CursorOptions as C;
+        let list = parse("DECLARE c CURSOR FOR SELECT 1");
+        let Node::DeclareCursorStmt(s) = one_stmt(&list) else { panic!("not a DeclareCursorStmt") };
+        assert_eq!(s.portalname.as_deref(), Some("c"));
+        // PG always folds in FAST_PLAN.
+        assert!(C::from_bits_truncate(s.options).contains(C::FAST_PLAN));
+        assert!(s.query.is_some());
+
+        let list = parse("DECLARE c SCROLL CURSOR WITH HOLD FOR SELECT 1");
+        let Node::DeclareCursorStmt(s) = one_stmt(&list) else { panic!("not a DeclareCursorStmt") };
+        let opts = C::from_bits_truncate(s.options);
+        assert!(opts.contains(C::SCROLL));
+        assert!(opts.contains(C::HOLD));
+        assert!(opts.contains(C::FAST_PLAN));
+
+        let list = parse("DECLARE c BINARY INSENSITIVE NO SCROLL CURSOR WITHOUT HOLD FOR SELECT 1");
+        let Node::DeclareCursorStmt(s) = one_stmt(&list) else { panic!("not a DeclareCursorStmt") };
+        let opts = C::from_bits_truncate(s.options);
+        assert!(opts.contains(C::BINARY));
+        assert!(opts.contains(C::INSENSITIVE));
+        assert!(opts.contains(C::NO_SCROLL));
+        assert!(!opts.contains(C::HOLD), "WITHOUT HOLD does not set HOLD");
+    }
+
+    #[test]
+    fn close_portal_forms() {
+        let list = parse("CLOSE c");
+        let Node::ClosePortalStmt(s) = one_stmt(&list) else { panic!("not a ClosePortalStmt") };
+        assert_eq!(s.portalname.as_deref(), Some("c"));
+
+        let list = parse("CLOSE ALL");
+        let Node::ClosePortalStmt(s) = one_stmt(&list) else { panic!("not a ClosePortalStmt") };
+        assert!(s.portalname.is_none(), "CLOSE ALL has no portalname");
+    }
+
+    use crate::nodes::parsenodes::FETCH_ALL;
+
+    fn one_fetch(s: &str) -> crate::nodes::parsenodes::FetchStmt {
+        let list = parse(s);
+        let Node::FetchStmt(f) = one_stmt(&list) else { panic!("not a FetchStmt: {s}") };
+        (**f).clone()
+    }
+
+    #[test]
+    fn fetch_and_move_forms() {
+        use crate::nodes::parsenodes::FetchDirection as D;
+
+        let f = one_fetch("FETCH c");
+        assert_eq!(f.direction, D::FORWARD);
+        assert_eq!(f.howMany, 1);
+        assert_eq!(f.portalname.as_deref(), Some("c"));
+        assert!(!f.ismove);
+
+        let f = one_fetch("FETCH 1 FROM c");
+        assert_eq!(f.direction, D::FORWARD);
+        assert_eq!(f.howMany, 1);
+        assert_eq!(f.portalname.as_deref(), Some("c"));
+
+        let f = one_fetch("FETCH ALL IN c");
+        assert_eq!(f.direction, D::FORWARD);
+        assert_eq!(f.howMany, FETCH_ALL);
+
+        let f = one_fetch("FETCH NEXT c");
+        assert_eq!(f.direction, D::FORWARD);
+        assert_eq!(f.howMany, 1);
+
+        let f = one_fetch("FETCH PRIOR FROM c");
+        assert_eq!(f.direction, D::BACKWARD);
+
+        let f = one_fetch("FETCH FIRST c");
+        assert_eq!(f.direction, D::ABSOLUTE);
+        assert_eq!(f.howMany, 1);
+
+        let f = one_fetch("FETCH LAST c");
+        assert_eq!(f.direction, D::ABSOLUTE);
+        assert_eq!(f.howMany, -1);
+
+        let f = one_fetch("FETCH ABSOLUTE 5 c");
+        assert_eq!(f.direction, D::ABSOLUTE);
+        assert_eq!(f.howMany, 5);
+
+        let f = one_fetch("FETCH RELATIVE 3 FROM c");
+        assert_eq!(f.direction, D::RELATIVE);
+        assert_eq!(f.howMany, 3);
+
+        let f = one_fetch("FETCH FORWARD 2 c");
+        assert_eq!(f.direction, D::FORWARD);
+        assert_eq!(f.howMany, 2);
+
+        let f = one_fetch("FETCH FORWARD ALL c");
+        assert_eq!(f.howMany, FETCH_ALL);
+
+        let f = one_fetch("FETCH BACKWARD c");
+        assert_eq!(f.direction, D::BACKWARD);
+        assert_eq!(f.howMany, 1);
+
+        let f = one_fetch("FETCH BACKWARD ALL c");
+        assert_eq!(f.direction, D::BACKWARD);
+        assert_eq!(f.howMany, FETCH_ALL);
+
+        // MOVE flips ismove.
+        let f = one_fetch("MOVE FORWARD c");
+        assert_eq!(f.direction, D::FORWARD);
+        assert!(f.ismove);
     }
 }

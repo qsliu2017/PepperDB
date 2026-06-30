@@ -356,6 +356,434 @@ pub fn portal_drop(portal: &mut PortalData) {
     portal.status = PortalStatus::Done;
 }
 
+// ---------------------------------------------------------------------------
+// Named-portal registry (PG portalmem.c's PortalHashTable, per-backend).
+//
+// In C the PortalHashTable is a process-global dynahash keyed by portal name. As
+// a tokio task per backend, it is per-task state (rules.md s10): a task-local
+// RefCell, like the relcache. A `PortalData` is NOT Send/Sync (it holds plans
+// and tuplestores), so it lives here, owned by the backend's session frame, and
+// is borrowed during execution. The unnamed protocol portal also lives here
+// (key ""); SQL cursors use their declared names.
+// ---------------------------------------------------------------------------
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+tokio::task_local! {
+    static PORTAL_TABLE: RefCell<HashMap<String, Box<PortalData>>>;
+}
+
+/// Establish the per-task named-portal registry and run `fut`. Wrapped into the
+/// backend's connect-to-database scope stack (postgres.rs `init_postgres`).
+pub async fn portal_scope_async<F, T>(fut: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    PORTAL_TABLE.scope(RefCell::new(HashMap::new()), fut).await
+}
+
+#[must_use]
+pub fn portal_table_present() -> bool {
+    PORTAL_TABLE.try_with(|_| ()).is_ok()
+}
+
+fn with_portal_table<R>(f: impl FnOnce(&mut HashMap<String, Box<PortalData>>) -> R) -> Option<R> {
+    PORTAL_TABLE.try_with(|cell| f(&mut cell.borrow_mut())).ok()
+}
+
+/// PG `GetPortalByName`: look up a named portal. Returns whether one exists; the
+/// portal itself is borrowed via `with_named_portal` (the owned `Box` stays in
+/// the table). Unlike C this can't hand out a long-lived pointer (ownership stays
+/// in the table), so callers operate on it under a closure.
+#[must_use]
+pub fn portal_exists(name: &str) -> bool {
+    with_portal_table(|t| t.contains_key(name)).unwrap_or(false)
+}
+
+/// Run `f` with a borrow of the named portal, returning its result (or `None` if
+/// no such portal). The table borrow is released before `f`'s result is returned.
+pub fn with_named_portal<R>(name: &str, f: impl FnOnce(&mut PortalData) -> R) -> Option<R> {
+    with_portal_table(|t| t.get_mut(name).map(|p| f(p))).flatten()
+}
+
+/// PG `CreatePortal` (portalmem.c): create a named portal and insert it into the
+/// per-task table. `allow_dup`/`dup_silent` govern duplicate handling: a non-dup
+/// create over an existing name raises "cursor already exists" (the cursor case).
+pub fn create_named_portal(name: &str, allow_dup: bool, dup_silent: bool) {
+    let existed = with_portal_table(|t| {
+        if t.contains_key(name) {
+            return true;
+        }
+        t.insert(name.to_string(), create_portal(name));
+        false
+    })
+    .unwrap_or_else(|| unreachable!("create_named_portal outside a portal scope"));
+    if existed {
+        if !allow_dup {
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_DUPLICATE_CURSOR)
+                    .errmsg(format!("cursor \"{name}\" already exists"));
+            });
+        } else if !dup_silent {
+            crate::ereport!(crate::utils::elog::WARNING, |e: &mut crate::utils::elog::ErrorData| {
+                e.errmsg(format!("closing existing cursor \"{name}\""));
+            });
+        }
+        // allow_dup: replace the existing portal (PG drops then recreates).
+        with_portal_table(|t| t.insert(name.to_string(), create_portal(name)));
+    }
+}
+
+/// PG `PortalDrop` (the per-task table variant): remove a named portal, tearing
+/// down its executor if still live.
+pub fn drop_named_portal(name: &str) {
+    if let Some(mut portal) = with_portal_table(|t| t.remove(name)).flatten() {
+        portal_drop(&mut portal);
+    }
+}
+
+/// PG `PortalHashTableDeleteAll`: drop every portal (CLOSE ALL).
+pub fn drop_all_named_portals() {
+    let names: Vec<String> = with_portal_table(|t| t.keys().cloned().collect()).unwrap_or_default();
+    for name in names {
+        drop_named_portal(&name);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Materialized-result receiver + FETCH navigation (cursor support).
+//
+// A SQL cursor / EXECUTE-into-store is materialized: PortalStart-equivalent runs
+// the SELECT once into a tuplestore (FillPortalStore), and FETCH/MOVE navigate
+// the store (DoPortalRunFetch over the materialized rows). This is PG's
+// holdStore path; it gives forward AND backward/absolute/relative scrolling for
+// free since the store is randomly accessible. (A streaming ONE_SELECT executor
+// kept live across FETCH commands needs a self-referential QueryDesc borrowing
+// open relations, which the borrow model can't persist; materialization is the
+// faithful, lifetime-clean choice for M9. STAGED: WITH HOLD survival across
+// commit -- the store currently lives for the portal, not past transaction end.)
+// ---------------------------------------------------------------------------
+
+use crate::utils::tuplestore::Tuplestorestate;
+
+/// A DestReceiver that stows received rows into a tuplestore (PG
+/// `tstoreReceiver`). Holds a raw owning pointer-free design: the store is
+/// threaded in by the caller and taken back out after the run.
+pub struct TuplestoreReceiver {
+    store: Box<Tuplestorestate>,
+    tupdesc: Option<crate::access::tupdesc::TupleDesc>,
+}
+
+impl TuplestoreReceiver {
+    #[must_use]
+    pub fn new(store: Box<Tuplestorestate>) -> Self {
+        Self { store, tupdesc: None }
+    }
+    /// Reclaim the (now filled) store + its tuple descriptor.
+    #[must_use]
+    pub fn into_parts(self) -> (Box<Tuplestorestate>, Option<crate::access::tupdesc::TupleDesc>) {
+        (self.store, self.tupdesc)
+    }
+}
+
+impl DestReceiver for TuplestoreReceiver {
+    fn receive_slot(&mut self, slot: &mut crate::executor::tuptable::TupleTableSlot) -> bool {
+        crate::backend::utils::sort::tuplestore::tuplestore_puttupleslot(&mut self.store, slot);
+        true
+    }
+    fn r_startup(&mut self, _operation: CmdType, typeinfo: crate::access::tupdesc::TupleDesc) {
+        crate::backend::utils::sort::tuplestore::tuplestore_set_tupdesc(&mut self.store, typeinfo.clone());
+        self.tupdesc = Some(typeinfo);
+    }
+    fn r_shutdown(&mut self) {}
+    fn mydest(&self) -> crate::tcop::dest::CommandDest {
+        crate::tcop::dest::CommandDest::DestTuplestore
+    }
+}
+
+/// A receiver that wraps a `TuplestoreReceiver` and, at shutdown, moves it into a
+/// shared slot so the caller can reclaim the filled store (the shared executor
+/// frame owns + drops its receiver, so this is how a materialized run hands the
+/// store back).
+struct CapturingReceiver {
+    inner: Option<TuplestoreReceiver>,
+    slot: Arc<std::sync::Mutex<Option<TuplestoreReceiver>>>,
+}
+
+impl DestReceiver for CapturingReceiver {
+    fn receive_slot(&mut self, slot: &mut crate::executor::tuptable::TupleTableSlot) -> bool {
+        self.inner.as_mut().is_none_or(|r| r.receive_slot(slot))
+    }
+    fn r_startup(&mut self, operation: CmdType, typeinfo: crate::access::tupdesc::TupleDesc) {
+        if let Some(r) = self.inner.as_mut() {
+            r.r_startup(operation, typeinfo);
+        }
+    }
+    fn r_shutdown(&mut self) {
+        if let Some(mut r) = self.inner.take() {
+            r.r_shutdown();
+            *self.slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r);
+        }
+    }
+    fn mydest(&self) -> crate::tcop::dest::CommandDest {
+        crate::tcop::dest::CommandDest::DestTuplestore
+    }
+}
+
+impl Drop for CapturingReceiver {
+    fn drop(&mut self) {
+        // A non-RETURNING DML produces no tuples, so ExecutorRun never calls
+        // r_shutdown (send_tuples is false). Reclaim the (empty) store here so the
+        // caller still gets it back instead of hitting the stash `unreachable!`.
+        if let Some(r) = self.inner.take() {
+            *self.slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(r);
+        }
+    }
+}
+
+/// Run a planned SELECT into a fresh tuplestore (with optional bound `$n` params)
+/// and return the filled store, its result `TupleDesc`, and the executor's
+/// `es_processed` count (rows sent for SELECT/RETURNING, rows modified for a
+/// no-result DML). This is the materialization step behind SQL cursors
+/// (portalcmds) and the extended-protocol Bind/Execute path. Async (the executor
+/// reaches the buffer pool).
+pub async fn run_plan_into_store(
+    shared: &Arc<SharedState>,
+    plan: &PlannedStmt,
+    query_string: &str,
+    bound_params: Option<&ParamListInfoData>,
+) -> (Box<crate::utils::tuplestore::Tuplestorestate>, Option<crate::access::tupdesc::TupleDesc>, u64)
+{
+    let store = crate::backend::utils::sort::tuplestore::tuplestore_begin_heap(true, false, 1024);
+    let slot: Arc<std::sync::Mutex<Option<TuplestoreReceiver>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let capture = Box::new(CapturingReceiver {
+        inner: Some(TuplestoreReceiver::new(store)),
+        slot: Arc::clone(&slot),
+    });
+    let processed = crate::backend::tcop::postgres::execute_plan_into(
+        shared,
+        plan,
+        query_string,
+        bound_params,
+        capture,
+        0,
+    )
+    .await;
+    let recv = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+        .unwrap_or_else(|| unreachable!("CapturingReceiver stashed its inner store at shutdown"));
+    let (mut store, tupdesc) = recv.into_parts();
+    crate::backend::utils::sort::tuplestore::tuplestore_rescan(&mut store);
+    (store, tupdesc, processed)
+}
+
+/// PG `DoPortalRunFetch` over a materialized portal store: navigate the portal's
+/// holdStore in the requested direction, replaying the selected rows to `dest`.
+/// Returns the number of rows actually sent to a real destination (FETCH) or
+/// skipped past (MOVE). FORWARD/ALL is the full path; BACKWARD/ABSOLUTE/RELATIVE
+/// are supported because the store is randomly accessible.
+///
+/// `to_dest`: a real receiver for FETCH, or `None` for MOVE (count rows only).
+pub fn portal_run_fetch(
+    portal: &mut PortalData,
+    direction: crate::nodes::parsenodes::FetchDirection,
+    how_many: i64,
+    to_dest: Option<&mut dyn DestReceiver>,
+) -> u64 {
+    use crate::nodes::parsenodes::{FetchDirection, FETCH_ALL};
+
+    crate::assert!(portal.hold_store.is_some());
+
+    // Resolve (forward, count) from the FETCH direction + signed count, mirroring
+    // DoPortalRunFetch. ABSOLUTE/RELATIVE reposition first, then fetch.
+    let (forward, count): (bool, i64) = match direction {
+        FetchDirection::FORWARD => {
+            if how_many < 0 {
+                (false, -how_many)
+            } else {
+                (true, how_many)
+            }
+        }
+        FetchDirection::BACKWARD => {
+            if how_many < 0 {
+                (true, -how_many)
+            } else {
+                (false, how_many)
+            }
+        }
+        FetchDirection::ABSOLUTE => {
+            // Rewind to start, advance to the absolute position, then fetch one.
+            fetch_rewind(portal);
+            if how_many > 0 {
+                if how_many > 1 {
+                    skip_in_store(portal, true, how_many - 1);
+                }
+                return fetch_from_store(portal, true, 1, to_dest);
+            } else if how_many < 0 {
+                // Advance to end, back up abs(count)-1, return prior row.
+                skip_in_store(portal, true, FETCH_ALL);
+                if how_many < -1 {
+                    skip_in_store(portal, false, -how_many - 1);
+                }
+                return fetch_from_store(portal, false, 1, to_dest);
+            }
+            // count == 0: rewind, return zero rows.
+            return fetch_from_store(portal, true, 0, to_dest);
+        }
+        FetchDirection::RELATIVE => {
+            if how_many > 0 {
+                if how_many > 1 {
+                    skip_in_store(portal, true, how_many - 1);
+                }
+                return fetch_from_store(portal, true, 1, to_dest);
+            } else if how_many < 0 {
+                if how_many < -1 {
+                    skip_in_store(portal, false, -how_many - 1);
+                }
+                return fetch_from_store(portal, false, 1, to_dest);
+            }
+            // count == 0: same as FETCH FORWARD 0 -- re-fetch current row (handled
+            // by the count == 0 block below).
+            (true, 0)
+        }
+    };
+
+    // Zero count means to re-fetch the current row, if any (per SQL), mirroring
+    // DoPortalRunFetch's shared count == 0 path.
+    if count == 0 {
+        // Sitting on a row iff not before-first and not after-last.
+        let on_row = !portal.at_start && !portal.at_end;
+        if to_dest.is_none() {
+            // MOVE 0 returns 0/1 based on whether FETCH 0 would return a row.
+            return u64::from(on_row);
+        }
+        if on_row {
+            // Back up one (no output) so the forward fetch re-reads the current row;
+            // leaves the cursor position unchanged.
+            skip_in_store(portal, false, 1);
+            return fetch_from_store(portal, true, 1, to_dest);
+        }
+        // Not on a row: still start/shut the destination, fetching no row.
+        return fetch_from_store(portal, true, 0, to_dest);
+    }
+
+    fetch_from_store(portal, forward, count, to_dest)
+}
+
+/// Rewind the portal's store read pointer to the start.
+fn fetch_rewind(portal: &mut PortalData) {
+    let store = portal
+        .hold_store
+        .as_mut()
+        .unwrap_or_else(|| unreachable!("fetch_rewind on a portal with no store"));
+    crate::backend::utils::sort::tuplestore::tuplestore_rescan(store);
+    portal.at_start = true;
+    portal.at_end = false;
+    portal.portal_pos = 0;
+}
+
+/// Skip `n` rows in the store (no output), updating the cursor position. `n` may
+/// be FETCH_ALL to drain to the end.
+fn skip_in_store(portal: &mut PortalData, forward: bool, n: i64) {
+    use crate::nodes::parsenodes::FETCH_ALL;
+    let store = portal
+        .hold_store
+        .as_mut()
+        .unwrap_or_else(|| unreachable!("skip_in_store on a portal with no store"));
+    let mut skipped: i64 = 0;
+    if n == FETCH_ALL {
+        while crate::backend::utils::sort::tuplestore::tuplestore_advance(store, forward) {
+            skipped += 1;
+        }
+    } else {
+        for _ in 0..n {
+            if !crate::backend::utils::sort::tuplestore::tuplestore_advance(store, forward) {
+                break;
+            }
+            skipped += 1;
+        }
+    }
+    advance_position(portal, forward, skipped as u64);
+}
+
+/// Fetch up to `count` rows from the store in `forward` direction, sending each to
+/// `to_dest` (if a real destination). Returns the number of rows fetched.
+fn fetch_from_store(
+    portal: &mut PortalData,
+    forward: bool,
+    count: i64,
+    mut to_dest: Option<&mut dyn DestReceiver>,
+) -> u64 {
+    use crate::nodes::parsenodes::FETCH_ALL;
+    let tupdesc = portal.tup_desc.clone();
+
+    // Start the destination (RowDescription is emitted by the caller for the wire;
+    // r_startup here lets a printtup/tuplestore receiver initialize).
+    if let (Some(dest), Some(td)) = (to_dest.as_deref_mut(), tupdesc.clone()) {
+        dest.r_startup(CmdType::SELECT, td);
+    }
+
+    let mut slot = crate::backend::executor::execTuples::make_single_tuple_table_slot(
+        tupdesc,
+        &crate::backend::executor::execTuples::TTS_OPS_VIRTUAL,
+    );
+
+    let store = portal
+        .hold_store
+        .as_mut()
+        .unwrap_or_else(|| unreachable!("fetch_from_store on a portal with no store"));
+
+    let unlimited = count == FETCH_ALL;
+    let mut fetched: u64 = 0;
+    loop {
+        if !unlimited && fetched >= count as u64 {
+            break;
+        }
+        let got = crate::backend::utils::sort::tuplestore::tuplestore_gettupleslot(
+            store, forward, false, &mut slot,
+        );
+        if !got {
+            break;
+        }
+        if let Some(dest) = to_dest.as_deref_mut() {
+            dest.receive_slot(&mut slot);
+        }
+        fetched += 1;
+    }
+
+    if let Some(dest) = to_dest {
+        dest.r_shutdown();
+    }
+
+    advance_position(portal, forward, fetched);
+    fetched
+}
+
+/// Update the portal's cursor position after moving `n` rows in `forward`.
+fn advance_position(portal: &mut PortalData, forward: bool, n: u64) {
+    if n > 0 {
+        if forward {
+            portal.at_start = false;
+            portal.portal_pos += n;
+        } else {
+            portal.at_end = false;
+            portal.portal_pos = portal.portal_pos.saturating_sub(n);
+        }
+    }
+    // at_end / at_start are recomputed by the store's eof state on next fetch.
+    let store = portal
+        .hold_store
+        .as_ref()
+        .unwrap_or_else(|| unreachable!("advance_position on a portal with no store"));
+    if forward && crate::backend::utils::sort::tuplestore::tuplestore_ateof(store) {
+        portal.at_end = true;
+    }
+}
+
 /// Build a fresh, empty `PortalData` for the unnamed portal.
 fn empty_portal(name: &str) -> PortalData {
     PortalData {
@@ -411,12 +839,12 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    use crate::access::tupdesc::TupleDesc;
+    use crate::access::tupdesc::{TupleDesc, TupleDescData};
     use crate::catalog::genbki::INT4OID;
     use crate::executor::executor::ExecutorFinish;
     use crate::executor::tuptable::{slot_getattr, TupleTableSlot};
     use crate::nodes::nodes::{CmdType, Node};
-    use crate::nodes::parsenodes::{RawStmt, FETCH_ALL};
+    use crate::nodes::parsenodes::{FetchDirection, RawStmt, FETCH_ALL};
     use crate::parser::parser::RawParseMode;
     use crate::postgres::{Datum, DatumGetInt32};
     use crate::tcop::dest::CommandDest;
@@ -510,5 +938,75 @@ mod tests {
         }
         portal_drop(&mut portal);
         assert_eq!(sink.lock().unwrap().rows, vec![vec![1, 2]]);
+    }
+
+    /// Build a holdable portal materialized over a 5-row int4 store, positioned at
+    /// the start (before-first), mirroring a freshly-opened SQL cursor.
+    fn five_row_portal() -> Box<PortalData> {
+        let mut td_data = TupleDescData::create_template(1);
+        td_data.init_builtin_entry(1, "n", INT4OID, -1, 0);
+        let td: TupleDesc = Arc::new(td_data);
+        let mut store =
+            crate::backend::utils::sort::tuplestore::tuplestore_begin_heap(true, false, 1024);
+        for n in 1..=5i32 {
+            crate::backend::utils::sort::tuplestore::tuplestore_putvalues(
+                &mut store,
+                &td,
+                &[crate::postgres::Int32GetDatum(n)],
+                &[false],
+            );
+        }
+        crate::backend::utils::sort::tuplestore::tuplestore_rescan(&mut store);
+        let mut portal = create_portal("c");
+        portal.tup_desc = Some(td);
+        portal.hold_store = Some(store);
+        portal.status = PortalStatus::Ready;
+        portal.at_start = true;
+        portal.at_end = false;
+        portal.portal_pos = 0;
+        portal
+    }
+
+    fn fetch(portal: &mut PortalData, dir: FetchDirection, n: i64) -> Vec<i32> {
+        let sink = Arc::new(Mutex::new(Collected::default()));
+        let mut dest = CollectingDest { sink: Arc::clone(&sink) };
+        portal_run_fetch(portal, dir, n, Some(&mut dest));
+        let rows = sink.lock().unwrap().rows.clone();
+        rows.into_iter().map(|r| r[0]).collect()
+    }
+
+    /// FETCH 0 re-fetches the current row (PG `DoPortalRunFetch` count == 0), without
+    /// moving the cursor: FETCH 2 -> row 2; FETCH 0 -> row 2 again; FETCH 1 -> row 3.
+    #[test]
+    fn fetch_zero_refetches_current_row() {
+        let mut portal = five_row_portal();
+
+        assert_eq!(fetch(&mut portal, FetchDirection::FORWARD, 2), vec![1, 2]);
+        assert_eq!(portal.portal_pos, 2);
+
+        // FETCH 0: re-fetch current row (row 2), position unchanged.
+        assert_eq!(fetch(&mut portal, FetchDirection::FORWARD, 0), vec![2]);
+        assert_eq!(portal.portal_pos, 2);
+
+        // FORWARD/RELATIVE/BACKWARD 0 all re-fetch the current row too.
+        assert_eq!(fetch(&mut portal, FetchDirection::RELATIVE, 0), vec![2]);
+        assert_eq!(fetch(&mut portal, FetchDirection::BACKWARD, 0), vec![2]);
+        assert_eq!(portal.portal_pos, 2);
+
+        // Position is still 2, so the next forward fetch returns row 3.
+        assert_eq!(fetch(&mut portal, FetchDirection::FORWARD, 1), vec![3]);
+        assert_eq!(portal.portal_pos, 3);
+    }
+
+    /// MOVE 0 (no destination) returns 1 when on a row, 0 when before-first.
+    #[test]
+    fn move_zero_reports_on_row() {
+        let mut portal = five_row_portal();
+        // Before-first: not on a row -> 0.
+        assert_eq!(portal_run_fetch(&mut portal, FetchDirection::FORWARD, 0, None), 0);
+        // Advance onto row 1, then MOVE 0 -> 1, position unchanged.
+        assert_eq!(fetch(&mut portal, FetchDirection::FORWARD, 1), vec![1]);
+        assert_eq!(portal_run_fetch(&mut portal, FetchDirection::FORWARD, 0, None), 1);
+        assert_eq!(portal.portal_pos, 1);
     }
 }

@@ -81,7 +81,7 @@ pub fn make_parsestate(parent_parse_state: Option<Box<ParseState>>) -> Box<Parse
         p_post_columnref_hook: post,
         p_paramref_hook: paramref,
         p_coerce_param_hook: coerce,
-        p_ref_hook_state: None,
+        p_ref_hook_state: crate::backend::parser::parse_param::ParamRefHookState::None,
     })
 }
 

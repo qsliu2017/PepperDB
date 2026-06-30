@@ -200,8 +200,10 @@ pub struct ParseState {
     pub p_post_columnref_hook: Option<PostParseColumnRefHook>,
     pub p_paramref_hook: Option<ParseParamRefHook>,
     pub p_coerce_param_hook: Option<CoerceParamHook>,
-    /// common passthrough link for the hooks above (C `void *p_ref_hook_state`)
-    pub p_ref_hook_state: Option<Node>, // TODO(ptr): opaque hook state
+    /// common passthrough link for the hooks above (C `void *p_ref_hook_state`).
+    /// Typed because Rust `fn` pointers cannot capture: the paramref/coerce hooks
+    /// read their `FixedParamState`/`VarParamState` out of here (see parse_param).
+    pub p_ref_hook_state: crate::backend::parser::parse_param::ParamRefHookState,
 }
 
 /// An element of a namespace list.

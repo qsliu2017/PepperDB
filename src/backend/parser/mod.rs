@@ -10,6 +10,7 @@ pub mod parse_expr;
 pub mod parse_func;
 pub mod parse_node;
 pub mod parse_oper;
+pub mod parse_param;
 pub mod parse_relation;
 pub mod parse_target;
 pub mod parse_utilcmd;

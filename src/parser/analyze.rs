@@ -21,14 +21,7 @@ pub static mut post_parse_analyze_hook: Option<PostParseAnalyzeHookType> = None;
 /// PG `parse_analyze_fixedparams`. See `crate::backend::parser::analyze`.
 pub use crate::backend::parser::analyze::parse_analyze_fixedparams;
 
-pub fn parse_analyze_varparams(
-    _parse_tree: &RawStmt,
-    _source_text: &str,
-    _param_types: &mut Vec<Oid>,
-    _query_env: Option<&mut QueryEnvironment>,
-) -> Box<Query> {
-    unimplemented!()
-}
+pub use crate::backend::parser::analyze::parse_analyze_varparams;
 
 pub fn parse_analyze_withcb(
     _parse_tree: &RawStmt,

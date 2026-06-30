@@ -31,10 +31,14 @@ pub fn free_executor_state(estate: Box<EState<'_>>) {
 /// PG `CreateExprContext`: a per-node expression context linked to `estate`.
 /// The per-query/per-tuple memory contexts are tombstoned; the rest of the
 /// fields default to their zero/empty values, matching CreateExprContextInternal.
-pub fn create_expr_context(_estate: &mut EState<'_>) -> Box<ExprContext> {
+pub fn create_expr_context(estate: &mut EState<'_>) -> Box<ExprContext> {
     Box::new(ExprContext {
         case_value_is_null: true,
         domain_value_is_null: true,
+        // CreateExprContextInternal copies the EState's param lists onto the
+        // context so EEOP_PARAM_EXTERN/EXEC can read the bound values.
+        ecxt_param_list_info: estate.param_list_info.clone(),
+        ecxt_param_exec_vals: estate.param_exec_vals.clone(),
         ..ExprContext::default()
     })
 }

@@ -313,6 +313,14 @@ fn exec_interp_step(
             eval_minmax(step, econtext, resvalue, resnull);
             pc + 1
         }
+        ExprEvalOp::PARAM_EXEC => {
+            eval_param_exec(step, econtext, resvalue, resnull);
+            pc + 1
+        }
+        ExprEvalOp::PARAM_EXTERN => {
+            eval_param_extern(step, econtext, resvalue, resnull);
+            pc + 1
+        }
         ExprEvalOp::AGGREF => {
             // Read the finalized per-group aggregate value nodeAgg deposited in
             // econtext.ecxt_aggvalues[aggno] / ecxt_aggnulls[aggno].
@@ -510,6 +518,112 @@ fn eval_minmax(
         }
         None => *resnull = true,
     }
+}
+
+/// PG `ExecEvalParamExec`: read an executor (PARAM_EXEC) param's value from the
+/// EState's `ecxt_param_exec_vals[paramid]`. PG lazily evaluates a not-yet-computed
+/// subplan param here (`prm->execPlan != NULL` -> ExecSetParamPlan); that lazy path
+/// is staged until correlated SubPlans are reachable (M9 reaches only pre-filled
+/// PARAM_EXEC slots, e.g. EPQ / initplan outputs).
+fn eval_param_exec(
+    step: &ExprEvalStep,
+    econtext: &ExprContext,
+    resvalue: &mut Datum,
+    resnull: &mut bool,
+) {
+    let ExprEvalStepData::Param(p) = &step.d else {
+        unreachable!("EEOP_PARAM_EXEC without Param payload");
+    };
+    let prms = econtext
+        .ecxt_param_exec_vals
+        .as_ref()
+        .unwrap_or_else(|| unimplemented!("PARAM_EXEC with no ecxt_param_exec_vals"));
+    let prm = &prms[p.paramid as usize];
+    if prm.exec_plan != 0 {
+        unimplemented!("PARAM_EXEC lazy subplan evaluation (ExecSetParamPlan) not yet reachable");
+    }
+    *resvalue = prm.value;
+    *resnull = prm.isnull;
+}
+
+/// PG `ExecEvalParamExtern`: read an external (PARAM_EXTERN, `$n`) param's value
+/// from the portal's `ParamListInfo`. A dynamic-param `paramFetch` hook gets a
+/// chance first (else the static `params[paramid-1]` slot is read). The fetched
+/// param's type must match the type recorded when the plan was compiled.
+fn eval_param_extern(
+    step: &ExprEvalStep,
+    econtext: &mut ExprContext,
+    resvalue: &mut Datum,
+    resnull: &mut bool,
+) {
+    let ExprEvalStepData::Param(p) = &step.d else {
+        unreachable!("EEOP_PARAM_EXTERN without Param payload");
+    };
+    let param_id = p.paramid;
+    let expected_type = p.paramtype;
+
+    let param_info = econtext
+        .ecxt_param_list_info
+        .as_mut()
+        .filter(|pi| param_id > 0 && param_id <= pi.num_params);
+    if let Some(param_info) = param_info {
+        // Give the hook a chance in case the parameter is dynamic.
+        let mut workspace = empty_param_extern();
+        let prm = match param_info.param_fetch {
+            Some(fetch) => fetch(param_info, param_id, false, &mut workspace),
+            None => clone_param_extern(&param_info.params[param_id as usize - 1]),
+        };
+        if crate::c::OidIsValid(prm.ptype) {
+            // Safety check in case a hook did something unexpected.
+            if prm.ptype != expected_type {
+                param_type_mismatch(param_id);
+            }
+            *resvalue = prm.value;
+            *resnull = prm.isnull;
+            return;
+        }
+    }
+    no_value_for_parameter(param_id);
+}
+
+/// A zero-valued `ParamExternData` workspace (PG passes `&prmdata` to paramFetch).
+fn empty_param_extern() -> crate::nodes::params::ParamExternData {
+    crate::nodes::params::ParamExternData {
+        value: Datum(0),
+        isnull: true,
+        pflags: crate::nodes::params::ParamFlags::empty(),
+        ptype: crate::postgres_ext::InvalidOid,
+    }
+}
+
+fn clone_param_extern(
+    src: &crate::nodes::params::ParamExternData,
+) -> crate::nodes::params::ParamExternData {
+    crate::nodes::params::ParamExternData {
+        value: src.value,
+        isnull: src.isnull,
+        pflags: src.pflags,
+        ptype: src.ptype,
+    }
+}
+
+#[cold]
+fn param_type_mismatch(param_id: i32) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_DATATYPE_MISMATCH).errmsg(format!(
+            "type of parameter {param_id} does not match that when preparing the plan"
+        ));
+    });
+    unreachable!("ereport(ERROR) diverges");
+}
+
+#[cold]
+fn no_value_for_parameter(param_id: i32) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_OBJECT)
+            .errmsg(format!("no value found for parameter {param_id}"));
+    });
+    unreachable!("ereport(ERROR) diverges");
 }
 
 /// EEOP_BOOL_AND_STEP[_FIRST|_LAST]: if a clause is NULL, remember it (anynull);
@@ -867,5 +981,107 @@ mod tests {
 
         // NOT NULL = NULL.
         assert!(isnull(not(bool_null())), "NOT NULL = NULL");
+    }
+
+    use crate::nodes::params::{ParamExecData, ParamExternData, ParamFlags, ParamListInfoData};
+    use crate::nodes::primnodes::{Param, ParamKind};
+
+    fn extern_param(paramid: i32, paramtype: Oid) -> Node {
+        Node::Param(Box::new(Param {
+            paramkind: ParamKind::EXTERN,
+            paramid,
+            paramtype,
+            paramtypmod: -1,
+            paramcollid: InvalidOid,
+            location: -1,
+        }))
+    }
+
+    /// A ParamListInfo carrying static $n values (no fetch hook).
+    fn param_list(values: &[(Oid, i32)]) -> ParamListInfoData {
+        let params = values
+            .iter()
+            .map(|&(ptype, v)| ParamExternData {
+                value: Int32GetDatum(v),
+                isnull: false,
+                pflags: ParamFlags::empty(),
+                ptype,
+            })
+            .collect::<Vec<_>>();
+        ParamListInfoData {
+            param_fetch: None,
+            param_compile: None,
+            parser_setup: None,
+            param_values_str: None,
+            num_params: values.len() as i32,
+            params,
+        }
+    }
+
+    /// An ExprContext carrying the given external-param list.
+    fn econtext_with_extern(params: ParamListInfoData) -> ExprContext {
+        ExprContext { ecxt_param_list_info: Some(Box::new(params)), ..ExprContext::default() }
+    }
+
+    /// An ExprContext carrying the given executor-param array.
+    fn econtext_with_exec(vals: Vec<ParamExecData>) -> ExprContext {
+        ExprContext { ecxt_param_exec_vals: Some(vals), ..ExprContext::default() }
+    }
+
+    /// PARAM_EXTERN: `$1 + 1` with a ParamListInfo {$1 = 41} evaluates to 42.
+    #[test]
+    fn param_extern_plus_one_is_42() {
+        let node = opexpr(551, F_INT4PL, INT4OID, vec![extern_param(1, INT4OID), const_int4_node(1)]);
+        let mut state = exec_init_expr(Some(&node), None).expect("opexpr state");
+        // The $1 arg is not a Const, so the inline-Const fast path does not apply:
+        // the param is read by an EEOP_PARAM_EXTERN sub-step.
+        let mut econtext = econtext_with_extern(param_list(&[(INT4OID, 41)]));
+        let mut is_null = true;
+        let v = exec_interp_expr(&mut state, &mut econtext, &mut is_null);
+        assert!(!is_null);
+        assert_eq!(DatumGetInt32(v), 42);
+    }
+
+    /// PARAM_EXTERN with a type mismatch vs the compiled paramtype raises
+    /// ereport(ERROR) with ERRCODE_DATATYPE_MISMATCH; caught via pg_try/pg_catch.
+    #[test]
+    fn param_extern_type_mismatch_errors() {
+        let sqlstate = crate::backend::utils::error::elog::pg_try(|| {
+            let node = extern_param(1, INT4OID);
+            let mut state = exec_init_expr(Some(&node), None).expect("param state");
+            // ParamListInfo declares $1 as BOOLOID, but the plan compiled it int4.
+            let mut econtext =
+                econtext_with_extern(param_list(&[(crate::catalog::genbki::BOOLOID, 1)]));
+            let mut is_null = true;
+            let _ = exec_interp_expr(&mut state, &mut econtext, &mut is_null);
+            None
+        })
+        .pg_catch(|edata| Some(edata.sqlerrcode))
+        .done();
+        assert_eq!(sqlstate, Some(crate::utils::errcodes::ERRCODE_DATATYPE_MISMATCH));
+    }
+
+    /// PARAM_EXEC: `$0 + 1` reading from ecxt_param_exec_vals[$0 = 41] -> 42.
+    #[test]
+    fn param_exec_plus_one_is_42() {
+        let exec_param = Node::Param(Box::new(Param {
+            paramkind: ParamKind::EXEC,
+            paramid: 0,
+            paramtype: INT4OID,
+            paramtypmod: -1,
+            paramcollid: InvalidOid,
+            location: -1,
+        }));
+        let node = opexpr(551, F_INT4PL, INT4OID, vec![exec_param, const_int4_node(1)]);
+        let mut state = exec_init_expr(Some(&node), None).expect("opexpr state");
+        let mut econtext = econtext_with_exec(vec![ParamExecData {
+            exec_plan: 0,
+            value: Int32GetDatum(41),
+            isnull: false,
+        }]);
+        let mut is_null = true;
+        let v = exec_interp_expr(&mut state, &mut econtext, &mut is_null);
+        assert!(!is_null);
+        assert_eq!(DatumGetInt32(v), 42);
     }
 }

@@ -95,7 +95,7 @@ fn make_query() -> Box<Query> {
 pub fn parse_analyze_fixedparams(
     parse_tree: &RawStmt,
     source_text: &str,
-    _param_types: &[Oid],
+    param_types: &[Oid],
     num_params: i32,
     _query_env: Option<&mut crate::utils::queryenvironment::QueryEnvironment>,
 ) -> Box<Query> {
@@ -103,7 +103,7 @@ pub fn parse_analyze_fixedparams(
     pstate.p_sourcetext = Some(source_text.to_string());
 
     if num_params > 0 {
-        not_yet_reachable("parse_analyze_fixedparams: external parameter setup");
+        crate::backend::parser::parse_param::setup_parse_fixed_parameters(&mut pstate, param_types);
     }
 
     let query = transformTopLevelStmt(&mut pstate, parse_tree);
@@ -114,6 +114,36 @@ pub fn parse_analyze_fixedparams(
     // produced Query). free_parsestate is RAII (Drop of pstate).
     crate::parser::parse_node::free_parsestate(&mut pstate);
 
+    query
+}
+
+/// PG `parse_analyze_varparams`: analyze a raw parse tree whose `$n` parameter
+/// types are inferred from usage. `param_types` is in/out - the resolved type
+/// array is written back after `check_variable_parameters` validates it.
+pub fn parse_analyze_varparams(
+    parse_tree: &RawStmt,
+    source_text: &str,
+    param_types: &mut Vec<Oid>,
+    _query_env: Option<&mut crate::utils::queryenvironment::QueryEnvironment>,
+) -> Box<Query> {
+    use crate::backend::parser::parse_param::{
+        check_variable_parameters, collected_param_types, setup_parse_variable_parameters,
+    };
+
+    let mut pstate = make_parsestate(None);
+    pstate.p_sourcetext = Some(source_text.to_string());
+
+    setup_parse_variable_parameters(&mut pstate, param_types);
+
+    let query = transformTopLevelStmt(&mut pstate, parse_tree);
+
+    // Make sure all is well with parameter types.
+    check_variable_parameters(&pstate, &query);
+
+    // Write the inferred type array back to the caller's out-param.
+    *param_types = collected_param_types(&pstate).to_vec();
+
+    crate::parser::parse_node::free_parsestate(&mut pstate);
     query
 }
 
@@ -283,6 +313,41 @@ pub async fn parse_analyze_fixedparams_async(
     let mut query = transform_stmt_async(shared, &mut pstate, stmt).await;
     query.stmt_location = parse_tree.stmt_location;
     query.stmt_len = parse_tree.stmt_len;
+
+    crate::parser::parse_node::free_parsestate(&mut pstate);
+    query
+}
+
+/// Async sibling of `parse_analyze_varparams`: analyze a raw parse tree whose
+/// `$n` parameter types are inferred from usage, while opening relations where
+/// the statement references them (PREPARE/extended protocol over real tables).
+/// `param_types` is in/out: the (possibly empty) declared prefix in, the resolved
+/// array out. Used by PREPARE and SPI_prepare.
+pub async fn parse_analyze_varparams_async(
+    shared: &Arc<SharedState>,
+    parse_tree: &RawStmt,
+    source_text: &str,
+    param_types: &mut Vec<Oid>,
+) -> Box<Query> {
+    use crate::backend::parser::parse_param::{
+        check_variable_parameters, collected_param_types, setup_parse_variable_parameters,
+    };
+
+    let mut pstate = make_parsestate(None);
+    pstate.p_sourcetext = Some(source_text.to_string());
+
+    setup_parse_variable_parameters(&mut pstate, param_types);
+
+    let stmt = parse_tree.stmt.as_ref().unwrap_or_else(|| {
+        not_yet_reachable("transformTopLevelStmt: empty RawStmt");
+    });
+    let mut query = transform_stmt_async(shared, &mut pstate, stmt).await;
+    query.stmt_location = parse_tree.stmt_location;
+    query.stmt_len = parse_tree.stmt_len;
+
+    // Make sure all is well with parameter types, then read the resolved array back.
+    check_variable_parameters(&pstate, &query);
+    *param_types = collected_param_types(&pstate).to_vec();
 
     crate::parser::parse_node::free_parsestate(&mut pstate);
     query

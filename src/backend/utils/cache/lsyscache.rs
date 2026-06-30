@@ -165,6 +165,37 @@ pub async fn get_typlenbyvalalign_populate(shared: &Arc<SharedState>, typid: Oid
     builtin_typlenbyvalalign(typid).unwrap_or_else(|| cache_lookup_failed(typid))
 }
 
+/// `get_typcollation` (SYNC): the type's `typcollation` (the collation to use for
+/// a value of this type, or InvalidOid if the type is not collatable). Reads a warm
+/// TYPEOID entry; for the catalog-less bootstrap window the builtin scalar types
+/// (int2/4/8) are non-collatable, so the fallback returns InvalidOid.
+#[must_use]
+pub fn get_typcollation(typid: Oid) -> Oid {
+    use crate::catalog::genbki::{UNKNOWNOID, VOIDOID};
+    if let Some(tuple) = search_sys_cache(SysCacheIdentifier::TYPEOID, &[ObjectIdGetDatum(typid)]) {
+        // SAFETY: held syscache tuple; borrow ends before release_sys_cache.
+        let out = {
+            let pt = unsafe { type_form(&*tuple) };
+            pt.typcollation
+        };
+        release_sys_cache(tuple);
+        return out;
+    }
+    // Bootstrap-window fallback: the builtin scalar types reachable before the
+    // catalog is warm (int2/4/8, plus the pseudo-types UNKNOWN/VOID used for
+    // not-yet-resolved $n params) are all non-collatable.
+    if builtin_typlenbyvalalign(typid).is_some() || typid == UNKNOWNOID || typid == VOIDOID {
+        return crate::postgres_ext::InvalidOid;
+    }
+    cache_lookup_failed(typid)
+}
+
+/// `type_is_collatable` (SYNC): does this type have a nonzero `typcollation`?
+#[must_use]
+pub fn type_is_collatable(typid: Oid) -> bool {
+    crate::c::OidIsValid(get_typcollation(typid))
+}
+
 /// Builtin layout for the int2/4/8 types (bootstrap-window fallback).
 fn builtin_typlenbyvalalign(typid: Oid) -> Option<(i16, bool, u8)> {
     use crate::catalog::genbki::{INT2OID, INT4OID, INT8OID};

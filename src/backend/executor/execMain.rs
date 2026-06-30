@@ -84,7 +84,13 @@ pub fn standard_executor_start_indexed<'rel>(
     if query_desc.operation != CmdType::SELECT {
         estate.output_cid = crate::backend::access::transam::xact::GetCurrentCommandId(true);
     }
-    // Param setup, junkfilter and trigger setup grow with their subsystems.
+    // es_param_list_info: the external ($n) parameters bound to this query (PG copies
+    // queryDesc->params onto the EState here). CreateExprContext threads it down so
+    // EEOP_PARAM_EXTERN can read the bound values. The junkfilter and trigger setup
+    // grow with their subsystems.
+    if let Some(params) = query_desc.params.as_deref() {
+        estate.param_list_info = Some(params.clone());
+    }
 
     init_plan(query_desc, eflags);
 }

@@ -480,13 +480,7 @@ pub fn get_typmodin(typid: Oid) -> Oid {
     unimplemented!()
 }
 
-pub fn get_typcollation(typid: Oid) -> Oid {
-    unimplemented!()
-}
-
-pub fn type_is_collatable(typid: Oid) -> bool {
-    unimplemented!()
-}
+pub use crate::backend::utils::cache::lsyscache::{get_typcollation, type_is_collatable};
 
 /// C `RegProcedure get_typsubscript(typid, Oid *typelemp)` -> (regproc, typelem).
 pub fn get_typsubscript(typid: Oid) -> (RegProcedure, Oid) {

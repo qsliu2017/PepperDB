@@ -64,8 +64,9 @@ fn transform_expr_recurse(pstate: &mut ParseState, expr: Option<Node>) -> Option
         Node::CaseExpr(c) => Some(transform_case_expr(pstate, *c)),
         Node::CoalesceExpr(c) => Some(transform_coalesce_expr(pstate, *c)),
         Node::MinMaxExpr(m) => Some(transform_min_max_expr(pstate, *m)),
-        // ParamRef / SubLink / ... arms are filled by later milestones; for now
-        // they route here cleanly.
+        Node::ParamRef(pref) => Some(transform_param_ref(pstate, *pref)),
+        // SubLink / ... arms are filled by later milestones; for now they route
+        // here cleanly.
         other => not_yet_reachable(&other),
     }
 }
@@ -363,6 +364,23 @@ fn transform_func_call(pstate: &mut ParseState, fc: &crate::nodes::parsenodes::F
 #[cold]
 fn not_yet_reachable_msg(msg: &str) -> ! {
     unimplemented!("{msg}");
+}
+
+/// PG `transformParamRef`: the core parser knows nothing about Params; if a
+/// paramref hook is set, call it. If not, or it returns NULL, raise "there is no
+/// parameter $n". (The hooks are installed by parse_param's setup functions.)
+fn transform_param_ref(pstate: &mut ParseState, mut pref: crate::nodes::parsenodes::ParamRef) -> Node {
+    let result = pstate.p_paramref_hook.and_then(|hook| hook(pstate, &mut pref));
+    result.unwrap_or_else(|| no_such_parameter(pref.number))
+}
+
+#[cold]
+fn no_such_parameter(number: i32) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_PARAMETER)
+            .errmsg(format!("there is no parameter ${number}"));
+    });
+    unreachable!("ereport(ERROR) diverges");
 }
 
 /// PG `transformColumnRef`: resolve a `ColumnRef` to a `Var` (or whole-row ref).
