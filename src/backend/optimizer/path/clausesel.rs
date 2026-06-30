@@ -21,10 +21,6 @@ use crate::nodes::pathnodes::{PlannerInfo, SpecialJoinInfo};
 type PlannerInfoRef<'a> = &'a mut PlannerInfo;
 type SpecialJoinInfoRef<'a> = &'a SpecialJoinInfo;
 
-/// selfuncs.h `DEFAULT_EQ_SEL`: default selectivity for "A = B".
-const DEFAULT_EQ_SEL: Selectivity = 0.005;
-/// selfuncs.h `DEFAULT_INEQ_SEL`: default selectivity for "A < B", "A > B" etc.
-const DEFAULT_INEQ_SEL: Selectivity = 0.333_333_333_333_333_3;
 /// Generic default for a boolean clause with no better estimate.
 const DEFAULT_CLAUSE_SEL: Selectivity = 0.333_333_333_333_333_3;
 
@@ -110,31 +106,52 @@ pub fn clause_selectivity_ext(
                 }
             }
         }
-        Node::OpExpr(op) => op_clause_default_selectivity(op.opno),
+        // PG routes the OpExpr through the operator's selectivity estimator: a join
+        // clause (both sides are Vars from different rels, var_relid == 0) uses the
+        // `oprjoin` estimator, a restriction clause (var_relid != 0, or one side is a
+        // pseudoconstant) uses the `oprrest` estimator. Both fall back to the no-stats
+        // defaults in selfuncs (eqsel/eqjoinsel -> DEFAULT_EQ_SEL, scalar* ->
+        // DEFAULT_INEQ_SEL) until ANALYZE lands.
+        Node::OpExpr(op) => op_clause_selectivity(root, op, var_relid, jointype, sjinfo),
         // A bare boolean Var/Const, or any other clause: generic guess.
         _ => DEFAULT_CLAUSE_SEL,
     }
 }
 
-/// Rough default for a comparison operator by OID: equality operators get
-/// `DEFAULT_EQ_SEL`, ordering comparisons get `DEFAULT_INEQ_SEL`. Pre-statistics
-/// we only need to distinguish "=" from the ordering comparisons; the exact
-/// operator set grows with the type set.
-///
-/// This serves both restriction clauses ("a = const", PG `eqsel`) and join clauses
-/// ("a.x = b.y", PG `eqjoinsel`): with no pg_statistic, both estimators fall back to
-/// `DEFAULT_EQ_SEL`, which is what drives the join-rel row estimate in
-/// `calc_joinrel_size_estimate` (costsize.rs). The per-operator estimators that read
-/// real stats (eqsel/eqjoinsel/scalarltsel) are selfuncs, step 31.
-fn op_clause_default_selectivity(opno: crate::postgres_ext::Oid) -> Selectivity {
-    // pg_operator.dat "=" OIDs: bool(91), int2(94), int4(96), text(98), int8(410),
-    // oid(607). (Cross-type "=" OIDs grow with the selfuncs lookup.)
-    let is_equality = matches!(opno.0, 91 | 94 | 96 | 98 | 410 | 607);
-    if is_equality {
-        DEFAULT_EQ_SEL
+/// PG `clause_selectivity_ext`'s OpExpr arm: dispatch to the operator's restriction
+/// or join selectivity estimator. A two-Var-side clause with `var_relid == 0` is a
+/// join clause (use `oprjoin` -> selfuncs `join_selectivity`); otherwise it is a
+/// restriction clause (use `oprrest` -> selfuncs `restriction_selectivity`). The
+/// estimators read pg_statistic, which is absent (no ANALYZE), so they take the
+/// no-stats default path.
+fn op_clause_selectivity(
+    root: PlannerInfoRef,
+    op: &crate::nodes::primnodes::OpExpr,
+    var_relid: i32,
+    jointype: JoinType,
+    sjinfo: Option<SpecialJoinInfoRef>,
+) -> Selectivity {
+    use crate::backend::utils::adt::selfuncs::{join_selectivity, restriction_selectivity};
+    use crate::backend::utils::cache::lsyscache::{get_oprjoin, get_oprrest};
+
+    let is_join_clause = var_relid == 0 && clause_is_join_clause(&op.args);
+    if is_join_clause && let Some(sjinfo) = sjinfo {
+        let oprjoin = get_oprjoin(op.opno);
+        join_selectivity(root, oprjoin, op.opno, &op.args, jointype, sjinfo)
     } else {
-        DEFAULT_INEQ_SEL
+        let oprrest = get_oprrest(op.opno);
+        restriction_selectivity(root, oprrest, op.opno, &op.args, var_relid)
     }
+}
+
+/// Whether a binary operator clause is a join clause (a Var on each side, with the
+/// two Vars from different relations). A restriction clause has a pseudoconstant on
+/// one side.
+fn clause_is_join_clause(args: &[Node]) -> bool {
+    let [Node::Var(l), Node::Var(r)] = args else {
+        return false;
+    };
+    l.varno != r.varno
 }
 
 /// PG `clauselist_selectivity`: combined selectivity of an implicit-AND clause

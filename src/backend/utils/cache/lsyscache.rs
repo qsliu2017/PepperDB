@@ -448,6 +448,81 @@ pub fn op_input_types(opno: Oid) -> (Oid, Oid) {
     (crate::postgres_ext::InvalidOid, crate::postgres_ext::InvalidOid)
 }
 
+/// PG `get_oprrest`: the operator's restriction-selectivity estimator proc OID
+/// (the seeded `pg_operator.oprrest` column). Reads the OPEROID syscache when warm;
+/// falls back to the builtin operator table (catalog cold / unit tests). Selfuncs
+/// dispatches on this proc OID. Returns `InvalidOid` for an unknown operator.
+#[must_use]
+pub fn get_oprrest(opno: Oid) -> Oid {
+    use crate::access::htup_details::GETSTRUCT;
+    use crate::catalog::pg_operator::{Form_pg_operator, FormData_pg_operator};
+    if let Some(tuple) = search_sys_cache(SysCacheIdentifier::OPEROID, &[ObjectIdGetDatum(opno)]) {
+        // SAFETY: a held OPEROID hit -> a pg_operator row.
+        let out = {
+            let op: Form_pg_operator = GETSTRUCT(unsafe { &*tuple }).cast::<FormData_pg_operator>();
+            Oid(unsafe { &*op }.oprrest.0)
+        };
+        release_sys_cache(tuple);
+        return out;
+    }
+    builtin_op_selectivity(opno).map_or(crate::postgres_ext::InvalidOid, |s| Oid(s.oprrest))
+}
+
+/// PG `get_oprjoin`: the operator's join-selectivity estimator proc OID (the seeded
+/// `pg_operator.oprjoin` column). Mirrors `get_oprrest`.
+#[must_use]
+pub fn get_oprjoin(opno: Oid) -> Oid {
+    use crate::access::htup_details::GETSTRUCT;
+    use crate::catalog::pg_operator::{Form_pg_operator, FormData_pg_operator};
+    if let Some(tuple) = search_sys_cache(SysCacheIdentifier::OPEROID, &[ObjectIdGetDatum(opno)]) {
+        // SAFETY: a held OPEROID hit -> a pg_operator row.
+        let out = {
+            let op: Form_pg_operator = GETSTRUCT(unsafe { &*tuple }).cast::<FormData_pg_operator>();
+            Oid(unsafe { &*op }.oprjoin.0)
+        };
+        release_sys_cache(tuple);
+        return out;
+    }
+    builtin_op_selectivity(opno).map_or(crate::postgres_ext::InvalidOid, |s| Oid(s.oprjoin))
+}
+
+/// Cold-catalog fallback for `get_oprrest`/`get_oprjoin`: the (oprrest, oprjoin)
+/// estimator proc OIDs for the seeded same-type comparison operators. The "="
+/// operators use eqsel/eqjoinsel; the ordering comparisons use scalar{in}eqsel /
+/// scalar*joinsel (pg_operator.dat). This covers the M7 join/restriction operators
+/// when pg_operator isn't warmed (the syscache path is used otherwise).
+struct OpSelectivity {
+    oprrest: u32,
+    oprjoin: u32,
+}
+
+fn builtin_op_selectivity(opno: Oid) -> Option<OpSelectivity> {
+    use crate::backend::utils::adt::selfuncs::{
+        F_EQJOINSEL, F_EQSEL, F_NEQJOINSEL, F_NEQSEL, F_SCALARGEJOINSEL, F_SCALARGESEL,
+        F_SCALARGTJOINSEL, F_SCALARGTSEL, F_SCALARLEJOINSEL, F_SCALARLESEL, F_SCALARLTJOINSEL,
+        F_SCALARLTSEL,
+    };
+    // Equality operators (pg_operator.dat: int2/int4/int8/bool/text/oid "=").
+    if lookup_builtin_eq(opno).is_some() {
+        return Some(OpSelectivity { oprrest: F_EQSEL, oprjoin: F_EQJOINSEL });
+    }
+    // Ordering comparisons + "<>" for the integer types (the M7 inequality set).
+    let (rest, join) = match opno.0 {
+        // int2/int4/int8 "<"
+        37 | 95 | 97 | 412 | 418 | 534 | 535 | 1864 | 1865 => (F_SCALARLTSEL, F_SCALARLTJOINSEL),
+        // ">"
+        76 | 413 | 419 | 520 | 521 | 536 | 537 => (F_SCALARGTSEL, F_SCALARGTJOINSEL),
+        // "<="
+        80 | 414 | 522 | 523 | 540 | 541 => (F_SCALARLESEL, F_SCALARLEJOINSEL),
+        // ">="
+        82 | 415 | 524 | 525 | 542 | 543 => (F_SCALARGESEL, F_SCALARGEJOINSEL),
+        // "<>"
+        518 | 519 | 85 | 411 => (F_NEQSEL, F_NEQJOINSEL),
+        _ => return None,
+    };
+    Some(OpSelectivity { oprrest: rest, oprjoin: join })
+}
+
 /// PG `get_op_index_interpretation`: the amcanorder (btree) opfamilies the
 /// operator belongs to, with its strategy/cmptype and input types. M7 returns the
 /// single builtin btree-equality interpretation for a known "=" operator. The

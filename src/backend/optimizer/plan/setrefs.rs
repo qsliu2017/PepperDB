@@ -16,8 +16,8 @@
 
 use crate::nodes::nodes::Node;
 use crate::nodes::pathnodes::PlannerInfo;
-use crate::nodes::plannodes::{Agg, Limit, Result, SeqScan, Sort, Unique};
-use crate::nodes::primnodes::OUTER_VAR;
+use crate::nodes::plannodes::{Agg, HashJoin, Limit, MergeJoin, NestLoop, Result, SeqScan, Sort, Unique};
+use crate::nodes::primnodes::{INNER_VAR, OUTER_VAR};
 
 /// Panic for a setrefs path not yet translated for this milestone (rules.md s4).
 #[cold]
@@ -72,6 +72,10 @@ fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
             Node::BitmapIndexScan(Box::new(set_bitmap_indexscan_refs(root, *s, rtoffset)))
         }
         Node::ModifyTable(m) => Node::ModifyTable(Box::new(set_modifytable_refs(root, *m, rtoffset))),
+        Node::NestLoop(n) => Node::NestLoop(Box::new(set_nestloop_refs(root, *n, rtoffset))),
+        Node::MergeJoin(m) => Node::MergeJoin(Box::new(set_mergejoin_refs(root, *m, rtoffset))),
+        Node::HashJoin(h) => Node::HashJoin(Box::new(set_hashjoin_refs(root, *h, rtoffset))),
+        Node::Hash(h) => Node::Hash(Box::new(set_hash_refs(root, *h, rtoffset))),
         Node::Agg(a) => Node::Agg(Box::new(set_agg_refs(root, *a, rtoffset))),
         Node::Sort(s) => Node::Sort(Box::new(set_sort_refs(root, *s, rtoffset))),
         Node::Unique(u) => Node::Unique(Box::new(set_unique_refs(root, *u, rtoffset))),
@@ -164,12 +168,225 @@ fn plan_tlist(plan: &Node) -> &[Node] {
     match plan {
         Node::Result(r) => &r.plan.targetlist,
         Node::SeqScan(s) => &s.scan.plan.targetlist,
+        Node::IndexScan(s) => &s.scan.plan.targetlist,
+        Node::IndexOnlyScan(s) => &s.scan.plan.targetlist,
+        Node::BitmapHeapScan(s) => &s.scan.plan.targetlist,
         Node::Agg(a) => &a.plan.targetlist,
         Node::Sort(s) => &s.plan.targetlist,
         Node::Unique(u) => &u.plan.targetlist,
         Node::Limit(l) => &l.plan.targetlist,
+        Node::NestLoop(n) => &n.join.plan.targetlist,
+        Node::MergeJoin(m) => &m.join.plan.targetlist,
+        Node::HashJoin(h) => &h.join.plan.targetlist,
+        Node::Hash(h) => &h.plan.targetlist,
         other => not_yet_reachable(&format!("set_plan_refs: child tlist of {other:?}")),
     }
+}
+
+/// PG `set_plan_refs` T_NestLoop arm + `set_join_references`: recurse into the
+/// outer/inner subplans, then rewrite the join's targetlist + joinqual Vars to
+/// reference the outer (OUTER_VAR) / inner (INNER_VAR) child output by position. M7
+/// has no nestloop params.
+fn set_nestloop_refs(root: &mut PlannerInfo, mut plan: NestLoop, rtoffset: usize) -> NestLoop {
+    plan.join.plan.plan_node_id = next_plan_node_id(root);
+    let (outer, inner) = recurse_join_children(root, &mut plan.join.plan, rtoffset);
+    let outer_tlist = plan_tlist(&outer).to_vec();
+    let inner_tlist = plan_tlist(&inner).to_vec();
+
+    fix_join_exprs(&mut plan.join.joinqual, &outer_tlist, &inner_tlist);
+    fix_join_exprs(&mut plan.join.plan.targetlist, &outer_tlist, &inner_tlist);
+    fix_join_qual(&mut plan.join.plan.qual, &outer_tlist, &inner_tlist);
+    crate::assert!(plan.nest_params.is_empty(), "set_join_references: nestloop params not yet reachable");
+
+    plan.join.plan.lefttree = Some(outer);
+    plan.join.plan.righttree = Some(inner);
+    plan
+}
+
+/// PG `set_plan_refs` T_MergeJoin arm: like NestLoop, plus the mergeclauses' Vars
+/// are rewritten against the outer/inner child outputs.
+fn set_mergejoin_refs(root: &mut PlannerInfo, mut plan: MergeJoin, rtoffset: usize) -> MergeJoin {
+    plan.join.plan.plan_node_id = next_plan_node_id(root);
+    let (outer, inner) = recurse_join_children(root, &mut plan.join.plan, rtoffset);
+    let outer_tlist = plan_tlist(&outer).to_vec();
+    let inner_tlist = plan_tlist(&inner).to_vec();
+
+    fix_join_exprs(&mut plan.join.joinqual, &outer_tlist, &inner_tlist);
+    fix_join_exprs(&mut plan.mergeclauses, &outer_tlist, &inner_tlist);
+    fix_join_exprs(&mut plan.join.plan.targetlist, &outer_tlist, &inner_tlist);
+    fix_join_qual(&mut plan.join.plan.qual, &outer_tlist, &inner_tlist);
+
+    plan.join.plan.lefttree = Some(outer);
+    plan.join.plan.righttree = Some(inner);
+    plan
+}
+
+/// PG `set_plan_refs` T_HashJoin arm: like NestLoop, plus the hashclauses' Vars and
+/// the (outer-only) hashkeys are rewritten. The HashJoin's righttree is a Hash node;
+/// the Hash node's own hashkeys reference the inner child and are rewritten to
+/// INNER_VAR against the Hash's input tlist.
+fn set_hashjoin_refs(root: &mut PlannerInfo, mut plan: HashJoin, rtoffset: usize) -> HashJoin {
+    plan.join.plan.plan_node_id = next_plan_node_id(root);
+    let (outer, inner) = recurse_join_children(root, &mut plan.join.plan, rtoffset);
+    let outer_tlist = plan_tlist(&outer).to_vec();
+    // The inner child here is the Hash node; the hashclauses reference the Hash's
+    // output (which mirrors its input tlist).
+    let inner_tlist = plan_tlist(&inner).to_vec();
+
+    fix_join_exprs(&mut plan.join.joinqual, &outer_tlist, &inner_tlist);
+    fix_join_exprs(&mut plan.hashclauses, &outer_tlist, &inner_tlist);
+    // The HashJoin's hashkeys (outer-side probe keys) reference only the outer child.
+    fix_outer_exprs(&mut plan.hashkeys, &outer_tlist);
+    fix_join_exprs(&mut plan.join.plan.targetlist, &outer_tlist, &inner_tlist);
+    fix_join_qual(&mut plan.join.plan.qual, &outer_tlist, &inner_tlist);
+
+    plan.join.plan.lefttree = Some(outer);
+    plan.join.plan.righttree = Some(inner);
+    plan
+}
+
+/// PG `set_plan_refs` T_Hash arm: recurse into the inner child, assign the node id,
+/// then rewrite the Hash's own hashkeys to INNER_VAR positions over the child output
+/// (the Hash sits below the HashJoin's inner side).
+fn set_hash_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::Hash,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::Hash {
+    let child = plan
+        .plan
+        .lefttree
+        .take()
+        .unwrap_or_else(|| not_yet_reachable("set_plan_refs: Hash without child"));
+    let child = set_plan_refs(root, child, rtoffset);
+    let child_tlist = plan_tlist(&child).to_vec();
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    // The Hash's tlist is a passthrough of its child; rewrite its hashkeys to
+    // OUTER_VAR positions over the child (the Hash has a single input -> OUTER_VAR).
+    fix_outer_exprs(&mut plan.hashkeys, &child_tlist);
+    fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
+    plan.plan.lefttree = Some(child);
+    plan
+}
+
+/// Recurse `set_plan_refs` into a join's outer (lefttree) and inner (righttree)
+/// subplans, returning the rewritten children. The parent join's tlist/quals are
+/// fixed by the caller after this.
+fn recurse_join_children(
+    root: &mut PlannerInfo,
+    plan: &mut crate::nodes::plannodes::Plan,
+    rtoffset: usize,
+) -> (Node, Node) {
+    let outer = plan
+        .lefttree
+        .take()
+        .unwrap_or_else(|| not_yet_reachable("set_join_references: join without outer subplan"));
+    let inner = plan
+        .righttree
+        .take()
+        .unwrap_or_else(|| not_yet_reachable("set_join_references: join without inner subplan"));
+    let outer = set_plan_refs(root, outer, rtoffset);
+    let inner = set_plan_refs(root, inner, rtoffset);
+    (outer, inner)
+}
+
+/// PG `fix_join_expr` over a clause list: rewrite each clause's Vars against the
+/// outer (OUTER_VAR) then inner (INNER_VAR) child indexed tlists, replacing the list
+/// in place.
+fn fix_join_exprs(clauses: &mut Vec<Node>, outer_tlist: &[Node], inner_tlist: &[Node]) {
+    *clauses = std::mem::take(clauses)
+        .into_iter()
+        .map(|c| fix_join_expr(c, outer_tlist, inner_tlist))
+        .collect();
+}
+
+/// PG `fix_join_expr` over a join node's qpqual (implicit-AND list). M7 inner joins
+/// carry no qpqual (every clause is a joinqual), so this is empty.
+fn fix_join_qual(qual: &mut Vec<Node>, outer_tlist: &[Node], inner_tlist: &[Node]) {
+    fix_join_exprs(qual, outer_tlist, inner_tlist);
+}
+
+/// PG `fix_upper_expr` over an outer-only expression list (the HashJoin/Hash
+/// hashkeys reference only their single child): rewrite Vars to OUTER_VAR positions.
+fn fix_outer_exprs(exprs: &mut Vec<Node>, child_tlist: &[Node]) {
+    *exprs = std::mem::take(exprs)
+        .into_iter()
+        .map(|e| fix_upper_expr(e, child_tlist))
+        .collect();
+}
+
+/// PG `fix_join_expr_mutator`: rewrite the Vars in a join expression so each Var
+/// references the outer or inner child's output by position. A Var found in the
+/// outer child tlist becomes `(OUTER_VAR, outer_resno)`; one found in the inner
+/// child tlist becomes `(INNER_VAR, inner_resno)`. The M7-reachable join expressions
+/// are Vars and binary OpExprs over Vars/Consts.
+fn fix_join_expr(expr: Node, outer_tlist: &[Node], inner_tlist: &[Node]) -> Node {
+    match expr {
+        Node::Var(var) => {
+            if let Some(newvar) = search_indexed_tlist_for_var(&var, outer_tlist, OUTER_VAR) {
+                return Node::Var(Box::new(newvar));
+            }
+            if let Some(newvar) = search_indexed_tlist_for_var(&var, inner_tlist, INNER_VAR) {
+                return Node::Var(Box::new(newvar));
+            }
+            not_yet_reachable("fix_join_expr: Var not found in either subplan output");
+        }
+        Node::OpExpr(mut op) => {
+            op.args = op
+                .args
+                .into_iter()
+                .map(|a| fix_join_expr(a, outer_tlist, inner_tlist))
+                .collect();
+            Node::OpExpr(op)
+        }
+        Node::BoolExpr(mut b) => {
+            b.args = b
+                .args
+                .into_iter()
+                .map(|a| fix_join_expr(a, outer_tlist, inner_tlist))
+                .collect();
+            Node::BoolExpr(b)
+        }
+        Node::FuncExpr(mut f) => {
+            f.args = f
+                .args
+                .into_iter()
+                .map(|a| fix_join_expr(a, outer_tlist, inner_tlist))
+                .collect();
+            Node::FuncExpr(f)
+        }
+        Node::TargetEntry(mut te) => {
+            if let Some(inner) = te.expr.take() {
+                te.expr = Some(fix_join_expr(inner, outer_tlist, inner_tlist));
+            }
+            Node::TargetEntry(te)
+        }
+        other => other,
+    }
+}
+
+/// PG `search_indexed_tlist_for_var`: find the base-rel Var (`varno`,`varattno`) in
+/// `child_tlist` and return a copy with `varno = newvarno` (OUTER_VAR or INNER_VAR)
+/// and `varattno = the child output column position` (the matching TargetEntry's
+/// resno). Returns None if the Var is not produced by this child.
+fn search_indexed_tlist_for_var(
+    var: &crate::nodes::primnodes::Var,
+    child_tlist: &[Node],
+    newvarno: i32,
+) -> Option<crate::nodes::primnodes::Var> {
+    for n in child_tlist {
+        let Node::TargetEntry(te) = n else { continue };
+        if let Some(Node::Var(cv)) = te.expr.as_ref()
+            && cv.varno == var.varno
+            && cv.varattno == var.varattno
+        {
+            let mut newvar = var.clone();
+            newvar.varno = newvarno;
+            newvar.varattno = te.resno;
+            return Some(newvar);
+        }
+    }
+    None
 }
 
 /// PG `set_upper_references` core: rewrite every `Var` in an upper node's tlist to
@@ -448,5 +665,125 @@ fn fix_scan_expr_identity(expr: Option<&Node>) {
         Node::CoalesceExpr(c) => c.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
         Node::MinMaxExpr(m) => m.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
         other => not_yet_reachable(&format!("set_plan_refs: unexpected scan expr {other:?}")),
+    }
+}
+
+#[cfg(test)]
+mod join_tests {
+    use super::*;
+    use crate::nodes::makefuncs::makeTargetEntry;
+    use crate::nodes::nodes::JoinType;
+    use crate::nodes::plannodes::{Join, NestLoop, Plan, Scan, SeqScan};
+    use crate::nodes::primnodes::{Var, VarReturningType};
+    use crate::postgres_ext::{InvalidOid, Oid};
+
+    const INT4: Oid = Oid(23);
+
+    fn var(varno: i32, varattno: i16) -> Node {
+        Node::Var(Box::new(Var {
+            varno,
+            varattno,
+            vartype: INT4,
+            vartypmod: -1,
+            varcollid: InvalidOid,
+            varnullingrels: None,
+            varlevelsup: 0,
+            varreturningtype: VarReturningType::DEFAULT,
+            varnosyn: varno as crate::nodes::primnodes::Index,
+            varattnosyn: varattno,
+            location: -1,
+        }))
+    }
+
+    fn tle(expr: Node, resno: i16) -> Node {
+        Node::TargetEntry(Box::new(makeTargetEntry(Some(expr), resno, None, false)))
+    }
+
+    fn empty_plan(tlist: Vec<Node>) -> Plan {
+        Plan {
+            disabled_nodes: 0,
+            startup_cost: 0.0,
+            total_cost: 0.0,
+            plan_rows: 0.0,
+            plan_width: 0,
+            parallel_aware: false,
+            parallel_safe: false,
+            async_capable: false,
+            plan_node_id: 0,
+            targetlist: tlist,
+            qual: Vec::new(),
+            lefttree: None,
+            righttree: None,
+            init_plan: Vec::new(),
+            ext_param: None,
+            all_param: None,
+        }
+    }
+
+    fn seqscan(relid: i32, attno: i16) -> Node {
+        Node::SeqScan(Box::new(SeqScan {
+            scan: Scan {
+                plan: empty_plan(vec![tle(var(relid, attno), 1)]),
+                scanrelid: relid as crate::nodes::primnodes::Index,
+            },
+        }))
+    }
+
+    fn test_root() -> PlannerInfo {
+        crate::backend::optimizer::plan::initsplan::tests::test_planner_info()
+    }
+
+    /// A NestLoop whose tlist is (rel1.col1, rel2.col1) and whose joinqual is the
+    /// `rel1.col1 = rel2.col1` clause, over two SeqScan children. After set_plan_refs
+    /// the tlist/qual Vars must reference OUTER_VAR (outer child) / INNER_VAR (inner).
+    #[test]
+    fn set_join_references_rewrites_outer_inner_var() {
+        use crate::nodes::primnodes::OpExpr;
+        let joinqual = Node::OpExpr(Box::new(OpExpr {
+            opno: Oid(96),
+            opfuncid: InvalidOid,
+            opresulttype: Oid(16),
+            opretset: false,
+            opcollid: InvalidOid,
+            inputcollid: InvalidOid,
+            args: vec![var(1, 1), var(2, 1)],
+            location: -1,
+        }));
+        let mut plan = empty_plan(vec![tle(var(1, 1), 1), tle(var(2, 1), 2)]);
+        plan.lefttree = Some(seqscan(1, 1));
+        plan.righttree = Some(seqscan(2, 1));
+        let nl = NestLoop {
+            join: Join { plan, jointype: JoinType::INNER, inner_unique: false, joinqual: vec![joinqual] },
+            nest_params: Vec::new(),
+        };
+
+        let mut root = test_root();
+        let Node::NestLoop(out) = set_plan_refs(&mut root, Node::NestLoop(Box::new(nl)), 0) else {
+            panic!("not a NestLoop");
+        };
+
+        // tlist[0] = rel1.col1 -> OUTER_VAR position 1; tlist[1] = rel2.col1 -> INNER_VAR position 1.
+        let tlist_var = |i: usize| -> Var {
+            let Node::TargetEntry(te) = &out.join.plan.targetlist[i] else { panic!() };
+            let Some(Node::Var(v)) = te.expr.as_ref() else { panic!() };
+            (**v).clone()
+        };
+        let v0 = tlist_var(0);
+        assert_eq!(v0.varno, OUTER_VAR);
+        assert_eq!(v0.varattno, 1);
+        let v1 = tlist_var(1);
+        assert_eq!(v1.varno, INNER_VAR);
+        assert_eq!(v1.varattno, 1);
+
+        // The joinqual's two operands are rewritten the same way: lhs OUTER, rhs INNER.
+        let Node::OpExpr(op) = &out.join.joinqual[0] else { panic!("joinqual not an OpExpr") };
+        let Node::Var(l) = &op.args[0] else { panic!() };
+        let Node::Var(r) = &op.args[1] else { panic!() };
+        assert_eq!(l.varno, OUTER_VAR);
+        assert_eq!(r.varno, INNER_VAR);
+
+        // The children are still SeqScans with assigned node ids.
+        assert!(matches!(out.join.plan.lefttree.as_ref(), Some(Node::SeqScan(_))));
+        assert!(matches!(out.join.plan.righttree.as_ref(), Some(Node::SeqScan(_))));
     }
 }

@@ -56,11 +56,15 @@ fn query_has_upper_stage(root: &PlannerInfo) -> bool {
 pub fn query_planner(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback) -> RelOptInfo {
     use crate::nodes::nodes::Node;
 
-    // The jointree always holds one RangeTblRef after replace_empty_jointree (a
-    // FROM-less SELECT got an RTE_RESULT). M2 supports exactly one FROM item.
+    // The jointree always holds one (FROM-less SELECT -> RTE_RESULT) or more
+    // RangeTblRef items after replace_empty_jointree. A multi-item fromlist (a join)
+    // takes the full deconstruct_jointree + make_one_rel path.
     let joinlist = jointree_fromlist(root);
+    if joinlist.len() >= 2 {
+        return query_planner_join(root, qp_callback);
+    }
     if joinlist.len() != 1 {
-        not_yet_reachable("query_planner: scan/join over multiple base relations");
+        not_yet_reachable("query_planner: empty jointree");
     }
     let Node::RangeTblRef(rtr) = &joinlist[0] else {
         not_yet_reachable("query_planner: non-RangeTblRef jointree item");
@@ -90,6 +94,48 @@ pub fn query_planner(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback)
     qp_callback(root);
 
     final_rel
+}
+
+/// PG `query_planner` multi-relation path: build a `RelOptInfo` per base relation,
+/// mark the needed Vars (`build_base_rel_tlists`), distribute the jointree quals
+/// (`deconstruct_jointree`), then run the join search (`make_one_rel`) to produce the
+/// final joinrel. M7 covers an inner join over base relations (a flat FROM list with
+/// a WHERE join clause); explicit JOIN syntax / outer joins grow later.
+fn query_planner_join(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback) -> RelOptInfo {
+    use crate::nodes::pathnodes::JoinDomain;
+
+    // setup_simple_rel_arrays: size the per-RT-index arrays from the rtable.
+    setup_simple_rel_arrays(root);
+
+    // The top-level join domain (deconstruct_jointree expects join_domains[0]).
+    root.join_domains = vec![Box::new(JoinDomain { jd_relids: None })];
+
+    // add_base_rels_to_query: a base RelOptInfo per RangeTblRef in the jointree.
+    let jointree = root
+        .parse
+        .jointree
+        .clone()
+        .unwrap_or_else(|| not_yet_reachable("query_planner: missing jointree"));
+    crate::backend::optimizer::plan::initsplan::add_base_rels_to_query(root, &jointree);
+
+    // build_base_rel_tlists: mark every Var in the final (scan-input or processed)
+    // tlist as needed, so it propagates into each base rel's reltarget.
+    let final_tlist = if query_has_upper_stage(root) {
+        root.scan_input_tlist.clone()
+    } else {
+        root.processed_tlist.clone()
+    };
+    crate::backend::optimizer::plan::initsplan::build_base_rel_tlists(root, &final_tlist);
+
+    // deconstruct_jointree: distribute the jointree's quals to the rels (baserestrict
+    // or joininfo), and return the joinlist for the search.
+    let joinlist = crate::backend::optimizer::plan::initsplan::deconstruct_jointree(root);
+
+    // EC merging is complete before the join search runs.
+    root.ec_merging_done = true;
+    qp_callback(root);
+
+    crate::backend::optimizer::path::allpaths::make_one_rel(root, &joinlist)
 }
 
 /// The FROM item RTE kind at RT index `rti`.
@@ -362,6 +408,9 @@ fn top_plan_tlist_mut(plan: &mut crate::nodes::nodes::Node) -> &mut Vec<crate::n
         Node::IndexScan(s) => &mut s.scan.plan.targetlist,
         Node::IndexOnlyScan(s) => &mut s.scan.plan.targetlist,
         Node::BitmapHeapScan(s) => &mut s.scan.plan.targetlist,
+        Node::NestLoop(n) => &mut n.join.plan.targetlist,
+        Node::MergeJoin(m) => &mut m.join.plan.targetlist,
+        Node::HashJoin(h) => &mut h.join.plan.targetlist,
         _ => not_yet_reachable("apply_tlist_labeling: unexpected top plan node"),
     }
 }
