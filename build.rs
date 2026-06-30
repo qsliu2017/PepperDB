@@ -1366,6 +1366,10 @@ fn gen_bootstrap_schemas(
         // self-row. The action/qual trees live in the in-memory rule registry; the
         // ev_action/ev_qual varlena columns hold a deparsed placeholder.
         ("pg_rewrite", "pg_rewrite.h"),
+        // M11 (step 41): pg_trigger is nailed so CREATE TRIGGER / ADD FOREIGN KEY can
+        // write pg_trigger rows and RelationBuildTriggers can read them back before
+        // pg_trigger has a pg_class self-row. Starts empty; filled by the DDL.
+        ("pg_trigger", "pg_trigger.h"),
     ];
 
     for (cat, hdr) in catalogs {

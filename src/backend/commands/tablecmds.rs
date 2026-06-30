@@ -17,6 +17,10 @@
     clippy::cast_ptr_alignment,
     reason = "faithful GETSTRUCT reinterpretation of a heap tuple to a Form_* struct (MAXALIGN'd body covers the Form alignment)"
 )]
+#![allow(
+    clippy::similar_names,
+    reason = "conkey/confkey + fk_relid/pk_relid are the PG-canonical FK vs referenced-key names"
+)]
 
 use std::sync::Arc;
 
@@ -130,7 +134,53 @@ pub async fn DefineRelation(
     )
     .await;
 
+    // Process FOREIGN KEY constraints (step 41): table-level FK Constraint elements
+    // and column-level REFERENCES (carried in each ColumnDef's `constraints`). The
+    // relation must be visible to the catalog scans the FK validation/trigger creation
+    // do, so bump the command counter first (PG runs the post-create AlterTable pass
+    // as a separate command).
+    let fks = collect_foreign_keys(&stmt.tableElts);
+    if !fks.is_empty() {
+        crate::backend::access::transam::xact::CommandCounterIncrement();
+        for con in fks {
+            Box::pin(add_foreign_key_constraint(shared, relation_id, &con)).await;
+            crate::backend::access::transam::xact::CommandCounterIncrement();
+        }
+    }
+
     ObjectAddress { classId: RelationRelationId, objectId: relation_id, objectSubId: 0 }
+}
+
+/// Collect the FOREIGN KEY constraints from a CREATE TABLE element list: the
+/// table-level `Constraint` elements with `contype FOREIGN`, plus each column's
+/// column-level REFERENCES (whose `fk_attrs` is filled from the owning column).
+fn collect_foreign_keys(elements: &[Node]) -> Vec<crate::nodes::parsenodes::Constraint> {
+    use crate::nodes::parsenodes::ConstrType;
+    let mut out = Vec::new();
+    for el in elements {
+        match el {
+            Node::Constraint(c) if c.contype == ConstrType::FOREIGN => {
+                out.push((**c).clone());
+            }
+            Node::ColumnDef(cd) => {
+                let colname = cd.colname.clone();
+                for con in &cd.constraints {
+                    let Node::Constraint(c) = con else { continue };
+                    if c.contype != ConstrType::FOREIGN {
+                        continue;
+                    }
+                    let mut c = (**c).clone();
+                    // A column-level REFERENCES constrains the owning column.
+                    if let (true, Some(name)) = (c.fk_attrs.is_empty(), colname.clone()) {
+                        c.fk_attrs = vec![Node::String_(crate::nodes::value::makeString(name))];
+                    }
+                    out.push(c);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// PG `BuildDescForRelation`: build a `TupleDesc` from a list of `ColumnDef`.
@@ -142,10 +192,16 @@ pub async fn build_desc_for_relation(
     shared: &Arc<SharedState>,
     columns: &[Node],
 ) -> TupleDesc {
-    let natts = i32::try_from(columns.len()).unwrap_or(0);
+    // Only ColumnDef elements describe attributes; table constraints (CHECK,
+    // FOREIGN KEY) are processed separately by DefineRelation after creation.
+    let col_defs: Vec<&Node> = columns
+        .iter()
+        .filter(|n| matches!(n, Node::ColumnDef(_)))
+        .collect();
+    let natts = i32::try_from(col_defs.len()).unwrap_or(0);
     let mut desc = TupleDescData::create_template(natts);
 
-    for (i, element) in columns.iter().enumerate() {
+    for (i, element) in col_defs.iter().enumerate() {
         let Node::ColumnDef(entry) = element else {
             not_yet_reachable("BuildDescForRelation: non-ColumnDef element");
         };
@@ -290,9 +346,26 @@ fn text_datum(s: &str) -> Datum {
 
 /// One catalog row copied out of a scan: an owned tuple (Send) + its on-disk TID.
 /// Collected before any `.await` so no live scan tuple crosses an await point.
-struct CatalogRow {
-    tuple: HeapTupleData,
-    tid: ItemPointerData,
+pub struct CatalogRow {
+    pub tuple: HeapTupleData,
+    pub tid: ItemPointerData,
+}
+
+/// Public re-export of [`scan_catalog_by_oid`] for sibling command modules
+/// (trigger.rs reads pg_trigger / pg_class / pg_constraint rows this way).
+pub async fn scan_catalog_rows_by_oid(
+    shared: &Arc<SharedState>,
+    catalog_id: Oid,
+    key_attno: i32,
+    key_value: Oid,
+) -> Vec<CatalogRow> {
+    scan_catalog_by_oid(shared, catalog_id, key_attno, key_value).await
+}
+
+/// Render a fixed-length `NameData` to an owned `String` (public for sibling
+/// command modules).
+pub fn name_to_string(name: &crate::c::NameData) -> String {
+    name_of(name)
 }
 
 /// Scan a catalog heap by an OID-equality key on `key_attno`, returning each
@@ -786,7 +859,214 @@ async fn ata_exec_add_constraint(shared: &Arc<SharedState>, relid: Oid, cmd: &Al
     };
     match con.contype {
         ConstrType::CHECK => store_check_constraint(shared, relid, con).await,
+        ConstrType::FOREIGN => add_foreign_key_constraint(shared, relid, con).await,
         other => not_yet_reachable(&format!("ATExecAddConstraint: {other:?}")),
+    }
+}
+
+/// PG `ATAddForeignKeyConstraint` (step 41): validate + record a FOREIGN KEY.
+/// Resolves the FK columns on `relid` and the referenced (PK) table + columns,
+/// validates the existing data satisfies the FK, stores the pg_constraint row, and
+/// creates the system triggers (the RI check trigger on the FK table + the RI
+/// action trigger on the PK table). `con` is the parsed FOREIGN KEY Constraint.
+pub async fn add_foreign_key_constraint(
+    shared: &Arc<SharedState>,
+    fk_relid: Oid,
+    con: &crate::nodes::parsenodes::Constraint,
+) {
+    use crate::nodes::nodes::Node;
+
+    // The referenced (PK) relation.
+    let pktable = con
+        .pktable
+        .as_ref()
+        .unwrap_or_else(|| unreachable!("a FOREIGN KEY names a referenced table"));
+    let pkrelname = pktable.relname.as_deref().unwrap_or_else(|| unreachable!("pktable has a name"));
+    let pk_relid = range_var_get_relid(shared, pktable.schemaname.as_deref(), pkrelname)
+        .await
+        .unwrap_or_else(|| {
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_TABLE)
+                    .errmsg(format!("relation \"{pkrelname}\" does not exist"));
+            });
+            unreachable!("ereport(ERROR) diverges");
+        });
+
+    // FK columns (conkey) on the FK relation. A column-level REFERENCES leaves
+    // fk_attrs empty; the caller (CREATE TABLE path) fills it. ALTER ADD always
+    // lists them.
+    let conkey = resolve_attnums(shared, fk_relid, &con.fk_attrs).await;
+    if conkey.is_empty() {
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_INVALID_FOREIGN_KEY)
+                .errmsg("foreign key constraint must specify referencing columns".to_string());
+        });
+    }
+
+    // Referenced columns (confkey): the named pk_attrs, else default to the PK of
+    // the referenced table. PRIMARY KEY constraint storage stages, so the default
+    // resolves to the referenced table's first column (the common `id` PK).
+    let confkey = if con.pk_attrs.is_empty() {
+        vec![1_i16]
+    } else {
+        resolve_attnums(shared, pk_relid, &con.pk_attrs).await
+    };
+
+    let conname = con.conname.clone().unwrap_or_else(|| {
+        let col = con
+            .fk_attrs
+            .first()
+            .and_then(node_string)
+            .unwrap_or_else(|| "fk".to_string());
+        format!("{pkrelname}_{col}_fkey")
+    });
+
+    // Validate existing rows: every non-NULL FK row must have a matching PK row.
+    validate_existing_fk(shared, fk_relid, pk_relid, &conkey, &confkey).await;
+
+    // Store the pg_constraint row (contype 'f').
+    let constraint_oid = crate::backend::catalog::pg_constraint::create_fk_constraint_entry(
+        shared,
+        crate::catalog::pg_namespace::PG_PUBLIC_NAMESPACE,
+        &crate::backend::catalog::pg_constraint::FkConstraintFields {
+            conname: &conname,
+            conrelid: fk_relid,
+            confrelid: pk_relid,
+            conkey: &conkey,
+            confkey: &confkey,
+            confupdtype: con.fk_upd_action,
+            confdeltype: con.fk_del_action,
+            confmatchtype: con.fk_matchtype,
+        },
+    )
+    .await;
+
+    // Create the RI system triggers.
+    create_fk_triggers(shared, fk_relid, pk_relid, constraint_oid, con.fk_del_action).await;
+    let _ = Node::Constraint;
+}
+
+/// Resolve a list of column-name value nodes to their 1-based attnums on `relid`.
+async fn resolve_attnums(shared: &Arc<SharedState>, relid: Oid, names: &[crate::nodes::nodes::Node]) -> Vec<i16> {
+    let mut out = Vec::with_capacity(names.len());
+    for n in names {
+        if let Some(name) = node_string(n) {
+            if let Some(attno) = column_attnum(shared, relid, &name).await {
+                out.push(attno);
+            } else {
+                crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                    e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_COLUMN)
+                        .errmsg(format!("column \"{name}\" referenced in foreign key constraint does not exist"));
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Extract a `String_` value node's string.
+fn node_string(n: &crate::nodes::nodes::Node) -> Option<String> {
+    match n {
+        crate::nodes::nodes::Node::String_(s) => Some(s.sval.clone()),
+        _ => None,
+    }
+}
+
+/// PG `validateForeignKeyConstraint` (RI_Initial_Check, step 41): scan the FK
+/// table; every row with all FK columns non-NULL must have a matching PK row, else
+/// ERRCODE_FOREIGN_KEY_VIOLATION.
+async fn validate_existing_fk(
+    shared: &Arc<SharedState>,
+    fk_relid: Oid,
+    pk_relid: Oid,
+    conkey: &[i16],
+    confkey: &[i16],
+) {
+    crate::backend::utils::adt::ri_triggers::ri_initial_check(
+        shared, fk_relid, pk_relid, conkey, confkey,
+    )
+    .await;
+}
+
+/// Create the foreign-key system triggers: the RI check trigger on the FK table
+/// (fires AFTER INSERT/UPDATE) and the RI action trigger on the PK table (fires
+/// AFTER DELETE per the ON DELETE action). Both are internal triggers linked to
+/// `constraint_oid`.
+async fn create_fk_triggers(
+    shared: &Arc<SharedState>,
+    fk_relid: Oid,
+    pk_relid: Oid,
+    constraint_oid: Oid,
+    del_action: i8,
+) {
+    use crate::catalog::pg_trigger::{
+        TRIGGER_TYPE_AFTER, TRIGGER_TYPE_DELETE, TRIGGER_TYPE_INSERT, TRIGGER_TYPE_ROW,
+        TRIGGER_TYPE_UPDATE,
+    };
+    use crate::backend::commands::trigger::ri_action_func_for_delete;
+    let _ = TRIGGER_TYPE_AFTER; // AFTER is the zero timing bit.
+
+    // The check trigger on the FK (referencing) table: AFTER INSERT OR UPDATE ROW,
+    // EXECUTE RI_FKey_check_ins. The trigger is defined ON the FK table, with its
+    // tgconstrrelid pointing at the PK (referenced) table.
+    let check_funcoid = crate::utils::fmgroids::F_RI_FKEY_CHECK_INS;
+    let check_stmt = make_internal_trig_stmt(
+        "RI_ConstraintTrigger_c",
+        fk_relid,
+        pk_relid,
+        TRIGGER_TYPE_ROW | TRIGGER_TYPE_INSERT | TRIGGER_TYPE_UPDATE,
+    );
+    crate::backend::commands::trigger::create_trigger(
+        shared, &check_stmt, "", fk_relid, constraint_oid, pk_relid, check_funcoid, true,
+    )
+    .await;
+
+    // The action trigger on the PK (referenced) table: AFTER DELETE ROW, EXECUTE the
+    // RI function for the ON DELETE action. tgconstrrelid points at the FK table.
+    let action_funcoid = ri_action_func_for_delete(del_action);
+    let action_stmt = make_internal_trig_stmt(
+        "RI_ConstraintTrigger_a",
+        pk_relid,
+        fk_relid,
+        TRIGGER_TYPE_ROW | TRIGGER_TYPE_DELETE,
+    );
+    crate::backend::commands::trigger::create_trigger(
+        shared, &action_stmt, "", pk_relid, constraint_oid, fk_relid, action_funcoid, true,
+    )
+    .await;
+}
+
+/// Build an internal `CreateTrigStmt` for a system (RI) trigger. `tgtype_bits` is
+/// the ROW + timing + events bitmask (timing is AFTER = 0). The function OID is
+/// passed separately to `create_trigger`, so `funcname` is unused here.
+fn make_internal_trig_stmt(
+    name: &str,
+    rel_oid: Oid,
+    _constr_rel_oid: Oid,
+    tgtype_bits: i16,
+) -> crate::nodes::parsenodes::CreateTrigStmt {
+    use crate::catalog::pg_trigger::{
+        TRIGGER_TYPE_DELETE, TRIGGER_TYPE_INSERT, TRIGGER_TYPE_ROW, TRIGGER_TYPE_UPDATE,
+    };
+    let events = tgtype_bits & (TRIGGER_TYPE_INSERT | TRIGGER_TYPE_UPDATE | TRIGGER_TYPE_DELETE);
+    let row = (tgtype_bits & TRIGGER_TYPE_ROW) != 0;
+    let _ = rel_oid;
+    crate::nodes::parsenodes::CreateTrigStmt {
+        replace: false,
+        isconstraint: true,
+        trigname: Some(name.to_string()),
+        relation: None,
+        funcname: Vec::new(),
+        args: Vec::new(),
+        row,
+        timing: 0, // AFTER
+        events,
+        columns: Vec::new(),
+        whenClause: None,
+        transitionRels: Vec::new(),
+        deferrable: false,
+        initdeferred: false,
+        constrrel: None,
     }
 }
 
@@ -796,6 +1076,7 @@ async fn ata_exec_drop_constraint(shared: &Arc<SharedState>, relid: Oid, cmd: &A
 
     let conname = cmd.name.as_deref().unwrap_or_else(|| unreachable!("DROP CONSTRAINT names it"));
     let mut found = false;
+    let mut dropped_oids = Vec::new();
     // pg_constraint is not seeded on-disk at this milestone (STAGED): if absent, no
     // constraint rows exist to drop.
     if let Some(pg_constraint) = relation_id_get_relation(ConstraintRelationId) {
@@ -808,6 +1089,7 @@ async fn ata_exec_drop_constraint(shared: &Arc<SharedState>, relid: Oid, cmd: &A
                 GETSTRUCT(&row.tuple).cast::<crate::catalog::pg_constraint::FormData_pg_constraint>();
             let this = unsafe { &*connamep };
             if name_of(&this.conname) == conname {
+                dropped_oids.push(this.oid);
                 catalog_tuple_delete(shared, &pg_constraint, &row.tid).await;
                 found = true;
             }
@@ -818,11 +1100,45 @@ async fn ata_exec_drop_constraint(shared: &Arc<SharedState>, relid: Oid, cmd: &A
         relation_close(pg_constraint);
     }
 
+    // Drop the FK constraint's system triggers (on both the FK and referenced
+    // tables) so enforcement stops. A CHECK constraint has no triggers to remove.
+    for oid in dropped_oids {
+        Box::pin(remove_constraint_triggers(shared, oid)).await;
+    }
+
     if !found && !cmd.missing_ok {
         crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
             e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_OBJECT)
                 .errmsg(format!("constraint \"{conname}\" of relation does not exist"));
         });
+    }
+}
+
+/// Remove every pg_trigger row whose `tgconstraint` equals `constraint_oid` (the FK
+/// system triggers). Each removal routes through `remove_trigger_by_id` so the
+/// owning relation's `relhastriggers` is cleared when its last trigger goes.
+async fn remove_constraint_triggers(shared: &Arc<SharedState>, constraint_oid: Oid) {
+    use crate::catalog::pg_trigger::{self as pgt, FormData_pg_trigger, TriggerRelationId};
+    let rows = scan_catalog_by_oid(
+        shared,
+        TriggerRelationId,
+        pgt::Anum_pg_trigger_tgconstraint,
+        constraint_oid,
+    )
+    .await;
+    let mut trig_oids = Vec::new();
+    for row in &rows {
+        // SAFETY: owned tuple.
+        let p = GETSTRUCT(&row.tuple).cast::<FormData_pg_trigger>();
+        if unsafe { (*p).tgconstraint } == constraint_oid {
+            trig_oids.push(unsafe { (*p).oid });
+        }
+    }
+    for row in rows {
+        heap_freetuple(row.tuple);
+    }
+    for oid in trig_oids {
+        Box::pin(crate::backend::commands::trigger::remove_trigger_by_id(shared, oid)).await;
     }
 }
 

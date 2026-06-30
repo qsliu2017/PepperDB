@@ -37,6 +37,50 @@ fn not_yet_reachable(what: &str) -> ! {
     unimplemented!("{what}: not yet translated for this milestone");
 }
 
+/// PG `transformAssignedExpr`: a catchable error when an INSERT/UPDATE value cannot
+/// be coerced to its target column's type (`coerce_to_target_type` returned NULL).
+/// Mirrors parse_target.c's `ERRCODE_DATATYPE_MISMATCH` ereport.
+#[cold]
+fn assigned_expr_type_mismatch(colname: &str, col_type: Oid, expr_type: Oid) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_DATATYPE_MISMATCH)
+            .errmsg(format!(
+                "column \"{}\" is of type {} but expression is of type {}",
+                colname,
+                type_name_be(col_type),
+                type_name_be(expr_type),
+            ))
+            .errhint("You will need to rewrite or cast the expression.");
+    });
+    unreachable!("ereport(ERROR) diverges");
+}
+
+/// A sync, non-panicking stand-in for PG `format_type_be` for the error message
+/// above: name the common base types, falling back to `oid N` for the rest (the real
+/// `format_type_be` reaches the typecache, which is async; the message only needs to
+/// be human-readable and catchable).
+fn type_name_be(oid: Oid) -> String {
+    use crate::catalog::genbki::{
+        BOOLOID, DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID, INT8OID, NAMEOID, NUMERICOID,
+        TEXTOID, TIMESTAMPOID,
+    };
+    let name = match oid {
+        x if x == BOOLOID => "boolean",
+        x if x == INT2OID => "smallint",
+        x if x == INT4OID => "integer",
+        x if x == INT8OID => "bigint",
+        x if x == FLOAT4OID => "real",
+        x if x == FLOAT8OID => "double precision",
+        x if x == NUMERICOID => "numeric",
+        x if x == TEXTOID => "text",
+        x if x == NAMEOID => "name",
+        x if x == DATEOID => "date",
+        x if x == TIMESTAMPOID => "timestamp without time zone",
+        _ => return format!("oid {}", oid.get()),
+    };
+    name.to_string()
+}
+
 /// PG `makeNode(Query)`: a zero-initialized `Query` (palloc0 semantics). The
 /// first enum variant is the zero discriminant, matching C's all-bytes-zero.
 fn make_query() -> Box<Query> {
@@ -1013,6 +1057,7 @@ fn collect_expr_names(node: Option<&Node>, ops: &mut Vec<String>, funcs: &mut Ve
 /// directly as the query targetlist (PG: "works just like a SELECT without FROM");
 /// multi-row VALUES, DEFAULT VALUES, ON CONFLICT, and RETURNING grow at their
 /// milestones.
+#[allow(clippy::too_many_lines, reason = "faithful transformInsertStmt: open + targets + per-column coercion")]
 async fn transform_insert_stmt(
     shared: &Arc<SharedState>,
     pstate: &mut ParseState,
@@ -1073,7 +1118,10 @@ async fn transform_insert_stmt(
         transform_expression_list(pstate, &row.args, ParseExprKind::ValuesSingle)
     };
 
-    // Generate the query targetlist: each expr keyed to its target attno.
+    // Generate the query targetlist: each expr keyed to its target attno, coerced to
+    // the target column's type (PG transformInsertRow -> transformAssignedExpr). The
+    // coercion retypes an UNKNOWN literal/NULL to the column type (e.g. `NULL` -> the
+    // int4 FK column's null).
     crate::assert!(expr_list.len() <= icolumns.len());
     let perminfo_index = pstate
         .p_target_nsitem
@@ -1081,14 +1129,52 @@ async fn transform_insert_stmt(
         .unwrap_or_else(|| not_yet_reachable("transformInsertStmt: no target nsitem"))
         .rte
         .perminfoindex;
+    // Column (atttypid, atttypmod) for each target attno, read from the target rel.
+    let col_types: Vec<(Oid, i32)> = {
+        let rel = pstate
+            .p_target_relation
+            .as_ref()
+            .unwrap_or_else(|| not_yet_reachable("transformInsertStmt: no target relation"));
+        let tupdesc = rel
+            .rd_att
+            .as_ref()
+            .unwrap_or_else(|| not_yet_reachable("transformInsertStmt: target rel has no descriptor"));
+        attrnos
+            .iter()
+            .map(|&attno| {
+                let att = tupdesc.attr((attno - 1) as usize);
+                (att.atttypid, att.atttypmod)
+            })
+            .collect()
+    };
     qry.targetList = expr_list
         .into_iter()
         .zip(icolumns.iter().zip(attrnos.iter()))
-        .map(|(expr, (col, &attno))| {
+        .enumerate()
+        .map(|(i, (expr, (col, &attno)))| {
             let name = col_name(col);
             mark_inserted_col(pstate, perminfo_index, attno);
+            let (atttypid, atttypmod) = col_types[i];
+            let exprtype = crate::backend::nodes::nodeFuncs::exprType(&expr);
+            let coerced = if exprtype == atttypid {
+                expr
+            } else {
+                crate::backend::parser::parse_coerce::coerce_to_target_type(
+                    pstate,
+                    Some(expr),
+                    exprtype,
+                    atttypid,
+                    atttypmod,
+                    crate::nodes::primnodes::CoercionContext::ASSIGNMENT,
+                    crate::nodes::primnodes::CoercionForm::IMPLICIT_CAST,
+                    -1,
+                )
+                .unwrap_or_else(|| {
+                    assigned_expr_type_mismatch(name.as_deref().unwrap_or(""), atttypid, exprtype)
+                })
+            };
             Node::TargetEntry(Box::new(crate::nodes::makefuncs::makeTargetEntry(
-                Some(expr),
+                Some(coerced),
                 attno,
                 name,
                 false,

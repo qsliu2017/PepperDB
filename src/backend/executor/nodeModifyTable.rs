@@ -180,6 +180,30 @@ pub async fn exec_modify_table<'r>(
     let cid = crate::backend::access::transam::xact::GetCurrentCommandId(true);
     let has_returning = run.returning.is_some();
 
+    // Build the result relation's trigger descriptor (PG keeps this on the relcache
+    // entry; the milestone builds it on demand for the ModifyTable run). AFTER ROW
+    // triggers (the RI system triggers) are queued during the run and fired at its
+    // end. `relhastriggers` short-circuits relations with no triggers.
+    let relid = run.result_relation.rd_id;
+    let has_triggers = run
+        .result_relation
+        .rd_rel
+        .as_ref()
+        .is_some_and(|r| r.relhastriggers);
+    let trigdesc = if has_triggers {
+        crate::backend::commands::trigger::relation_build_triggers(shared, relid).await
+    } else {
+        None
+    };
+
+    // AfterTriggerBeginQuery / AfterTriggerEndQuery are NOT driven here: PG opens
+    // the after-trigger query level in standard_ExecutorStart and fires the queued
+    // events in standard_ExecutorFinish (ExecPostprocessPlan + AfterTriggerEndQuery),
+    // so they run regardless of how the run terminates -- a full drain, a RETURNING
+    // fetch that stops at a row-count limit, or an early portal stop. Firing them
+    // from this node would skip the queue (the RI FK check) whenever the run breaks
+    // out before this node returns None. See execMain `standard_executor_finish`.
+
     loop {
         // Pull the next source row, snapshotting its values + TID before the modify
         // (the subplan-slot borrow ends here, freeing `run` for the RETURNING project).
@@ -199,12 +223,34 @@ pub async fn exec_modify_table<'r>(
         match run.operation {
             CmdType::INSERT => {
                 exec_insert(shared, run.result_relation, &snapshot, cid).await;
+                // ExecARInsertTriggers: queue AFTER ROW INSERT triggers (RI check).
+                crate::backend::commands::trigger::exec_ar_insert_triggers(
+                    trigdesc.as_ref(), relid, &snapshot.values, &snapshot.isnull, &snapshot.desc,
+                );
             }
             CmdType::UPDATE => {
                 exec_update(shared, run.result_relation, &snapshot, cid).await;
+                // ExecARUpdateTriggers: queue AFTER ROW UPDATE triggers.
+                crate::backend::commands::trigger::exec_ar_update_triggers(
+                    trigdesc.as_ref(), relid, &snapshot.values, &snapshot.isnull, &snapshot.desc,
+                );
             }
             CmdType::DELETE => {
+                // The DELETE subplan slot carries only the row identity (ctid), not
+                // the full column values an AFTER DELETE trigger reads. When delete
+                // triggers exist, fetch the OLD tuple at the TID before deleting it.
+                let old_row = if trigdesc.as_ref().is_some_and(|d| d.trig_delete_after_row) {
+                    fetch_old_row(shared, run.result_relation, &snapshot.tid).await
+                } else {
+                    None
+                };
                 exec_delete(shared, run.result_relation, &snapshot.tid, cid).await;
+                // ExecARDeleteTriggers: queue AFTER ROW DELETE triggers (RI action).
+                if let Some((vals, nulls, desc)) = old_row {
+                    crate::backend::commands::trigger::exec_ar_delete_triggers(
+                        trigdesc.as_ref(), relid, &vals, &nulls, &desc,
+                    );
+                }
             }
             other => unimplemented!("ExecModifyTable: operation {other:?} not reachable"),
         }
@@ -219,6 +265,28 @@ pub async fn exec_modify_table<'r>(
 
     run.state.mt_done = true;
     None
+}
+
+/// Fetch the full column values of the (about-to-be-deleted) row at `tid`, so an
+/// AFTER DELETE trigger sees the OLD tuple's columns. Returns (values, isnull, desc),
+/// or None if the row cannot be fetched.
+async fn fetch_old_row(
+    shared: &Arc<SharedState>,
+    relation: &RelationData,
+    tid: &ItemPointerData,
+) -> Option<(
+    Vec<crate::postgres::Datum>,
+    Vec<bool>,
+    Option<crate::access::tupdesc::TupleDesc>,
+)> {
+    use crate::backend::utils::time::snapmgr::{ActiveSnapshotSet, GetActiveSnapshot};
+    let snap = if ActiveSnapshotSet() { GetActiveSnapshot()? } else { return None };
+    let tup = crate::backend::access::heap::heapam::heap_fetch_tid(shared, relation, tid, &snap).await?;
+    let desc = relation.rd_att.clone()?;
+    // SAFETY: live fetched tuple + the relation's descriptor.
+    let (vals, nulls) =
+        unsafe { crate::backend::access::common::heaptuple::heap_deform_tuple(&tup, &desc) };
+    Some((vals, nulls, Some(desc)))
 }
 
 /// A snapshot of the subplan row (its values + TID), taken before the modify so the
@@ -282,7 +350,8 @@ fn run_projection(
 }
 
 /// PG `ExecInsert` (M2 subset): form a heap tuple from `slot` and store it through
-/// the table AM. BEFORE/AFTER triggers, indexes, WCO and partition routing grow later.
+/// the table AM. AFTER ROW triggers fire in the caller's loop (ExecARInsertTriggers,
+/// step 41); BEFORE ROW triggers, indexes, WCO and partition routing grow later.
 async fn exec_insert(
     shared: &Arc<SharedState>,
     relation: &RelationData,

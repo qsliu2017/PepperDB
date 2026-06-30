@@ -15,6 +15,10 @@ pub mod schemacmds;
 pub mod sequence;
 pub mod tablecmds;
 pub mod tablespace;
+pub mod trigger;
 pub mod typecmds;
 pub mod variable;
 pub mod view;
+
+#[cfg(test)]
+mod fk_tests;

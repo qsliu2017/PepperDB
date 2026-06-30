@@ -36,6 +36,8 @@ use crate::backend::parser::parser::{
     make_create_function_stmt, make_generic_def_elem, make_createdb_stmt, make_dropdb_stmt,
     make_create_conversion_stmt, make_create_tablespace_stmt, make_function_parameter,
     make_ot_column_def, make_view_stmt, make_rule_stmt, make_string_value_node,
+    make_create_trig_stmt, make_fk_constraint, make_column_fk_constraint, set_constraint_name,
+    make_null_const, TrigTiming, TrigEvent,
     DropBehaviorTok, ObjType,
 };
 use crate::nodes::parsenodes::{CursorOptions, FetchDirection, FETCH_ALL};
@@ -246,6 +248,20 @@ extern {
         "INSTEAD"    => Token::Keyword("instead"),
         "RECURSIVE"  => Token::Keyword("recursive"),
         "CASCADED"   => Token::Keyword("cascaded"),
+        // M11 (step 41): CREATE TRIGGER + FOREIGN KEY keywords.
+        "TRIGGER"    => Token::Keyword("trigger"),
+        "BEFORE"     => Token::Keyword("before"),
+        "AFTER"      => Token::Keyword("after"),
+        "EACH"       => Token::Keyword("each"),
+        "ROW"        => Token::Keyword("row"),
+        "STATEMENT"  => Token::Keyword("statement"),
+        "FOREIGN"    => Token::Keyword("foreign"),
+        "REFERENCES" => Token::Keyword("references"),
+        "PRIMARY"    => Token::Keyword("primary"),
+        "MATCH"      => Token::Keyword("match"),
+        "PARTIAL"    => Token::Keyword("partial"),
+        "SIMPLE"     => Token::Keyword("simple"),
+        "ACTION"     => Token::Keyword("action"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -323,6 +339,7 @@ Stmt: Option<Node> = {
     <s:CreateTableSpaceStmt> => Some(s),
     <s:ViewStmt> => Some(s),
     <s:RuleStmt> => Some(s),
+    <s:CreateTrigStmt> => Some(s),
     <s:InsertStmt> => Some(s),
     <s:UpdateStmt> => Some(s),
     <s:DeleteStmt> => Some(s),
@@ -528,10 +545,25 @@ TableElement: Node = {
 };
 
 // gram.y `columnDef`: ColId Typename ColQualList. M2 builds the plain
-// `name type` ColumnDef; column constraints (NOT NULL / DEFAULT / ...) grow with
-// the ColQualList machinery.
+// `name type` ColumnDef; M11 (step 41) adds the column-level REFERENCES
+// constraint. Other column constraints (NOT NULL / DEFAULT / ...) grow with
+// the full ColQualList machinery.
 ColumnDef: Node = {
     <name:ColId> <typ:Typename> => make_column_def_elt(name, typ),
+    <name:ColId> <typ:Typename> <c:ColRefConstraint> => {
+        let mut col = make_column_def_elt(name, typ);
+        if let Node::ColumnDef(cd) = &mut col { cd.constraints.push(c); }
+        col
+    },
+};
+
+// gram.y `ColConstraintElem: REFERENCES qualified_name opt_column_list
+// key_match key_actions`. M11 (step 41): the column-level foreign key. The
+// referenced columns default to the PK of the referenced table.
+ColRefConstraint: Node = {
+    "REFERENCES" <pktable:QualifiedName> <pkcols:OptColumnList>
+        <m:KeyMatch> <a:KeyActions> =>
+        make_column_fk_constraint(pktable, pkcols, m, a.0, a.1),
 };
 
 // ===========================================================================
@@ -622,11 +654,140 @@ AlterTableCmd: Node = {
 };
 
 // gram.y `TableConstraint: CONSTRAINT name ConstraintElem | ConstraintElem`. M10
-// reaches a named/unnamed CHECK constraint (the minimal table constraint).
+// reaches a named/unnamed CHECK constraint; M11 (step 41) adds the table-level
+// FOREIGN KEY constraint.
 TableConstraint: Node = {
     "CONSTRAINT" <n:ColId> "CHECK" "(" <e:AExpr> ")" =>
         make_check_constraint(Some(n), e),
     "CHECK" "(" <e:AExpr> ")" => make_check_constraint(None, e),
+    "CONSTRAINT" <n:ColId> <c:FkConstraintElem> => set_constraint_name(c, n),
+    <c:FkConstraintElem> => c,
+};
+
+// gram.y `ConstraintElem: FOREIGN KEY '(' columnList ')' REFERENCES qualified_name
+// opt_column_list key_match key_actions ConstraintAttributeSpec`. M11 (step 41):
+// the column-array + referenced-columns + MATCH + ON DELETE/UPDATE actions.
+FkConstraintElem: Node = {
+    "FOREIGN" "KEY" "(" <fkcols:ColumnList> ")" "REFERENCES" <pktable:QualifiedName>
+        <pkcols:OptColumnList> <m:KeyMatch> <a:KeyActions> =>
+        make_fk_constraint(fkcols, pktable, pkcols, m, a.0, a.1),
+};
+
+// gram.y `columnList: columnElem (',' columnElem)*`. Each element is a String_
+// value node naming a column.
+ColumnList: Vec<Node> = {
+    <n:ColId> => vec![make_string_value_node(n)],
+    <mut list:ColumnList> "," <n:ColId> => { list.push(make_string_value_node(n)); list },
+};
+
+// gram.y `opt_column_list: '(' columnList ')' | /*EMPTY*/`.
+OptColumnList: Vec<Node> = {
+    "(" <list:ColumnList> ")" => list,
+    => Vec::new(),
+};
+
+// gram.y `key_match`: MATCH FULL | MATCH PARTIAL | MATCH SIMPLE | /*EMPTY*/.
+// Defaults to MATCH SIMPLE. (FULL/PARTIAL parse but enforcement stages.)
+KeyMatch: i8 = {
+    "MATCH" "FULL" => crate::nodes::parsenodes::FKCONSTR_MATCH_FULL,
+    "MATCH" "PARTIAL" => crate::nodes::parsenodes::FKCONSTR_MATCH_PARTIAL,
+    "MATCH" "SIMPLE" => crate::nodes::parsenodes::FKCONSTR_MATCH_SIMPLE,
+    => crate::nodes::parsenodes::FKCONSTR_MATCH_SIMPLE,
+};
+
+// gram.y `key_actions`: an optional ON UPDATE and/or ON DELETE action. Returns
+// (upd_action, del_action); each defaults to NO ACTION.
+KeyActions: (i8, i8) = {
+    => (crate::nodes::parsenodes::FKCONSTR_ACTION_NOACTION,
+        crate::nodes::parsenodes::FKCONSTR_ACTION_NOACTION),
+    "ON" "UPDATE" <u:KeyAction> =>
+        (u, crate::nodes::parsenodes::FKCONSTR_ACTION_NOACTION),
+    "ON" "DELETE" <d:KeyAction> =>
+        (crate::nodes::parsenodes::FKCONSTR_ACTION_NOACTION, d),
+    "ON" "UPDATE" <u:KeyAction> "ON" "DELETE" <d:KeyAction> => (u, d),
+    "ON" "DELETE" <d:KeyAction> "ON" "UPDATE" <u:KeyAction> => (u, d),
+};
+
+// gram.y `key_action`: NO ACTION | RESTRICT | CASCADE | SET NULL | SET DEFAULT.
+KeyAction: i8 = {
+    "NO" "ACTION" => crate::nodes::parsenodes::FKCONSTR_ACTION_NOACTION,
+    "RESTRICT"    => crate::nodes::parsenodes::FKCONSTR_ACTION_RESTRICT,
+    "CASCADE"     => crate::nodes::parsenodes::FKCONSTR_ACTION_CASCADE,
+    "SET" "NULL"  => crate::nodes::parsenodes::FKCONSTR_ACTION_SETNULL,
+    "SET" "DEFAULT" => crate::nodes::parsenodes::FKCONSTR_ACTION_SETDEFAULT,
+};
+
+// ===========================================================================
+//  CREATE TRIGGER  (M11, step 41)
+// ===========================================================================
+
+// gram.y `CreateTrigStmt`: CREATE [OR REPLACE] [CONSTRAINT] TRIGGER name
+// {BEFORE|AFTER|INSTEAD OF} events ON qualified_name [FROM ...] [deferrable]
+// [FOR [EACH] {ROW|STATEMENT}] [WHEN (cond)] EXECUTE {FUNCTION|PROCEDURE} func(args).
+// M11 (step 41) reaches the row/statement, BEFORE/AFTER, INSERT/UPDATE/DELETE form;
+// CONSTRAINT triggers, FROM reftable, deferrable, transition tables stage.
+CreateTrigStmt: Node = {
+    "CREATE" <repl:OptOrReplace> "TRIGGER" <name:ColId>
+        <timing:TriggerActionTime> <events:TriggerEvents> "ON" <rel:QualifiedName>
+        <row:TriggerForSpec> <whn:TriggerWhen>
+        "EXECUTE" <_fp:FuncOrProcedure> <fname:AnyNameParts> "(" <args:TriggerFuncArgs> ")" =>
+        make_create_trig_stmt(repl, name, timing, events, rel, row, whn, fname, args),
+};
+
+// gram.y `TriggerActionTime`: BEFORE | AFTER | INSTEAD OF.
+TriggerActionTime: TrigTiming = {
+    "BEFORE"  => TrigTiming::Before,
+    "AFTER"   => TrigTiming::After,
+    "INSTEAD" "OF" => TrigTiming::InsteadOf,
+};
+
+// gram.y `TriggerEvents`: TriggerOneEvent (OR TriggerOneEvent)*.
+TriggerEvents: Vec<TrigEvent> = {
+    <e:TriggerOneEvent> => vec![e],
+    <mut list:TriggerEvents> "OR" <e:TriggerOneEvent> => { list.push(e); list },
+};
+
+TriggerOneEvent: TrigEvent = {
+    "INSERT" => TrigEvent::Insert,
+    "DELETE" => TrigEvent::Delete,
+    "UPDATE" => TrigEvent::Update,
+};
+
+// gram.y `TriggerForSpec: FOR TriggerForOptEach TriggerForType | /*EMPTY*/`.
+// Returns true for FOR EACH ROW, false for STATEMENT (the default).
+TriggerForSpec: bool = {
+    => false,
+    "FOR" <r:TriggerForType> => r,
+    "FOR" "EACH" <r:TriggerForType> => r,
+};
+
+TriggerForType: bool = {
+    "ROW"       => true,
+    "STATEMENT" => false,
+};
+
+// gram.y `TriggerWhen: WHEN '(' a_expr ')' | /*EMPTY*/`.
+TriggerWhen: Option<Node> = {
+    => None,
+    "WHEN" "(" <e:AExpr> ")" => Some(e),
+};
+
+FuncOrProcedure: () = {
+    "FUNCTION"  => (),
+    "PROCEDURE" => (),
+};
+
+// gram.y `TriggerFuncArgs: TriggerFuncArg (',' TriggerFuncArg)* | /*EMPTY*/`.
+TriggerFuncArgs: Vec<Node> = {
+    => Vec::new(),
+    <a:TriggerFuncArg> => vec![a],
+    <mut list:TriggerFuncArgs> "," <a:TriggerFuncArg> => { list.push(a); list },
+};
+
+TriggerFuncArg: Node = {
+    <i:"ICONST"> => make_string_value_node(i.to_string()),
+    <s:"SCONST"> => make_string_value_node(s),
+    <n:ColId>    => make_string_value_node(n),
 };
 
 // gram.y `opt_drop_behavior: CASCADE | RESTRICT | /*EMPTY*/`.
@@ -1881,6 +2042,8 @@ CExpr: Node = {
     FuncExpr,
     // gram.y `c_expr: case_expr` (M4, step 23).
     CaseExpr,
+    // gram.y `c_expr: NULL_P` (the SQL NULL literal -> a null A_Const).
+    "NULL" => make_null_const(),
 };
 
 // gram.y `func_expr: func_application ... | func_expr_common_subexpr`. M3 reaches a

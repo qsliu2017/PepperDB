@@ -279,9 +279,15 @@ pub async fn ExecutorRun(
 }
 pub use crate::backend::executor::execMain::standard_executor_run as standard_ExecutorRun;
 
-/// PG `ExecutorFinish`: hook or `standard_ExecutorFinish`.
-pub fn ExecutorFinish(query_desc: &mut QueryDesc<'_>) {
-    standard_ExecutorFinish(query_desc);
+/// PG `ExecutorFinish`: hook or `standard_ExecutorFinish`. Async since the finish
+/// boundary drives ModifyTable to completion and fires queued AFTER triggers (the RI
+/// FK checks), both of which reach I/O. `shared` is `Option` so the const SELECT path
+/// can finish without one.
+pub async fn ExecutorFinish(
+    shared: Option<&std::sync::Arc<crate::shared_state::SharedState>>,
+    query_desc: &mut QueryDesc<'_>,
+) {
+    standard_ExecutorFinish(shared, query_desc).await;
 }
 pub use crate::backend::executor::execMain::standard_executor_finish as standard_ExecutorFinish;
 

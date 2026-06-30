@@ -48,6 +48,7 @@ pub async fn process_utility(
 /// PG `standard_ProcessUtility`: the utility dispatcher. M2 routes the
 /// catalog-creating statements through the "slow" path; the fast in-utility.c arms
 /// (transaction control, LISTEN/NOTIFY, ...) grow at their milestones.
+#[allow(clippy::too_many_lines, reason = "faithful standard_ProcessUtility dispatch over every utility statement kind")]
 pub async fn standard_process_utility(
     shared: &Arc<SharedState>,
     pstmt: &PlannedStmt,
@@ -155,6 +156,14 @@ pub async fn standard_process_utility(
         // --- CREATE VIEW / CREATE RULE (M11, step 40) ---
         Node::ViewStmt(_) | Node::RuleStmt(_) => {
             process_view_rule_stmt(shared, pstmt, parsetree, query_string).await;
+        }
+        // --- CREATE TRIGGER (M11, step 41) ---
+        Node::CreateTrigStmt(stmt) => {
+            crate::backend::commands::trigger::create_trigger_command(
+                shared, stmt, query_string,
+            )
+            .await;
+            crate::backend::access::transam::xact::CommandCounterIncrement();
         }
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
     }

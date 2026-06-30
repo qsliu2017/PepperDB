@@ -173,6 +173,9 @@ where
     let body = Box::pin(with_insertion(body));
     let body = Box::pin(combocid_scope(body));
     let body = Box::pin(snapmgr_scope(body));
+    // Per-backend after-trigger event queue (trigger.c's AfterTriggers state): so
+    // AFTER ROW triggers queued during a statement fire at its end (RI checks).
+    let body = Box::pin(crate::backend::commands::trigger::after_trigger_scope(body));
     // Per-backend GUC store (PG's process-wide GUC globals): so SET/SHOW persist for
     // the life of the connection. Boot defaults until a SET overrides them.
     let body = Box::pin(crate::backend::utils::misc::guc::guc_scope(body));
@@ -1059,7 +1062,7 @@ pub(crate) async fn execute_plan_into(
         0,
     );
     standard_executor_run(Some(shared), &mut query_desc, ScanDirection::Forward, count).await;
-    standard_executor_finish(&mut query_desc);
+    standard_executor_finish(Some(shared), &mut query_desc).await;
     let processed = query_desc.estate.as_ref().map_or(0, |e| e.processed);
     standard_executor_end(Some(shared), &mut query_desc);
 

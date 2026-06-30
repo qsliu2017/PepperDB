@@ -45,6 +45,7 @@ use crate::catalog::pg_operator::{OperatorRelationId, OperatorRelation_Rowtype_I
 use crate::catalog::pg_attrdef::{AttrDefaultRelationId, AttrDefaultRelation_Rowtype_Id};
 use crate::catalog::pg_constraint::{ConstraintRelationId, ConstraintRelation_Rowtype_Id};
 use crate::catalog::pg_rewrite::{RewriteRelationId, RewriteRelation_Rowtype_Id};
+use crate::catalog::pg_trigger::{TriggerRelationId, TriggerRelation_Rowtype_Id};
 use crate::catalog::pg_database::{DatabaseRelationId, DatabaseRelation_Rowtype_Id};
 use crate::catalog::pg_tablespace::TableSpaceRelationId;
 use crate::catalog::pg_collation::CollationRelationId;
@@ -181,6 +182,9 @@ pub static FORMRDESC_CATALOGS: &[BootstrapCatalog] = &[
     // M11 (step 40): pg_rewrite is nailed so DefineQueryRewrite's InsertRule can
     // write the view _RETURN rule row. Starts empty; filled by CREATE VIEW / RULE.
     catalog!("pg_rewrite", RewriteRelationId, RewriteRelation_Rowtype_Id, isshared => false, SCHEMA_PG_REWRITE),
+    // M11 (step 41): pg_trigger is nailed so CREATE TRIGGER / ADD FOREIGN KEY can
+    // write its rows and RelationBuildTriggers can read them. Starts empty.
+    catalog!("pg_trigger", TriggerRelationId, TriggerRelation_Rowtype_Id, isshared => false, SCHEMA_PG_TRIGGER),
 ];
 
 /// Build the compiled-in `TupleDesc` for a nailed bootstrap catalog from its
@@ -1120,6 +1124,14 @@ async fn seed_object_ddl_catalogs(shared: &std::sync::Arc<crate::shared_state::S
     build_oid_index(
         ConversionRelationId, Oid::new(2670), "pg_conversion_oid_index", "oid",
         crate::catalog::pg_conversion::Anum_pg_conversion_oid as i16,
+    )
+    .await;
+    // M11 (step 41): pg_trigger's oid index, so CREATE TRIGGER inserts maintain it
+    // and RemoveTriggerById can find the row by OID.
+    build_oid_index(
+        TriggerRelationId, crate::catalog::pg_trigger::TriggerOidIndexId,
+        "pg_trigger_oid_index", "oid",
+        crate::catalog::pg_trigger::Anum_pg_trigger_oid as i16,
     )
     .await;
 

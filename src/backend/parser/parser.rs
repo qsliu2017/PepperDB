@@ -42,6 +42,15 @@ pub fn make_float_const(text: String) -> Node {
     a_const(ValUnion::Float(makeFloat(text)))
 }
 
+/// PG `makeNullAConst`: an A_Const with `isnull` set (the SQL NULL literal).
+pub fn make_null_const() -> Node {
+    Node::A_Const(Box::new(A_Const {
+        val: ValUnion::Integer(makeInteger(0)),
+        isnull: true,
+        location: -1,
+    }))
+}
+
 /// PG `makeStringConst`: an A_Const holding a T_String value.
 pub fn make_string_const(text: String) -> Node {
     a_const(ValUnion::String(makeString(text)))
@@ -1426,6 +1435,168 @@ pub fn make_function_parameter(name: Option<String>, arg_type: TypeName) -> Node
 /// CREATE TYPE AS composite).
 pub fn make_ot_column_def(name: String, type_name: TypeName) -> Node {
     make_column_def_elt(name, type_name)
+}
+
+// ===========================================================================
+//  M11 (step 41): CREATE TRIGGER + FOREIGN KEY constraint node builders.
+// ===========================================================================
+
+use crate::nodes::parsenodes::CreateTrigStmt;
+
+/// gram.y `TriggerActionTime` token: BEFORE / AFTER / INSTEAD OF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrigTiming {
+    Before,
+    After,
+    InsteadOf,
+}
+
+/// gram.y `TriggerOneEvent` token: INSERT / DELETE / UPDATE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrigEvent {
+    Insert,
+    Delete,
+    Update,
+}
+
+/// A fresh, all-default `Constraint` node to fill in per constraint type (the
+/// gram.y `makeNode(Constraint)` + field assignment).
+fn empty_constraint(contype: ConstrType) -> Constraint {
+    Constraint {
+        contype,
+        conname: None,
+        deferrable: false,
+        initdeferred: false,
+        is_enforced: true,
+        skip_validation: false,
+        initially_valid: true,
+        is_no_inherit: false,
+        raw_expr: None,
+        cooked_expr: None,
+        generated_when: 0,
+        generated_kind: 0,
+        nulls_not_distinct: false,
+        keys: Vec::new(),
+        without_overlaps: false,
+        including: Vec::new(),
+        exclusions: Vec::new(),
+        options: Vec::new(),
+        indexname: None,
+        indexspace: None,
+        reset_default_tblspc: false,
+        access_method: None,
+        where_clause: None,
+        pktable: None,
+        fk_attrs: Vec::new(),
+        pk_attrs: Vec::new(),
+        fk_with_period: false,
+        pk_with_period: false,
+        fk_matchtype: crate::nodes::parsenodes::FKCONSTR_MATCH_SIMPLE,
+        fk_upd_action: crate::nodes::parsenodes::FKCONSTR_ACTION_NOACTION,
+        fk_del_action: crate::nodes::parsenodes::FKCONSTR_ACTION_NOACTION,
+        fk_del_set_cols: Vec::new(),
+        old_conpfeqop: Vec::new(),
+        old_pktable_oid: crate::postgres_ext::InvalidOid,
+        location: -1,
+    }
+}
+
+/// gram.y `ConstraintElem: FOREIGN KEY '(' columnList ')' REFERENCES ...` -> the
+/// table-level FK Constraint. `fk_attrs`/`pk_attrs` are String_ value nodes.
+pub fn make_fk_constraint(
+    fk_attrs: Vec<Node>,
+    pktable: RangeVar,
+    pk_attrs: Vec<Node>,
+    matchtype: i8,
+    upd_action: i8,
+    del_action: i8,
+) -> Node {
+    let mut c = empty_constraint(ConstrType::FOREIGN);
+    c.pktable = Some(Box::new(pktable));
+    c.fk_attrs = fk_attrs;
+    c.pk_attrs = pk_attrs;
+    c.fk_matchtype = matchtype;
+    c.fk_upd_action = upd_action;
+    c.fk_del_action = del_action;
+    Node::Constraint(Box::new(c))
+}
+
+/// gram.y `ColConstraintElem: REFERENCES qualified_name ...` -> the column-level FK
+/// Constraint. `fk_attrs` is empty here (the owning column is the FK; the executor
+/// fills it from the ColumnDef's name when the table is processed).
+pub fn make_column_fk_constraint(
+    pktable: RangeVar,
+    pk_attrs: Vec<Node>,
+    matchtype: i8,
+    upd_action: i8,
+    del_action: i8,
+) -> Node {
+    let mut c = empty_constraint(ConstrType::FOREIGN);
+    c.pktable = Some(Box::new(pktable));
+    c.pk_attrs = pk_attrs;
+    c.fk_matchtype = matchtype;
+    c.fk_upd_action = upd_action;
+    c.fk_del_action = del_action;
+    Node::Constraint(Box::new(c))
+}
+
+/// Attach a name to a constraint node (gram.y `CONSTRAINT name ConstraintElem`).
+pub fn set_constraint_name(constraint: Node, name: String) -> Node {
+    let Node::Constraint(mut c) = constraint else {
+        unreachable!("set_constraint_name on a non-Constraint node");
+    };
+    c.conname = Some(name);
+    Node::Constraint(c)
+}
+
+/// gram.y `CreateTrigStmt`: build the raw `CreateTrigStmt`. The tgtype timing/events
+/// are folded into the `timing`/`events` i16 bitmasks (TRIGGER_TYPE_*).
+#[allow(clippy::too_many_arguments)]
+pub fn make_create_trig_stmt(
+    replace: bool,
+    trigname: String,
+    timing: TrigTiming,
+    events: Vec<TrigEvent>,
+    relation: RangeVar,
+    row: bool,
+    when_clause: Option<Node>,
+    funcname: Vec<String>,
+    args: Vec<Node>,
+) -> Node {
+    use crate::catalog::pg_trigger::{
+        TRIGGER_TYPE_AFTER, TRIGGER_TYPE_BEFORE, TRIGGER_TYPE_DELETE, TRIGGER_TYPE_INSERT,
+        TRIGGER_TYPE_INSTEAD, TRIGGER_TYPE_UPDATE,
+    };
+    let timing_bits = match timing {
+        TrigTiming::Before => TRIGGER_TYPE_BEFORE,
+        TrigTiming::After => TRIGGER_TYPE_AFTER,
+        TrigTiming::InsteadOf => TRIGGER_TYPE_INSTEAD,
+    };
+    let mut event_bits: i16 = 0;
+    for e in events {
+        event_bits |= match e {
+            TrigEvent::Insert => TRIGGER_TYPE_INSERT,
+            TrigEvent::Delete => TRIGGER_TYPE_DELETE,
+            TrigEvent::Update => TRIGGER_TYPE_UPDATE,
+        };
+    }
+    Node::CreateTrigStmt(Box::new(CreateTrigStmt {
+        replace,
+        isconstraint: false,
+        trigname: Some(trigname),
+        relation: Some(Box::new(relation)),
+        funcname: funcname.into_iter().map(make_any_name_part).collect(),
+        args,
+        row,
+        timing: timing_bits,
+        events: event_bits,
+        columns: Vec::new(),
+        whenClause: when_clause,
+        transitionRels: Vec::new(),
+        deferrable: false,
+        initdeferred: false,
+        constrrel: None,
+    }))
 }
 
 #[cfg(test)]

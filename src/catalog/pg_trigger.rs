@@ -4,6 +4,10 @@ use crate::c::{NameData, bytea, varlena};
 use crate::postgres_ext::Oid;
 
 pub const TriggerRelationId: Oid = Oid::new(2620);
+/// pg_trigger composite rowtype OID. Nails the descriptor at bootstrap.
+pub const TriggerRelation_Rowtype_Id: Oid = Oid::new(11637);
+/// pg_trigger_oid_index (pkey on oid).
+pub const TriggerOidIndexId: Oid = Oid::new(2702);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

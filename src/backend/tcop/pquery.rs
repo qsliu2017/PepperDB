@@ -913,7 +913,7 @@ mod tests {
 
         // Finish + drop the executor (this also drops the moved-in receiver).
         if let Some(query_desc) = portal.query_desc.as_mut() {
-            ExecutorFinish(query_desc);
+            drive_const_executor(ExecutorFinish(None, query_desc));
         }
         portal_drop(&mut portal);
 
@@ -934,7 +934,7 @@ mod tests {
         let mut qc = QueryCompletion { command_tag: CommandTag::Unknown, nprocessed: 0 };
         portal_run(&mut portal, FETCH_ALL, dest, Some(&mut qc));
         if let Some(query_desc) = portal.query_desc.as_mut() {
-            ExecutorFinish(query_desc);
+            drive_const_executor(ExecutorFinish(None, query_desc));
         }
         portal_drop(&mut portal);
         assert_eq!(sink.lock().unwrap().rows, vec![vec![1, 2]]);

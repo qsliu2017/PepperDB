@@ -92,6 +92,15 @@ pub fn standard_executor_start_indexed<'rel>(
         estate.param_list_info = Some(params.clone());
     }
 
+    // AfterTriggerBeginQuery: open the after-trigger query level for this query,
+    // unless triggers are skipped or this is EXPLAIN-only (ExecutorFinish, which
+    // ends the query level, would not run then). PG execMain.c `standard_ExecutorStart`.
+    // The matching end-of-query drain+fire is in `standard_executor_finish`.
+    let skip = ExecFlag::SKIP_TRIGGERS | ExecFlag::EXPLAIN_ONLY;
+    if ExecFlag::from_bits_truncate(eflags).intersection(skip).is_empty() {
+        crate::backend::commands::trigger::after_trigger_begin_query();
+    }
+
     init_plan(query_desc, eflags);
 }
 
@@ -264,11 +273,69 @@ async fn execute_plan(
     // ExecShutdownNode grows with parallel/async nodes; nothing to do on M1/M2.
 }
 
-/// PG `standard_ExecutorFinish`: run any post-processing (ModifyTable to
-/// completion). Nothing to do for a SELECT.
-pub fn standard_executor_finish(query_desc: &mut QueryDesc<'_>) {
+/// PG `standard_ExecutorFinish`: run post-processing (ModifyTable to completion via
+/// `ExecPostprocessPlan`) then fire the queued AFTER-trigger events
+/// (`AfterTriggerEndQuery`). Async because both reach I/O (the heap modify + the RI
+/// FK checks). `shared` is `Option` so the const SELECT path (no node reaches an I/O
+/// leaf, no triggers) can finish without one.
+///
+/// This is the single firing boundary for queued AFTER ROW events (the RI FK check):
+/// it runs once per executor instance regardless of how `ExecutorRun` terminated --
+/// a full drain, a RETURNING fetch stopped at a row-count limit, or an early portal
+/// stop -- so the FK violation is never silently skipped.
+pub async fn standard_executor_finish(
+    shared: Option<&Arc<SharedState>>,
+    query_desc: &mut QueryDesc<'_>,
+) {
+    crate::assert!(
+        query_desc.estate.as_ref().is_some_and(|e| !e.finished),
+        "ExecutorFinish: run once per executor instance"
+    );
+
+    // ExecPostprocessPlan: drive any not-yet-exhausted ModifyTable node to completion
+    // (the RETURNING path may have stopped at a fetch limit), so every row is applied
+    // and its AFTER events queued before they fire. PG runs es_auxmodifytables here;
+    // this port drives the root ModifyTable (the only data-modifying node reachable).
+    exec_postprocess_plan(shared, query_desc).await;
+
+    // AfterTriggerEndQuery: fire the queued AFTER ROW events (the RI checks/actions),
+    // unless triggers are skipped for this query. Mirrors execMain.c.
+    let skip_triggers = query_desc
+        .estate
+        .as_ref()
+        .is_some_and(|e| ExecFlag::from_bits_truncate(e.top_eflags).contains(ExecFlag::SKIP_TRIGGERS));
+    if !skip_triggers && let Some(shared) = shared {
+        crate::backend::commands::trigger::after_trigger_end_query(shared).await;
+    }
+
     if let Some(estate) = query_desc.estate.as_mut() {
         estate.finished = true;
+    }
+}
+
+/// PG `ExecPostprocessPlan`: run the data-modifying node to completion in case the
+/// run did not fetch all its rows (a RETURNING fetch limited by a row count). PG
+/// drains `es_auxmodifytables`; here the root planstate is the ModifyTable, so drain
+/// it directly. A non-ModifyTable plan (SELECT) has nothing to post-process.
+async fn exec_postprocess_plan(shared: Option<&Arc<SharedState>>, query_desc: &mut QueryDesc<'_>) {
+    if let Some(estate) = query_desc.estate.as_mut() {
+        estate.direction = ScanDirection::Forward;
+    }
+    let Some(planstate) = query_desc.planstate.as_mut() else { return };
+    if !matches!(planstate.as_ref(), PlanStateNode::ModifyTable(_)) {
+        return;
+    }
+    // Drive ExecProcNode until the node reports done (TupIsNull). For a RETURNING run
+    // this applies the remaining rows (each queues its AFTER event); for a
+    // non-RETURNING run it already returned None on its single drive.
+    while exec_proc_node(shared, planstate).await.is_some() {}
+
+    // Fold any rows applied during post-processing into es_processed (the run loop
+    // does this for rows it pulled; rows drained here are counted on the node).
+    if let PlanStateNode::ModifyTable(mt) = planstate.as_mut()
+        && let Some(estate) = query_desc.estate.as_mut()
+    {
+        estate.processed = mt.processed;
     }
 }
 
@@ -515,7 +582,7 @@ mod tests {
         assert_eq!(result_desc.attr(0).atttypid, INT4OID);
 
         block_on_ready(ExecutorRun(None, &mut qd, ScanDirection::Forward, 0));
-        ExecutorFinish(&mut qd);
+        block_on_ready(ExecutorFinish(None, &mut qd));
 
         {
             let dest = sink.lock().unwrap();
@@ -551,7 +618,7 @@ mod tests {
         let mut qd = query_desc("SELECT 42", &sink);
         ExecutorStart(&mut qd, 0);
         block_on_ready(ExecutorRun(None, &mut qd, ScanDirection::Forward, 0));
-        ExecutorFinish(&mut qd);
+        block_on_ready(ExecutorFinish(None, &mut qd));
         assert_eq!(DatumGetInt32(sink.lock().unwrap().rows[0][0].0), 42);
         ExecutorEnd(None, &mut qd);
     }
@@ -562,7 +629,7 @@ mod tests {
         let mut qd = query_desc("SELECT 1, 2", &sink);
         ExecutorStart(&mut qd, 0);
         block_on_ready(ExecutorRun(None, &mut qd, ScanDirection::Forward, 0));
-        ExecutorFinish(&mut qd);
+        block_on_ready(ExecutorFinish(None, &mut qd));
         {
             let dest = sink.lock().unwrap();
             assert_eq!(dest.rows.len(), 1);
