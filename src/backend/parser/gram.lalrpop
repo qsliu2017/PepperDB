@@ -27,6 +27,10 @@ use crate::backend::parser::parser::{
     make_set_transaction_snapshot, make_reset, make_reset_all, make_variable_show,
     make_param_ref, make_prepare_stmt, make_execute_stmt, make_deallocate_stmt,
     make_declare_cursor_stmt, make_close_portal_stmt, make_fetch_stmt, set_fetch_ismove,
+    make_alter_table_stmt, make_at_add_column, make_at_drop_column, make_at_column_default,
+    make_at_set_not_null, make_at_add_constraint, make_at_drop_constraint, make_check_constraint,
+    make_rename_relation, make_rename_column, make_drop_stmt, make_any_name, make_grant_stmt,
+    make_comment_stmt, DropBehaviorTok, ObjType,
 };
 use crate::nodes::parsenodes::{CursorOptions, FetchDirection, FETCH_ALL};
 use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
@@ -185,6 +189,28 @@ extern {
         "RELATIVE"   => Token::Keyword("relative"),
         "BACKWARD"   => Token::Keyword("backward"),
         "FORWARD"    => Token::Keyword("forward"),
+        // M10 (step 38): ALTER TABLE / DROP / RENAME + dependency keywords.
+        "ALTER"      => Token::Keyword("alter"),
+        "DROP"       => Token::Keyword("drop"),
+        "ADD"        => Token::Keyword("add"),
+        "COLUMN"     => Token::Keyword("column"),
+        "RENAME"     => Token::Keyword("rename"),
+        "CASCADE"    => Token::Keyword("cascade"),
+        "RESTRICT"   => Token::Keyword("restrict"),
+        "EXISTS"     => Token::Keyword("exists"),
+        "IF"         => Token::Keyword("if"),
+        "CONSTRAINT" => Token::Keyword("constraint"),
+        "NULL"       => Token::Keyword("null"),
+        "CHECK"      => Token::Keyword("check"),
+        "GRANT"      => Token::Keyword("grant"),
+        "REVOKE"     => Token::Keyword("revoke"),
+        "COMMENT"    => Token::Keyword("comment"),
+        "IS"         => Token::Keyword("is"),
+        "TYPE"       => Token::Keyword("type"),
+        "VIEW"       => Token::Keyword("view"),
+        "SEQUENCE"   => Token::Keyword("sequence"),
+        "SCHEMA"     => Token::Keyword("schema"),
+        "PRIVILEGES" => Token::Keyword("privileges"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -245,6 +271,11 @@ Stmt: Option<Node> = {
     <s:SelectStmt> => Some(s),
     <s:CreateStmt> => Some(s),
     <s:IndexStmt> => Some(s),
+    <s:AlterTableStmt> => Some(s),
+    <s:RenameStmt> => Some(s),
+    <s:DropStmt> => Some(s),
+    <s:GrantStmt> => Some(s),
+    <s:CommentStmt> => Some(s),
     <s:InsertStmt> => Some(s),
     <s:UpdateStmt> => Some(s),
     <s:DeleteStmt> => Some(s),
@@ -496,6 +527,152 @@ IndexParams: Vec<Node> = {
 // (with ASC/DESC); opclasses, expressions, collations, and NULLS ordering grow.
 IndexElem: Node = {
     <n:ColId> <dir:OptAscDesc> => make_index_elem(n, dir),
+};
+
+// ===========================================================================
+//  ALTER TABLE / RENAME / DROP  (M10, step 38)
+// ===========================================================================
+
+// gram.y `AlterTableStmt: ALTER TABLE relation_expr alter_table_cmds`. M10 reaches
+// `ALTER TABLE [IF EXISTS] name <cmd> [, <cmd>]...` for tables; the MATERIALIZED
+// VIEW / INDEX / TYPE / partition / SET-clause forms grow at their milestones.
+AlterTableStmt: Node = {
+    "ALTER" "TABLE" <rel:QualifiedName> <cmds:AlterTableCmds> =>
+        make_alter_table_stmt(rel, cmds, false),
+    "ALTER" "TABLE" "IF" "EXISTS" <rel:QualifiedName> <cmds:AlterTableCmds> =>
+        make_alter_table_stmt(rel, cmds, true),
+};
+
+AlterTableCmds: Vec<Node> = {
+    <c:AlterTableCmd> => vec![c],
+    <mut list:AlterTableCmds> "," <c:AlterTableCmd> => { list.push(c); list },
+};
+
+// gram.y `alter_table_cmd`: the M10-reachable subcommands (ADD/DROP COLUMN,
+// ALTER COLUMN SET/DROP DEFAULT, SET/DROP NOT NULL, ALTER COLUMN TYPE, ADD/DROP
+// CONSTRAINT). The rarely-hit AT_* forms grow at their milestones.
+AlterTableCmd: Node = {
+    "ADD" "COLUMN" <c:ColumnDef> => make_at_add_column(c),
+    "ADD" <c:ColumnDef> => make_at_add_column(c),
+    "DROP" "COLUMN" <n:ColId> <b:OptDropBehavior> => make_at_drop_column(n, false, b),
+    "DROP" "COLUMN" "IF" "EXISTS" <n:ColId> <b:OptDropBehavior> =>
+        make_at_drop_column(n, true, b),
+    "DROP" <n:ColId> <b:OptDropBehavior> => make_at_drop_column(n, false, b),
+    "ALTER" "COLUMN" <n:ColId> "SET" "DEFAULT" <e:AExpr> =>
+        make_at_column_default(n, Some(e)),
+    "ALTER" <n:ColId> "SET" "DEFAULT" <e:AExpr> => make_at_column_default(n, Some(e)),
+    "ALTER" "COLUMN" <n:ColId> "DROP" "DEFAULT" => make_at_column_default(n, None),
+    "ALTER" <n:ColId> "DROP" "DEFAULT" => make_at_column_default(n, None),
+    "ALTER" "COLUMN" <n:ColId> "SET" "NOT" "NULL" => make_at_set_not_null(n, true),
+    "ALTER" <n:ColId> "SET" "NOT" "NULL" => make_at_set_not_null(n, true),
+    "ALTER" "COLUMN" <n:ColId> "DROP" "NOT" "NULL" => make_at_set_not_null(n, false),
+    "ALTER" <n:ColId> "DROP" "NOT" "NULL" => make_at_set_not_null(n, false),
+    "ADD" <c:TableConstraint> => make_at_add_constraint(c),
+    "DROP" "CONSTRAINT" <n:ColId> <b:OptDropBehavior> =>
+        make_at_drop_constraint(n, false, b),
+    "DROP" "CONSTRAINT" "IF" "EXISTS" <n:ColId> <b:OptDropBehavior> =>
+        make_at_drop_constraint(n, true, b),
+};
+
+// gram.y `TableConstraint: CONSTRAINT name ConstraintElem | ConstraintElem`. M10
+// reaches a named/unnamed CHECK constraint (the minimal table constraint).
+TableConstraint: Node = {
+    "CONSTRAINT" <n:ColId> "CHECK" "(" <e:AExpr> ")" =>
+        make_check_constraint(Some(n), e),
+    "CHECK" "(" <e:AExpr> ")" => make_check_constraint(None, e),
+};
+
+// gram.y `opt_drop_behavior: CASCADE | RESTRICT | /*EMPTY*/`.
+OptDropBehavior: DropBehaviorTok = {
+    "CASCADE"  => DropBehaviorTok::Cascade,
+    "RESTRICT" => DropBehaviorTok::Restrict,
+    => DropBehaviorTok::Restrict,
+};
+
+// gram.y `RenameStmt`: the M10-reachable forms -- RENAME a table/index/view/...
+// or one of its columns. `ALTER TABLE name RENAME [COLUMN] col TO new` and
+// `ALTER TABLE name RENAME TO new`.
+RenameStmt: Node = {
+    "ALTER" "TABLE" <rel:QualifiedName> "RENAME" "TO" <new:ColId> =>
+        make_rename_relation(ObjType::Table, rel, new, false),
+    "ALTER" "TABLE" "IF" "EXISTS" <rel:QualifiedName> "RENAME" "TO" <new:ColId> =>
+        make_rename_relation(ObjType::Table, rel, new, true),
+    "ALTER" "TABLE" <rel:QualifiedName> "RENAME" "COLUMN" <col:ColId> "TO" <new:ColId> =>
+        make_rename_column(ObjType::Table, rel, col, new, false),
+    "ALTER" "TABLE" <rel:QualifiedName> "RENAME" <col:ColId> "TO" <new:ColId> =>
+        make_rename_column(ObjType::Table, rel, col, new, false),
+    "ALTER" "TABLE" "IF" "EXISTS" <rel:QualifiedName> "RENAME" "COLUMN" <col:ColId> "TO" <new:ColId> =>
+        make_rename_column(ObjType::Table, rel, col, new, true),
+    "ALTER" "INDEX" <rel:QualifiedName> "RENAME" "TO" <new:ColId> =>
+        make_rename_relation(ObjType::Index, rel, new, false),
+    "ALTER" "VIEW" <rel:QualifiedName> "RENAME" "TO" <new:ColId> =>
+        make_rename_relation(ObjType::View, rel, new, false),
+};
+
+// gram.y `DropStmt`: the generic `DROP <objtype> [IF EXISTS] names [CASCADE|RESTRICT]`.
+// M10 reaches TABLE/INDEX/VIEW/SEQUENCE/TYPE/SCHEMA; the table/index forms route to
+// RemoveRelations, the rest to RemoveObjects.
+DropStmt: Node = {
+    "DROP" <t:DropObjectType> <ie:OptIfExists> <names:AnyNameList> <b:OptDropBehavior> =>
+        make_drop_stmt(t, names, ie, b),
+};
+
+DropObjectType: ObjType = {
+    "TABLE"    => ObjType::Table,
+    "INDEX"    => ObjType::Index,
+    "VIEW"     => ObjType::View,
+    "SEQUENCE" => ObjType::Sequence,
+    "TYPE"     => ObjType::Type,
+    "SCHEMA"   => ObjType::Schema,
+};
+
+OptIfExists: bool = {
+    "IF" "EXISTS" => true,
+    => false,
+};
+
+// gram.y `any_name_list`: a comma-separated list of (possibly qualified) names.
+// Each name is carried as a List of String parts (the DropStmt `objects` shape).
+AnyNameList: Vec<Node> = {
+    <n:AnyName> => vec![n],
+    <mut list:AnyNameList> "," <n:AnyName> => { list.push(n); list },
+};
+
+AnyName: Node = {
+    <n:ColId> => make_any_name(vec![n]),
+    <s:ColId> "." <n:ColId> => make_any_name(vec![s, n]),
+};
+
+// ===========================================================================
+//  GRANT / COMMENT  (M10 stub-parse: route to step-39 not_yet_reachable)
+// ===========================================================================
+
+// gram.y `GrantStmt`: stub-parsed into a GrantStmt node that ProcessUtility routes
+// to not_yet_reachable (step 39 builds the privilege machinery). M10 accepts the
+// shape `GRANT|REVOKE ... ON TABLE name TO|FROM role` loosely (names tokenized).
+GrantStmt: Node = {
+    "GRANT" <_p:GrantPrivList> "ON" "TABLE" <_n:QualifiedName> "TO" <_r:ColId> =>
+        make_grant_stmt(true),
+    "REVOKE" <_p:GrantPrivList> "ON" "TABLE" <_n:QualifiedName> "FROM" <_r:ColId> =>
+        make_grant_stmt(false),
+};
+
+GrantPrivList: () = {
+    "ALL" => (),
+    "ALL" "PRIVILEGES" => (),
+    <ColId> => (),
+};
+
+// gram.y `CommentStmt`: stub-parsed into a CommentStmt node routed to
+// not_yet_reachable (step 39). `COMMENT ON TABLE name IS 'text'|NULL`.
+CommentStmt: Node = {
+    "COMMENT" "ON" "TABLE" <_n:QualifiedName> "IS" <c:CommentText> =>
+        make_comment_stmt(c),
+};
+
+CommentText: Option<String> = {
+    <s:"SCONST"> => Some(s),
+    "NULL" => None,
 };
 
 // ===========================================================================

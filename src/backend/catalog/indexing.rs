@@ -82,6 +82,26 @@ pub fn register_catalog_index(heap_relid: Oid, index: Arc<RelationData>, info: I
     });
 }
 
+/// Remove the index `indexoid` from the per-task registry (`index_drop`'s effect on
+/// the rd_indexlist stand-in). Searches every heap entry; returns the heap relid the
+/// index belonged to, or `None` if it was not registered.
+pub fn unregister_catalog_index(indexoid: Oid) -> Option<Oid> {
+    CATALOG_INDEXES
+        .try_with(|cell| {
+            let mut map = cell.borrow_mut();
+            for (&heap, indexes) in map.iter_mut() {
+                let pos = indexes.iter().position(|ri| ri.index.rd_id == indexoid);
+                if let Some(pos) = pos {
+                    indexes.remove(pos);
+                    return Some(Oid(heap));
+                }
+            }
+            None
+        })
+        .ok()
+        .flatten()
+}
+
 /// The open indexes of a heap relation as owned `Arc`s + their key-attnums. The
 /// `Arc`s are clones of the registry's (a refcount bump pinning each index relation);
 /// this owned `Vec` lives in the caller's frame and is what [`CatalogIndexState`]
@@ -268,16 +288,41 @@ pub async fn catalog_tuple_insert_with_info(
     simple_catalog_insert(shared, heap_rel, tup, indstate).await;
 }
 
-/// `CatalogTupleUpdate`: STAGED. The M2 path only inserts catalog rows (CREATE);
-/// in-place catalog updates (e.g. relhasindex via index_update_stats, type shell
-/// fill-in) land with the update milestone. Until then a faithful update needs
-/// `simple_heap_update` (the heap update AM, a grow guard).
+/// `CatalogTupleUpdate`: update a catalog row in place (`simple_heap_update`) then
+/// re-add it to the catalog's indexes. Mirrors the insert path: open the indexes,
+/// `heap_update`, re-index the new tuple. PG only re-indexes when the update touched
+/// an indexed column; the M10 path always re-indexes (correct, just not amortized).
 pub async fn catalog_tuple_update(
     shared: &Arc<SharedState>,
     heap_rel: &RelationData,
     otid: &ItemPointerData,
     tup: &mut HeapTupleData,
 ) {
-    let _ = (shared, heap_rel, otid, tup);
-    unimplemented!("CatalogTupleUpdate: needs simple_heap_update (heap update AM, M6)")
+    let cid = GetCurrentCommandId(true);
+    // simple_heap_update: heap_update with wait=true; the M10 catalog path is
+    // single-backend, so the update never collides.
+    let (_result, _lockmode, _idx) = crate::backend::access::heap::heapam::heap_update(
+        shared, heap_rel, otid, tup, cid, None, true,
+    )
+    .await;
+    let index_owner = lookup_catalog_indexes(heap_rel.rd_id);
+    let indstate = catalog_open_indexes(heap_rel, &index_owner);
+    catalog_index_insert(shared, &indstate, tup).await;
+    catalog_close_indexes(indstate);
+}
+
+/// `CatalogTupleDelete`: delete a catalog row (`simple_heap_delete`). The catalog
+/// indexes are not pruned eagerly -- index entries pointing at a dead heap TID are
+/// skipped by the MVCC visibility check on the next scan (PG relies on VACUUM /
+/// index bloat for the physical reclaim), and the M10 read path is heap-scan-based.
+pub async fn catalog_tuple_delete(
+    shared: &Arc<SharedState>,
+    heap_rel: &RelationData,
+    tid: &ItemPointerData,
+) {
+    let cid = GetCurrentCommandId(true);
+    // simple_heap_delete: heap_delete with wait=true; single-backend on M10.
+    let (_result, _fdata) =
+        crate::backend::access::heap::heapam::heap_delete(shared, heap_rel, tid, cid, None, true, false)
+            .await;
 }

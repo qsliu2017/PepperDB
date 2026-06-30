@@ -10,6 +10,7 @@ pub mod int;
 pub mod name;
 pub mod numeric;
 pub mod oid;
+pub mod ruleutils;
 pub mod selfuncs;
 pub mod timestamp;
 pub mod varlena;

@@ -9,10 +9,12 @@
 //! pg_class/pg_attribute/pg_type rows + build the catalog unique indexes.
 
 pub mod catalog;
+pub mod dependency;
 pub mod heap;
 pub mod index;
 pub mod indexing;
 pub mod namespace;
+pub mod objectaddress;
 pub mod pg_namespace;
 pub mod pg_type;
 

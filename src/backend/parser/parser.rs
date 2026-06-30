@@ -923,6 +923,245 @@ fn syntax_error(
     unreachable!("ereport(ERROR) diverges");
 }
 
+// ===========================================================================
+//  M10 (step 38): ALTER TABLE / RENAME / DROP / GRANT / COMMENT node builders.
+// ===========================================================================
+
+use crate::nodes::parsenodes::{
+    AlterTableCmd, AlterTableStmt, AlterTableType, CommentStmt, Constraint, ConstrType, DropBehavior,
+    DropStmt, GrantStmt, GrantTargetType, ObjectType, RenameStmt,
+};
+
+/// gram.y `opt_drop_behavior` token (CASCADE / RESTRICT). Decoupled from
+/// parsenodes' `DropBehavior` so the grammar imports a small local enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DropBehaviorTok {
+    Cascade,
+    Restrict,
+}
+
+impl DropBehaviorTok {
+    fn to_node(self) -> DropBehavior {
+        match self {
+            Self::Cascade => DropBehavior::CASCADE,
+            Self::Restrict => DropBehavior::RESTRICT,
+        }
+    }
+}
+
+/// gram.y object-type token for the M10-reachable DROP / RENAME object kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjType {
+    Table,
+    Index,
+    View,
+    Sequence,
+    Type,
+    Schema,
+}
+
+impl ObjType {
+    fn to_object_type(self) -> ObjectType {
+        match self {
+            Self::Table => ObjectType::TABLE,
+            Self::Index => ObjectType::INDEX,
+            Self::View => ObjectType::VIEW,
+            Self::Sequence => ObjectType::SEQUENCE,
+            Self::Type => ObjectType::TYPE,
+            Self::Schema => ObjectType::SCHEMA,
+        }
+    }
+}
+
+fn alter_table_cmd(
+    subtype: AlterTableType,
+    name: Option<String>,
+    def: Option<Node>,
+    behavior: DropBehavior,
+    missing_ok: bool,
+) -> Node {
+    Node::AlterTableCmd(Box::new(AlterTableCmd {
+        subtype,
+        name,
+        num: 0,
+        newowner: None,
+        def,
+        behavior,
+        missing_ok,
+        recurse: false,
+    }))
+}
+
+/// gram.y `AlterTableStmt: ALTER TABLE relation_expr alter_table_cmds`.
+pub fn make_alter_table_stmt(relation: RangeVar, cmds: Vec<Node>, missing_ok: bool) -> Node {
+    Node::AlterTableStmt(Box::new(AlterTableStmt {
+        relation: Some(Box::new(relation)),
+        cmds,
+        objtype: ObjectType::TABLE,
+        missing_ok,
+    }))
+}
+
+/// gram.y `ADD [COLUMN] columnDef` -> AT_AddColumn.
+pub fn make_at_add_column(coldef: Node) -> Node {
+    alter_table_cmd(AlterTableType::AddColumn, None, Some(coldef), DropBehavior::RESTRICT, false)
+}
+
+/// gram.y `DROP [COLUMN] [IF EXISTS] name opt_drop_behavior` -> AT_DropColumn.
+pub fn make_at_drop_column(name: String, missing_ok: bool, behavior: DropBehaviorTok) -> Node {
+    alter_table_cmd(AlterTableType::DropColumn, Some(name), None, behavior.to_node(), missing_ok)
+}
+
+/// gram.y `ALTER [COLUMN] name SET DEFAULT expr | DROP DEFAULT` -> AT_ColumnDefault.
+pub fn make_at_column_default(name: String, expr: Option<Node>) -> Node {
+    alter_table_cmd(AlterTableType::ColumnDefault, Some(name), expr, DropBehavior::RESTRICT, false)
+}
+
+/// gram.y `ALTER [COLUMN] name SET|DROP NOT NULL` -> AT_SetNotNull / AT_DropNotNull.
+pub fn make_at_set_not_null(name: String, set: bool) -> Node {
+    let subtype = if set { AlterTableType::SetNotNull } else { AlterTableType::DropNotNull };
+    alter_table_cmd(subtype, Some(name), None, DropBehavior::RESTRICT, false)
+}
+
+/// gram.y `ADD TableConstraint` -> AT_AddConstraint.
+pub fn make_at_add_constraint(constraint: Node) -> Node {
+    alter_table_cmd(AlterTableType::AddConstraint, None, Some(constraint), DropBehavior::RESTRICT, false)
+}
+
+/// gram.y `DROP CONSTRAINT [IF EXISTS] name opt_drop_behavior` -> AT_DropConstraint.
+pub fn make_at_drop_constraint(name: String, missing_ok: bool, behavior: DropBehaviorTok) -> Node {
+    alter_table_cmd(AlterTableType::DropConstraint, Some(name), None, behavior.to_node(), missing_ok)
+}
+
+/// gram.y `ConstraintElem: CHECK '(' a_expr ')'` (the minimal table constraint).
+pub fn make_check_constraint(conname: Option<String>, expr: Node) -> Node {
+    Node::Constraint(Box::new(Constraint {
+        contype: ConstrType::CHECK,
+        conname,
+        deferrable: false,
+        initdeferred: false,
+        is_enforced: true,
+        skip_validation: false,
+        initially_valid: true,
+        is_no_inherit: false,
+        raw_expr: Some(expr),
+        cooked_expr: None,
+        generated_when: 0,
+        generated_kind: 0,
+        nulls_not_distinct: false,
+        keys: Vec::new(),
+        without_overlaps: false,
+        including: Vec::new(),
+        exclusions: Vec::new(),
+        options: Vec::new(),
+        indexname: None,
+        indexspace: None,
+        reset_default_tblspc: false,
+        access_method: None,
+        where_clause: None,
+        pktable: None,
+        fk_attrs: Vec::new(),
+        pk_attrs: Vec::new(),
+        fk_with_period: false,
+        pk_with_period: false,
+        fk_matchtype: 0,
+        fk_upd_action: 0,
+        fk_del_action: 0,
+        fk_del_set_cols: Vec::new(),
+        old_conpfeqop: Vec::new(),
+        old_pktable_oid: crate::postgres_ext::InvalidOid,
+        location: -1,
+    }))
+}
+
+/// gram.y `RenameStmt: ALTER TABLE relation RENAME TO name` (and the INDEX/VIEW
+/// forms). renameType selects the catalog object kind.
+pub fn make_rename_relation(objtype: ObjType, relation: RangeVar, newname: String, missing_ok: bool) -> Node {
+    Node::RenameStmt(Box::new(RenameStmt {
+        renameType: objtype.to_object_type(),
+        relationType: objtype.to_object_type(),
+        relation: Some(Box::new(relation)),
+        object: None,
+        subname: None,
+        newname: Some(newname),
+        behavior: DropBehavior::RESTRICT,
+        missing_ok,
+    }))
+}
+
+/// gram.y `RenameStmt: ALTER TABLE relation RENAME [COLUMN] col TO new`.
+pub fn make_rename_column(
+    objtype: ObjType,
+    relation: RangeVar,
+    col: String,
+    newname: String,
+    missing_ok: bool,
+) -> Node {
+    Node::RenameStmt(Box::new(RenameStmt {
+        renameType: ObjectType::COLUMN,
+        relationType: objtype.to_object_type(),
+        relation: Some(Box::new(relation)),
+        object: None,
+        subname: Some(col),
+        newname: Some(newname),
+        behavior: DropBehavior::RESTRICT,
+        missing_ok,
+    }))
+}
+
+/// gram.y `any_name`: a (possibly schema-qualified) object name, carried as a
+/// `RangeVar` node (the M10-reachable object kinds all reduce to a named relation
+/// or schema-qualified object; PG carries a `List` of String, equivalent here).
+pub fn make_any_name(mut parts: Vec<String>) -> Node {
+    let (schema, name) = match parts.len() {
+        0 => (None, None),
+        1 => (None, Some(parts.remove(0))),
+        _ => {
+            let name = parts.pop();
+            let schema = parts.pop();
+            (schema, name)
+        }
+    };
+    Node::RangeVar(Box::new(crate::nodes::makefuncs::makeRangeVar(schema, name, -1)))
+}
+
+/// gram.y `DropStmt`: the generic DROP. `objects` are the parsed names (RangeVars).
+pub fn make_drop_stmt(objtype: ObjType, objects: Vec<Node>, missing_ok: bool, behavior: DropBehaviorTok) -> Node {
+    Node::DropStmt(Box::new(DropStmt {
+        objects,
+        removeType: objtype.to_object_type(),
+        behavior: behavior.to_node(),
+        missing_ok,
+        concurrent: false,
+    }))
+}
+
+/// gram.y `GrantStmt` (M10 stub-parse): a minimal GrantStmt routed to
+/// not_yet_reachable by ProcessUtility (step 39 builds the privilege machinery).
+pub fn make_grant_stmt(is_grant: bool) -> Node {
+    Node::GrantStmt(Box::new(GrantStmt {
+        is_grant,
+        targtype: GrantTargetType::OBJECT,
+        objtype: ObjectType::TABLE,
+        objects: Vec::new(),
+        privileges: Vec::new(),
+        grantees: Vec::new(),
+        grant_option: false,
+        grantor: None,
+        behavior: DropBehavior::RESTRICT,
+    }))
+}
+
+/// gram.y `CommentStmt` (M10 stub-parse): a minimal CommentStmt routed to
+/// not_yet_reachable by ProcessUtility (step 39).
+pub fn make_comment_stmt(comment: Option<String>) -> Node {
+    Node::CommentStmt(Box::new(CommentStmt {
+        objtype: ObjectType::TABLE,
+        object: None,
+        comment,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

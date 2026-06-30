@@ -1999,6 +1999,21 @@ mod wire_tests {
         out
     }
 
+    /// Parse a RowDescription body into the field names. Body: int16 nfields, then
+    /// per field a NUL-terminated name + 18 bytes of metadata (tableoid/colno/
+    /// typoid/typlen/typmod/format).
+    fn rowdescription_field_names(body: &[u8]) -> Vec<String> {
+        let nfields = u16::from_be_bytes([body[0], body[1]]) as usize;
+        let mut out = Vec::with_capacity(nfields);
+        let mut off = 2usize;
+        for _ in 0..nfields {
+            let end = body[off..].iter().position(|&b| b == 0).expect("field name NUL") + off;
+            out.push(String::from_utf8(body[off..end].to_vec()).expect("utf8 name"));
+            off = end + 1 + 18; // skip NUL + 18 metadata bytes
+        }
+        out
+    }
+
     /// THE M4 MILESTONE: casts + CASE + COALESCE + NULLIF + GREATEST/LEAST over the
     /// wire. Over rows a in {-1, 0, 2}:
     ///   - `a::numeric` -> "-1","0","2" (int4_numeric via-func cast),
@@ -2334,6 +2349,82 @@ mod wire_tests {
         let upd_none =
             simple_query(&mut client, &mut buf, "UPDATE t SET a = 99 WHERE a = 12345").await;
         assert_eq!(tag(&upd_none), "UPDATE 0", "UPDATE matching zero rows -> 0, no error");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// M10 (step 38): ALTER TABLE / RENAME / DROP over the wire. Exercises the full
+    /// DDL dispatch substrate end-to-end: ADD/DROP/RENAME COLUMN, RENAME TABLE,
+    /// SET DEFAULT, DROP TABLE (+ IF EXISTS, + a dependent index dropped with it).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m10_alter_drop_rename_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let tag = |msgs: &[Msg]| -> String {
+            let c = msgs.iter().find(|m| m.ty == b'C').expect("CommandComplete");
+            let end = c.body.iter().position(|&x| x == 0).unwrap_or(c.body.len());
+            String::from_utf8_lossy(&c.body[..end]).into_owned()
+        };
+        let names = |msgs: &[Msg]| -> Vec<String> {
+            let t = msgs.iter().find(|m| m.ty == b'T').expect("RowDescription");
+            rowdescription_field_names(&t.body)
+        };
+
+        // CREATE TABLE t(a int).
+        simple_query(&mut client, &mut buf, "CREATE TABLE t (a int)").await;
+        simple_query(&mut client, &mut buf, "INSERT INTO t VALUES (1)").await;
+
+        // ALTER TABLE t ADD COLUMN b text -> SELECT * sees a, b.
+        let add = simple_query(&mut client, &mut buf, "ALTER TABLE t ADD COLUMN b text").await;
+        assert_eq!(tag(&add), "ALTER TABLE", "ADD COLUMN completion tag");
+        let sel = simple_query(&mut client, &mut buf, "SELECT * FROM t").await;
+        assert_eq!(names(&sel), vec!["a".to_owned(), "b".to_owned()], "SELECT * shows a, b");
+
+        // ALTER TABLE t DROP COLUMN b -> SELECT * shows only a.
+        simple_query(&mut client, &mut buf, "ALTER TABLE t DROP COLUMN b").await;
+        let sel = simple_query(&mut client, &mut buf, "SELECT * FROM t").await;
+        assert_eq!(names(&sel), vec!["a".to_owned()], "b gone from SELECT *");
+
+        // ALTER TABLE t RENAME COLUMN a TO x.
+        simple_query(&mut client, &mut buf, "ALTER TABLE t RENAME COLUMN a TO x").await;
+        let sel = simple_query(&mut client, &mut buf, "SELECT * FROM t").await;
+        assert_eq!(names(&sel), vec!["x".to_owned()], "a renamed to x");
+
+        // ALTER TABLE t ALTER COLUMN x SET DEFAULT 5 (records the default; the
+        // completion tag confirms the path).
+        let sd = simple_query(&mut client, &mut buf, "ALTER TABLE t ALTER COLUMN x SET DEFAULT 5").await;
+        assert_eq!(tag(&sd), "ALTER TABLE", "SET DEFAULT completion tag");
+
+        // ALTER TABLE t RENAME TO t2 -> SELECT FROM t2 works, t errors.
+        simple_query(&mut client, &mut buf, "ALTER TABLE t RENAME TO t2").await;
+        let sel = simple_query(&mut client, &mut buf, "SELECT x FROM t2").await;
+        assert!(sel.iter().any(|m| m.ty == b'T'), "SELECT from t2 works");
+        // The old name no longer resolves: the query errors server-side (ErrorResponse
+        // is not yet sent to the client at this milestone -- the response carries no
+        // RowDescription, only ReadyForQuery).
+        let err = simple_query(&mut client, &mut buf, "SELECT x FROM t").await;
+        assert!(!err.iter().any(|m| m.ty == b'T'), "old name t no longer resolves");
+
+        // CREATE INDEX, then DROP TABLE t2 drops the index too (dependency walk).
+        simple_query(&mut client, &mut buf, "CREATE INDEX t2_x_idx ON t2 (x)").await;
+        let drop_msgs = simple_query(&mut client, &mut buf, "DROP TABLE t2").await;
+        assert_eq!(tag(&drop_msgs), "DROP TABLE", "DROP TABLE completion tag");
+        // SELECT FROM t2 now errors (relation gone): no RowDescription in the reply.
+        let gone = simple_query(&mut client, &mut buf, "SELECT * FROM t2").await;
+        assert!(!gone.iter().any(|m| m.ty == b'T'), "t2 is gone after DROP");
+
+        // DROP TABLE IF EXISTS on a missing table -> notice, no error (CommandComplete).
+        let if_exists = simple_query(&mut client, &mut buf, "DROP TABLE IF EXISTS nosuch").await;
+        assert_eq!(tag(&if_exists), "DROP TABLE", "IF EXISTS on missing is not an error");
 
         drop(client);
         sup.shutdown.trigger();

@@ -124,7 +124,47 @@ pub async fn standard_process_utility(
         Node::ClosePortalStmt(stmt) => {
             crate::backend::commands::portalcmds::perform_portal_close(stmt.portalname.as_deref());
         }
+        // --- DDL: ALTER TABLE / RENAME / DROP (M10, step 38) ---
+        Node::AlterTableStmt(stmt) => {
+            crate::backend::commands::tablecmds::alter_table(shared, stmt).await;
+            crate::backend::access::transam::xact::CommandCounterIncrement();
+        }
+        Node::RenameStmt(stmt) => {
+            crate::backend::commands::alter::exec_rename_stmt(shared, stmt).await;
+            crate::backend::access::transam::xact::CommandCounterIncrement();
+        }
+        Node::DropStmt(stmt) => {
+            process_drop_stmt(shared, stmt).await;
+            crate::backend::access::transam::xact::CommandCounterIncrement();
+        }
+        // GRANT / COMMENT are stub-parsed; the privilege + comment machinery is step 39.
+        Node::GrantStmt(_) => not_yet_reachable("ProcessUtility: GRANT/REVOKE (step 39)"),
+        Node::CommentStmt(_) => not_yet_reachable("ProcessUtility: COMMENT (step 39)"),
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
+    }
+}
+
+/// PG `standard_ProcessUtility`'s `T_DropStmt` arm: route the relation-shaped DROP
+/// kinds (TABLE / INDEX / SEQUENCE / MATVIEW / VIEW / FOREIGN_TABLE) through
+/// `RemoveRelations` (the dependency walk that also drops the table's indexes);
+/// every other object kind routes through `RemoveObjects`.
+async fn process_drop_stmt(
+    shared: &Arc<SharedState>,
+    stmt: &crate::nodes::parsenodes::DropStmt,
+) {
+    use crate::nodes::parsenodes::ObjectType;
+    match stmt.removeType {
+        ObjectType::TABLE
+        | ObjectType::INDEX
+        | ObjectType::SEQUENCE
+        | ObjectType::VIEW
+        | ObjectType::MATVIEW
+        | ObjectType::FOREIGN_TABLE => {
+            crate::backend::commands::tablecmds::remove_relations(shared, stmt).await;
+        }
+        _ => {
+            crate::backend::commands::dropcmds::remove_objects(shared, stmt).await;
+        }
     }
 }
 
@@ -275,6 +315,26 @@ pub fn create_command_tag(parsetree: &Node) -> CommandTag {
         Node::MergeStmt(_) => CommandTag::Merge,
         Node::CreateStmt(_) => CommandTag::CreateTable,
         Node::IndexStmt(_) => CommandTag::CreateIndex,
+        // ALTER TABLE + RENAME (on a table) tag as ALTER TABLE (PG
+        // AlterObjectTypeCommandTag); RENAME of an index/view tags by object kind.
+        Node::AlterTableStmt(_) => CommandTag::AlterTable,
+        Node::RenameStmt(stmt) => match stmt.relationType {
+            crate::nodes::parsenodes::ObjectType::INDEX => CommandTag::AlterIndex,
+            crate::nodes::parsenodes::ObjectType::VIEW => CommandTag::AlterView,
+            _ => CommandTag::AlterTable,
+        },
+        Node::DropStmt(stmt) => match stmt.removeType {
+            crate::nodes::parsenodes::ObjectType::INDEX => CommandTag::DropIndex,
+            crate::nodes::parsenodes::ObjectType::VIEW => CommandTag::DropView,
+            crate::nodes::parsenodes::ObjectType::SEQUENCE => CommandTag::DropSequence,
+            crate::nodes::parsenodes::ObjectType::TYPE => CommandTag::DropType,
+            crate::nodes::parsenodes::ObjectType::SCHEMA => CommandTag::DropSchema,
+            _ => CommandTag::DropTable,
+        },
+        Node::GrantStmt(stmt) => {
+            if stmt.is_grant { CommandTag::Grant } else { CommandTag::Revoke }
+        }
+        Node::CommentStmt(_) => CommandTag::Comment,
         Node::TransactionStmt(stmt) => match stmt.kind {
             TxKind::BEGIN => CommandTag::Begin,
             TxKind::START => CommandTag::StartTransaction,

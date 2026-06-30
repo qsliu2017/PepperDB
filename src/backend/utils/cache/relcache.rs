@@ -160,6 +160,19 @@ pub fn update_relation_stats(relid: Oid, relpages: i32, reltuples: f32) {
     });
 }
 
+/// `RelationForgetRelation` / `RelationClearRelation`'s drop effect: evict a
+/// relation's relcache entry so the next open rebuilds it from the (now mutated)
+/// catalog rows. Used by DDL after it writes pg_class/pg_attribute changes (DROP /
+/// ALTER): PG marks the entry for rebuild at command end; the M10 single-backend
+/// path evicts eagerly so the very next `relation_build_desc` re-reads disk. Nailed
+/// catalogs are never forgotten. Returns whether an entry was removed.
+pub fn relation_forget_relation(relid: Oid) -> bool {
+    if is_nailed_catalog(relid) {
+        return false;
+    }
+    with_state(|st| st.by_oid.remove(&relid.0).is_some()).unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Phase 2/3: nail the formrdesc catalogs
 // ---------------------------------------------------------------------------
