@@ -205,6 +205,7 @@ pub struct ParseState {
 }
 
 /// An element of a namespace list.
+#[derive(Clone)]
 pub struct ParseNamespaceItem {
     /// Table and column names
     pub names: Box<Alias>,
@@ -229,6 +230,7 @@ pub struct ParseNamespaceItem {
 }
 
 /// Data about one column of a ParseNamespaceItem.
+#[derive(Clone)]
 pub struct ParseNamespaceColumn {
     /// rangetable index
     pub varno: Index,

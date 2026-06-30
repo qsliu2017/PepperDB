@@ -97,7 +97,7 @@ pub async fn set_target_table(
     pstate: &mut ParseState,
     relation: &RangeVar,
     inh: bool,
-    _also_source: bool,
+    also_source: bool,
     required_perms: AclMode,
 ) -> i32 {
     let rel = open_table_for_parse(shared, relation).await;
@@ -116,7 +116,15 @@ pub async fn set_target_table(
     pstate.p_rteperminfos[(perminfo_index - 1) as usize].requiredPerms = required_perms;
 
     pstate.p_target_relation = Some(rel);
-    pstate.p_target_nsitem = Some(Box::new(nsitem));
+    pstate.p_target_nsitem = Some(Box::new(nsitem.clone()));
+
+    // PG: UPDATE/DELETE/MERGE also make the target a source relation -- add the
+    // RTE's RangeTblRef to the join list and expose it in the namespace so SET / qual
+    // / RETURNING expressions can reference its columns. INSERT (also_source=false)
+    // keeps the target out of the namespace (its tlist is built from VALUES).
+    if also_source {
+        add_ns_item_to_query(pstate, nsitem, true, true, true);
+    }
     rtindex
 }
 

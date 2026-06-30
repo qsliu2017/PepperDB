@@ -36,9 +36,12 @@ pub fn set_plan_references(root: &mut PlannerInfo, plan: Node) -> Node {
     let rtoffset = root.glob.finalrtable.len();
     crate::assert!(rtoffset == 0);
 
-    if !root.row_marks.is_empty() || !root.append_rel_list.is_empty() {
-        not_yet_reachable("set_plan_references: rowmarks / appendrels");
+    if !root.append_rel_list.is_empty() {
+        not_yet_reachable("set_plan_references: appendrels");
     }
+    // Row marks (FOR UPDATE) offset their RT index by rtoffset (0 with one query).
+    // The finalrowmarks were already published by preprocess_rowmarks; with rtoffset
+    // 0 they need no adjustment.
 
     // add_rtes_to_flat_rtable: append this query's RTEs (and their perminfos) to
     // the flat rangetable. With a single query the indexes are unchanged. The
@@ -72,6 +75,7 @@ fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
             Node::BitmapIndexScan(Box::new(set_bitmap_indexscan_refs(root, *s, rtoffset)))
         }
         Node::ModifyTable(m) => Node::ModifyTable(Box::new(set_modifytable_refs(root, *m, rtoffset))),
+        Node::LockRows(l) => Node::LockRows(Box::new(set_lockrows_refs(root, *l, rtoffset))),
         Node::NestLoop(n) => Node::NestLoop(Box::new(set_nestloop_refs(root, *n, rtoffset))),
         Node::MergeJoin(m) => Node::MergeJoin(Box::new(set_mergejoin_refs(root, *m, rtoffset))),
         Node::HashJoin(h) => Node::HashJoin(Box::new(set_hashjoin_refs(root, *h, rtoffset))),
@@ -503,6 +507,33 @@ fn set_modifytable_refs(
     if let Some(sub) = plan.plan.lefttree.take() {
         plan.plan.lefttree = Some(set_plan_refs(root, sub, rtoffset));
     }
+    // RETURNING list Vars (scan Vars over the result relation) keep their identity
+    // with rtoffset 0; they read the subplan slot at exec time. The targetlist mirror
+    // is fixed by the same identity pass.
+    fix_scan_tlist_identity(&plan.plan.targetlist, rtoffset);
+    plan
+}
+
+/// PG `set_plan_refs` T_LockRows arm: recurse into the child and offset the row marks'
+/// RT indices (no-op with rtoffset 0). The LockRows projects its child unchanged.
+fn set_lockrows_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::LockRows,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::LockRows {
+    plan.plan.plan_node_id = root.glob.last_plan_node_id;
+    root.glob.last_plan_node_id += 1;
+    let off = rtoffset as crate::nodes::primnodes::Index;
+    for m in &mut plan.row_marks {
+        if let crate::nodes::nodes::Node::PlanRowMark(rm) = m {
+            rm.rti += off;
+            rm.prti += off;
+        }
+    }
+    if let Some(sub) = plan.plan.lefttree.take() {
+        plan.plan.lefttree = Some(set_plan_refs(root, sub, rtoffset));
+    }
+    fix_scan_tlist_identity(&plan.plan.targetlist, rtoffset);
     plan
 }
 

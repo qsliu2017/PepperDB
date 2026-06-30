@@ -296,6 +296,113 @@ fn eflag_marker() -> ExecFlag {
     ExecFlag::empty()
 }
 
+// ===========================================================================
+//  EvalPlanQual (EPQ): re-check a concurrently-updated row (M8, step 34).
+//
+//  When an UPDATE/DELETE/SELECT-FOR-UPDATE finds the target row was updated by a
+//  concurrent transaction (TM_Updated), PG re-fetches the latest row version and
+//  re-runs the query's quals over it (`EvalPlanQual`) to decide whether the new
+//  version still qualifies. The state lives in an `EPQState` threaded by the
+//  ModifyTable / LockRows node.
+//
+//  M8 builds the EPQ SCAFFOLDING -- the EPQState lifecycle (Init / Slot / SetPlan /
+//  End), the per-rel test-tuple slots, the row-identity helpers, and the
+//  non-concurrent recheck path (no concurrent writer -> the origslot row is returned
+//  unchanged). The full recheck-subtree rebuild (`EvalPlanQualStart`, a child EState
+//  over the parent's range table) is reached only on an actual concurrent-update
+//  conflict; that path is a clear grow guard (the concurrent-writer milestone).
+// ===========================================================================
+
+use crate::nodes::execnodes::{EPQState, EState, ExecRowMark, TupleTableSlot};
+use crate::nodes::lockoptions::LockTupleMode;
+use crate::nodes::nodes::Node;
+
+/// PG `EvalPlanQualInit`: initialize an EPQState over a parent EState's subplan and
+/// the (non-locking) auxiliary row marks. Allocates the per-rti test-tuple slot
+/// vector and marks the EPQ inactive.
+pub fn eval_plan_qual_init(
+    epqstate: &mut EPQState,
+    range_table_size: usize,
+    subplan: Option<Node>,
+    epq_param: i32,
+    result_relations: Vec<i32>,
+) {
+    epqstate.epq_param = epq_param;
+    epqstate.result_relations = result_relations;
+    epqstate.tuple_table = Vec::new();
+    epqstate.relsubs_slot = Vec::with_capacity(range_table_size);
+    epqstate.plan = subplan;
+    epqstate.origslot = None;
+    epqstate.recheckestate = None;
+    epqstate.recheckplanstate = None;
+    epqstate.relsubs_rowmark = Vec::new();
+    epqstate.relsubs_done = Vec::new();
+    epqstate.relsubs_blocked = Vec::new();
+}
+
+/// PG `EvalPlanQualSetPlan`: set or change an EPQState's subplan (shutting down any
+/// live EPQ tree first).
+pub fn eval_plan_qual_set_plan(epqstate: &mut EPQState, subplan: Option<Node>) {
+    eval_plan_qual_end(epqstate);
+    epqstate.plan = subplan;
+}
+
+/// PG `EvalPlanQualSetSlot`: record the top-level result row to recheck (origslot).
+pub fn eval_plan_qual_set_slot(epqstate: &mut EPQState, slot: Option<Box<TupleTableSlot>>) {
+    epqstate.origslot = slot;
+}
+
+/// PG `EvalPlanQualNext`: fetch the next row from the EPQ recheck plan. With no
+/// concurrent writer (the common, M8-reachable case) there is no recheck subtree
+/// running and the origslot row stands -- return it unchanged. The recheck-subtree
+/// drive (a re-run of the plan over the re-fetched row) is reached only after
+/// `EvalPlanQualBegin` built a child plan, which is staged.
+pub fn eval_plan_qual_next(epqstate: &mut EPQState) -> Option<&mut TupleTableSlot> {
+    if epqstate.recheckplanstate.is_some() {
+        // A live recheck tree means a concurrent conflict was detected; driving it
+        // (ExecProcNode on the child EState) is the concurrent-writer path.
+        unimplemented!("EvalPlanQualNext: recheck-subtree drive not yet reachable for this milestone");
+    }
+    // Non-concurrent case: the origslot row is the recheck result, returned unchanged.
+    epqstate.origslot.as_deref_mut()
+}
+
+/// PG `EvalPlanQualBegin`: (re)initialize the EPQ recheck plan tree. Reached only on
+/// an actual concurrent-update conflict; the child-EState rebuild over the parent's
+/// borrowed range table is staged (the concurrent-writer milestone).
+pub fn eval_plan_qual_begin(_epqstate: &mut EPQState) {
+    unimplemented!("EvalPlanQualBegin: recheck-subtree rebuild not yet reachable for this milestone");
+}
+
+/// PG `EvalPlanQualEnd`: tear down a live EPQ recheck tree (no-op when inactive).
+pub fn eval_plan_qual_end(epqstate: &mut EPQState) {
+    epqstate.recheckplanstate = None;
+    epqstate.recheckestate = None;
+    epqstate.origslot = None;
+    epqstate.tuple_table.clear();
+    epqstate.relsubs_slot.clear();
+}
+
+/// PG `EvalPlanQualFetchRowMark`: fetch the current row value for a non-locked
+/// relation that the EPQ recheck must scan. Reached only inside an active EPQ
+/// recheck (concurrent-writer path); staged.
+pub fn eval_plan_qual_fetch_row_mark(
+    _epqstate: &mut EPQState,
+    _rti: usize,
+    _slot: &mut TupleTableSlot,
+) -> bool {
+    unimplemented!("EvalPlanQualFetchRowMark: not yet reachable for this milestone");
+}
+
+/// PG `ExecUpdateLockMode`: the tuple-lock strength for an UPDATE. If a key column
+/// was modified, FOR UPDATE strength (exclusive); otherwise the weaker NO KEY
+/// UPDATE. M8 has no index-key bitmap wired (no unique indexes on the test tables),
+/// so the conservative LockTupleExclusive is returned (matches PG when key columns
+/// are or may be updated); the key-column narrowing grows with the index attr bitmap.
+pub fn exec_update_lock_mode(_estate: &EState<'_>, _relinfo: &ExecRowMark) -> LockTupleMode {
+    LockTupleMode::LockTupleExclusive
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,5 +578,31 @@ mod tests {
             Poll::Ready(v) => v,
             Poll::Pending => panic!("const executor future suspended unexpectedly"),
         }
+    }
+
+    /// EPQ scaffolding: with no concurrent writer, EvalPlanQualNext returns the
+    /// recorded top-level row (origslot) unchanged -- the common, non-conflict case.
+    #[test]
+    fn eval_plan_qual_next_returns_origslot_unchanged() {
+        use crate::backend::executor::execTuples::{make_tuple_table_slot, TTS_OPS_VIRTUAL};
+        use crate::postgres::{DatumGetInt32, Int32GetDatum};
+
+        let mut epq = EPQState::default();
+        eval_plan_qual_init(&mut epq, 1, None, -1, vec![1]);
+
+        // Record a top-level row (the row being rechecked).
+        let mut slot = make_tuple_table_slot(None, &TTS_OPS_VIRTUAL);
+        slot.values = vec![Int32GetDatum(7)];
+        slot.isnull = vec![false];
+        slot.nvalid = 1;
+        eval_plan_qual_set_slot(&mut epq, Some(slot));
+
+        // No recheck subtree is running -> EvalPlanQualNext returns the origslot row.
+        let out = eval_plan_qual_next(&mut epq).expect("origslot returned unchanged");
+        assert_eq!(DatumGetInt32(out.values[0]), 7, "the row is returned unchanged");
+
+        // EvalPlanQualEnd clears the state (idempotent).
+        eval_plan_qual_end(&mut epq);
+        assert!(epq.origslot.is_none(), "EvalPlanQualEnd cleared the origslot");
     }
 }

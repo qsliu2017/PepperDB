@@ -433,13 +433,17 @@ async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
     crate::miscadmin::check_for_interrupts();
 
     // pg_analyze_and_rewrite_fixedparams: parse analysis (ASYNC -- opens relations
-    // for SELECT/INSERT) + rewrite. The rewriter's INSERT/UPDATE/DELETE target-list
-    // rewriting + rule firing is staged (rewriteHandler.rs s4); M2 has no rules or
-    // views and `transform_insert_stmt` already builds a complete, attno-ordered
-    // INSERT targetlist, so a plain INSERT is passed straight to the planner without
-    // the rewrite pass. SELECT (and UTILITY) go through QueryRewrite as usual.
+    // for SELECT/INSERT/UPDATE/DELETE) + rewrite. The rewriter's data-modifying
+    // target-list rewriting + rule firing is staged (rewriteHandler.rs s4); M2/M8 have
+    // no rules or views and the transforms already build the final attno-ordered form
+    // (INSERT tlist, UPDATE SET tlist + preptlist expansion, DELETE row identity), so a
+    // plain data-modifying statement is passed straight to the planner without the
+    // rewrite pass. SELECT (and UTILITY) go through QueryRewrite as usual.
     let analyzed = parse_analyze_fixedparams_async(shared, &raw, query_string, &[], 0).await;
-    let mut query = if analyzed.commandType == CmdType::INSERT {
+    let mut query = if matches!(
+        analyzed.commandType,
+        CmdType::INSERT | CmdType::UPDATE | CmdType::DELETE | CmdType::MERGE
+    ) {
         *analyzed
     } else {
         let mut rewritten = query_rewrite(*analyzed);
@@ -479,7 +483,7 @@ async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
             )
             .await;
         }
-        CmdType::SELECT | CmdType::INSERT => {
+        CmdType::SELECT | CmdType::INSERT | CmdType::UPDATE | CmdType::DELETE | CmdType::MERGE => {
             run_plan_over_wire(shared, &plan, query_string, command_tag, dest, &mut qc).await;
         }
         other => unimplemented!("exec_simple_query: command type {other:?} deferred"),
@@ -777,6 +781,9 @@ fn command_tag_for(plan: &crate::nodes::plannodes::PlannedStmt) -> CommandTag {
     match plan.command_type {
         crate::nodes::nodes::CmdType::SELECT => CommandTag::Select,
         crate::nodes::nodes::CmdType::INSERT => CommandTag::Insert,
+        crate::nodes::nodes::CmdType::UPDATE => CommandTag::Update,
+        crate::nodes::nodes::CmdType::DELETE => CommandTag::Delete,
+        crate::nodes::nodes::CmdType::MERGE => CommandTag::Merge,
         crate::nodes::nodes::CmdType::UTILITY => {
             let stmt = plan.utility_stmt.as_ref().unwrap_or_else(|| {
                 unreachable!("a CMD_UTILITY plan carries its utilityStmt")
@@ -1754,6 +1761,109 @@ mod wire_tests {
             vec![vec!["3".to_owned(), "30".to_owned()], vec!["3".to_owned(), "31".to_owned()]],
             "3-table join a JOIN b JOIN c"
         );
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// THE M8 MILESTONE: UPDATE / DELETE / RETURNING / FOR UPDATE over the wire.
+    /// Over t(a int, b int) seeded with {(1,10),(2,20),(3,30),(5,50)}:
+    ///   - `UPDATE t SET a = a + 1 WHERE b > 0`     -> 4 rows, every a bumped.
+    ///   - `DELETE FROM t WHERE a = 5`              (after the bump, no a=5) -> 0 rows.
+    ///   - `DELETE FROM t WHERE a = 6`              -> 1 row (the bumped (5,50)).
+    ///   - `UPDATE t SET a = 1 RETURNING a, b`      -> the modified rows projected.
+    ///   - `DELETE FROM t WHERE b = 10 RETURNING *` -> the deleted row projected.
+    ///   - `SELECT a FROM t FOR UPDATE`             -> rows returned (rows locked).
+    ///   - `UPDATE t SET a = 99 WHERE a = 12345`    -> 0 rows (no error).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m8_update_delete_returning_for_update_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        simple_query(&mut client, &mut buf, "CREATE TABLE t (a int, b int)").await;
+        for (a, b) in [(1, 10), (2, 20), (3, 30), (5, 50)] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO t VALUES ({a}, {b})")).await;
+        }
+
+        let single = |msgs: &[Msg]| -> Vec<String> {
+            msgs.iter().filter(|m| m.ty == b'D').map(|m| datarow_single_text(&m.body)).collect()
+        };
+        let texts = |msgs: &[Msg]| -> Vec<Vec<String>> {
+            let mut rows: Vec<Vec<String>> =
+                msgs.iter().filter(|m| m.ty == b'D').map(|m| datarow_texts(&m.body)).collect();
+            rows.sort();
+            rows
+        };
+        let tag = |msgs: &[Msg]| -> String {
+            let c = msgs.iter().find(|m| m.ty == b'C').expect("CommandComplete");
+            let end = c.body.iter().position(|&x| x == 0).unwrap_or(c.body.len());
+            String::from_utf8_lossy(&c.body[..end]).into_owned()
+        };
+
+        // UPDATE ... SET a = a + 1 WHERE b > 0: all 4 rows bumped.
+        let upd = simple_query(&mut client, &mut buf, "UPDATE t SET a = a + 1 WHERE b > 0").await;
+        assert_eq!(tag(&upd), "UPDATE 4", "UPDATE affected-row count");
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM t").await;
+        assert_eq!(single(&sel), vec!["2", "3", "4", "6"], "new a values visible");
+
+        // DELETE FROM t WHERE a = 5 -> 0 rows (a=5 was bumped to 6).
+        let del0 = simple_query(&mut client, &mut buf, "DELETE FROM t WHERE a = 5").await;
+        assert_eq!(tag(&del0), "DELETE 0", "DELETE matching zero rows -> 0, no error");
+
+        // DELETE FROM t WHERE a = 6 -> 1 row (the bumped (5,50)).
+        let del1 = simple_query(&mut client, &mut buf, "DELETE FROM t WHERE a = 6").await;
+        assert_eq!(tag(&del1), "DELETE 1", "DELETE affected-row count");
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM t").await;
+        assert_eq!(single(&sel), vec!["2", "3", "4"], "row gone after DELETE");
+
+        // UPDATE ... RETURNING a, b: the modified rows are projected.
+        let upd_ret =
+            simple_query(&mut client, &mut buf, "UPDATE t SET a = 1 RETURNING a, b").await;
+        let types: Vec<u8> = upd_ret.iter().map(|m| m.ty).collect();
+        assert_eq!(
+            types,
+            vec![b'T', b'D', b'D', b'D', b'C', b'Z'],
+            "RowDescription + 3 RETURNING DataRows + CommandComplete + ReadyForQuery"
+        );
+        // Remaining rows are {(2,10),(3,20),(4,30)} (b unchanged by the a bump), so
+        // RETURNING a, b yields a=1 with b in {10,20,30}.
+        assert_eq!(
+            texts(&upd_ret),
+            vec![
+                vec!["1".to_owned(), "10".to_owned()],
+                vec!["1".to_owned(), "20".to_owned()],
+                vec!["1".to_owned(), "30".to_owned()],
+            ],
+            "UPDATE ... RETURNING a, b projects the new rows (a forced to 1)"
+        );
+
+        // DELETE ... RETURNING *: the deleted row (1,20) is projected.
+        let del_ret =
+            simple_query(&mut client, &mut buf, "DELETE FROM t WHERE b = 20 RETURNING *").await;
+        assert_eq!(
+            texts(&del_ret),
+            vec![vec!["1".to_owned(), "20".to_owned()]],
+            "DELETE ... RETURNING * projects the deleted row"
+        );
+
+        // SELECT ... FOR UPDATE: the remaining rows {(1,10),(1,30)} are returned
+        // (and locked). a is 1 for both; check b.
+        let sel_fu = simple_query(&mut client, &mut buf, "SELECT b FROM t FOR UPDATE").await;
+        let mut fu = single(&sel_fu);
+        fu.sort();
+        assert_eq!(fu, vec!["10", "30"], "SELECT ... FOR UPDATE returns the locked rows");
+
+        // UPDATE matching zero rows -> 0 affected, no error.
+        let upd_none =
+            simple_query(&mut client, &mut buf, "UPDATE t SET a = 99 WHERE a = 12345").await;
+        assert_eq!(tag(&upd_none), "UPDATE 0", "UPDATE matching zero rows -> 0, no error");
 
         drop(client);
         sup.shutdown.trigger();

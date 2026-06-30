@@ -7,12 +7,14 @@
 //! of the grammar file; lalrpop semantic actions cannot hold Rust fn bodies as
 //! cleanly as bison, so they live here and the grammar calls them.
 
-use crate::nodes::nodes::Node;
+use crate::nodes::nodes::{CmdType, Node};
+use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
 use crate::nodes::parsenodes::{
-    A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, IndexElem, IndexStmt, InsertStmt,
-    RawStmt, ResTarget, SelectStmt, SetOperation, SortByDir, SortByNulls, TypeName, ValUnion,
+    A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, DeleteStmt, IndexElem, IndexStmt,
+    InsertStmt, LockingClause, MergeStmt, MergeWhenClause, RawStmt, ResTarget, ReturningClause,
+    SelectStmt, SetOperation, SortByDir, SortByNulls, TypeName, UpdateStmt, ValUnion,
 };
-use crate::nodes::primnodes::{OnCommitAction, OverridingKind, RangeVar};
+use crate::nodes::primnodes::{MergeMatchKind, OnCommitAction, OverridingKind, RangeVar};
 use crate::nodes::value::{makeFloat, makeInteger, makeString};
 use crate::parser::parser::RawParseMode;
 
@@ -399,6 +401,119 @@ pub fn make_insert_stmt(relation: RangeVar, cols: Vec<Node>, select_stmt: Option
         withClause: None,
         r#override: OverridingKind::NOT_SET,
     }))
+}
+
+/// gram.y `set_clause: set_target '=' a_expr`: a ResTarget naming the assigned
+/// column (`name`) with the value expression in `val` (M8, step 34).
+pub fn make_set_target(col: String, val: Node) -> Node {
+    Node::ResTarget(Box::new(ResTarget {
+        name: Some(col),
+        indirection: Vec::new(),
+        val: Some(val),
+        location: -1,
+    }))
+}
+
+/// gram.y `returning_clause`: wrap the RETURNING target list in a ReturningClause
+/// (empty list -> None, no RETURNING). M8 has no RETURNING options (OLD/NEW alias).
+pub fn make_returning_clause(exprs: Vec<Node>) -> Option<Box<ReturningClause>> {
+    if exprs.is_empty() {
+        None
+    } else {
+        Some(Box::new(ReturningClause { options: Vec::new(), exprs }))
+    }
+}
+
+/// gram.y `UpdateStmt`: build the raw `UpdateStmt` node (M8 plain form). WITH grows
+/// at its milestone; WHERE CURRENT OF is folded into `whereClause` by the grammar.
+pub fn make_update_stmt(
+    relation: RangeVar,
+    target_list: Vec<Node>,
+    from_clause: Vec<Node>,
+    where_clause: Option<Node>,
+    returning: Vec<Node>,
+) -> Node {
+    Node::UpdateStmt(Box::new(UpdateStmt {
+        relation: Some(Box::new(relation)),
+        targetList: target_list,
+        whereClause: where_clause,
+        fromClause: from_clause,
+        returningClause: make_returning_clause(returning),
+        withClause: None,
+    }))
+}
+
+/// gram.y `DeleteStmt`: build the raw `DeleteStmt` node (M8 plain form).
+pub fn make_delete_stmt(
+    relation: RangeVar,
+    using_clause: Vec<Node>,
+    where_clause: Option<Node>,
+    returning: Vec<Node>,
+) -> Node {
+    Node::DeleteStmt(Box::new(DeleteStmt {
+        relation: Some(Box::new(relation)),
+        usingClause: using_clause,
+        whereClause: where_clause,
+        returningClause: make_returning_clause(returning),
+        withClause: None,
+    }))
+}
+
+/// gram.y `MergeStmt`: build the raw `MergeStmt` node (M8 basic form).
+pub fn make_merge_stmt(
+    relation: RangeVar,
+    source_relation: Node,
+    join_condition: Node,
+    when_clauses: Vec<Node>,
+    returning: Vec<Node>,
+) -> Node {
+    Node::MergeStmt(Box::new(MergeStmt {
+        relation: Some(Box::new(relation)),
+        sourceRelation: Some(source_relation),
+        joinCondition: Some(join_condition),
+        mergeWhenClauses: when_clauses,
+        returningClause: make_returning_clause(returning),
+        withClause: None,
+    }))
+}
+
+/// gram.y `merge_when_clause`: build a `MergeWhenClause`. `target_list` is the SET
+/// list (UPDATE) and `values` the VALUES list (INSERT); both empty for DELETE / DO
+/// NOTHING. The match condition (WHEN MATCHED AND ...) grows later.
+pub fn make_merge_when(
+    match_kind: MergeMatchKind,
+    command_type: CmdType,
+    target_list: Vec<Node>,
+    values: Vec<Node>,
+) -> Node {
+    Node::MergeWhenClause(Box::new(MergeWhenClause {
+        matchKind: match_kind,
+        commandType: command_type,
+        r#override: OverridingKind::NOT_SET,
+        condition: None,
+        targetList: target_list,
+        values,
+    }))
+}
+
+/// gram.y `for_locking_item`: build a `LockingClause` (the locked-rel list is a
+/// Vec of RangeVar nodes; empty means "all FROM rels").
+pub fn make_locking_clause(
+    strength: LockClauseStrength,
+    locked_rels: Vec<Node>,
+    wait_policy: LockWaitPolicy,
+) -> LockingClause {
+    LockingClause { lockedRels: locked_rels, strength, waitPolicy: wait_policy }
+}
+
+/// gram.y `select_no_parens: ... for_locking_clause`: stamp the FOR-locking clause
+/// onto a SelectStmt (PG appends to `lockingClause`).
+pub fn set_select_locking(stmt: Node, lock: LockingClause) -> Node {
+    let Node::SelectStmt(mut sel) = stmt else {
+        unreachable!("set_select_locking: not a SelectStmt");
+    };
+    sel.lockingClause.push(Node::LockingClause(Box::new(lock)));
+    Node::SelectStmt(sel)
 }
 
 /// A zero-default SelectStmt (makeNode(SelectStmt) semantics) carrying the given
@@ -958,6 +1073,77 @@ mod tests {
         let Some(Node::A_Expr(add)) = &mul.lexpr else { panic!("lhs not the add A_Expr") };
         let Node::String_(asym) = &add.name[0] else { panic!() };
         assert_eq!(asym.sval, "+");
+    }
+
+    /// Unwrap the single statement node out of a one-statement parse.
+    fn one_stmt(list: &RawStmtVec) -> &Node {
+        assert_eq!(list.len(), 1, "expected one statement");
+        let Node::RawStmt(rs) = &list[0] else { panic!("not a RawStmt") };
+        rs.stmt.as_ref().expect("RawStmt has a stmt")
+    }
+
+    #[test]
+    fn update_set_where_returning_parses() {
+        let list = parse("UPDATE t SET a = a + 1, b = 2 WHERE a > 0 RETURNING a, b");
+        let Node::UpdateStmt(u) = one_stmt(&list) else { panic!("not an UpdateStmt") };
+        assert_eq!(u.relation.as_ref().unwrap().relname.as_deref(), Some("t"));
+        assert_eq!(u.targetList.len(), 2, "two SET items");
+        let Node::ResTarget(rt0) = &u.targetList[0] else { panic!("SET item not a ResTarget") };
+        assert_eq!(rt0.name.as_deref(), Some("a"));
+        assert!(rt0.val.is_some(), "SET value present");
+        assert!(u.whereClause.is_some(), "WHERE present");
+        let ret = u.returningClause.as_ref().expect("RETURNING present");
+        assert_eq!(ret.exprs.len(), 2, "RETURNING a, b");
+    }
+
+    #[test]
+    fn delete_where_returning_star_parses() {
+        let list = parse("DELETE FROM t WHERE a = 5 RETURNING *");
+        let Node::DeleteStmt(d) = one_stmt(&list) else { panic!("not a DeleteStmt") };
+        assert_eq!(d.relation.as_ref().unwrap().relname.as_deref(), Some("t"));
+        assert!(d.whereClause.is_some(), "WHERE present");
+        let ret = d.returningClause.as_ref().expect("RETURNING present");
+        assert_eq!(ret.exprs.len(), 1, "RETURNING * is one star target");
+    }
+
+    #[test]
+    fn select_for_update_parses_to_locking_clause() {
+        let list = parse("SELECT a FROM t FOR UPDATE");
+        let sel = one_select(&list);
+        assert_eq!(sel.lockingClause.len(), 1, "one FOR-locking clause");
+        let Node::LockingClause(lc) = &sel.lockingClause[0] else { panic!("not a LockingClause") };
+        assert_eq!(lc.strength, crate::nodes::lockoptions::LockClauseStrength::FORUPDATE);
+        assert_eq!(lc.waitPolicy, crate::nodes::lockoptions::LockWaitPolicy::LockWaitBlock);
+        assert!(lc.lockedRels.is_empty(), "no OF list");
+    }
+
+    #[test]
+    fn select_for_share_skip_locked_parses() {
+        let list = parse("SELECT a FROM t FOR SHARE SKIP LOCKED");
+        let sel = one_select(&list);
+        let Node::LockingClause(lc) = &sel.lockingClause[0] else { panic!("not a LockingClause") };
+        assert_eq!(lc.strength, crate::nodes::lockoptions::LockClauseStrength::FORSHARE);
+        assert_eq!(lc.waitPolicy, crate::nodes::lockoptions::LockWaitPolicy::LockWaitSkip);
+    }
+
+    #[test]
+    fn merge_basic_parses() {
+        let list = parse(
+            "MERGE INTO t USING s ON t.a = s.a \
+             WHEN MATCHED THEN UPDATE SET b = s.b \
+             WHEN NOT MATCHED THEN INSERT VALUES (s.a, s.b)",
+        );
+        let Node::MergeStmt(m) = one_stmt(&list) else { panic!("not a MergeStmt") };
+        assert_eq!(m.relation.as_ref().unwrap().relname.as_deref(), Some("t"));
+        assert!(m.sourceRelation.is_some(), "USING source present");
+        assert!(m.joinCondition.is_some(), "ON condition present");
+        assert_eq!(m.mergeWhenClauses.len(), 2, "two WHEN clauses");
+        let Node::MergeWhenClause(w0) = &m.mergeWhenClauses[0] else { panic!("not a MergeWhenClause") };
+        assert_eq!(w0.commandType, CmdType::UPDATE);
+        assert_eq!(w0.matchKind, MergeMatchKind::MATCHED);
+        let Node::MergeWhenClause(w1) = &m.mergeWhenClauses[1] else { panic!("not a MergeWhenClause") };
+        assert_eq!(w1.commandType, CmdType::INSERT);
+        assert_eq!(w1.matchKind, MergeMatchKind::NOT_MATCHED_BY_TARGET);
     }
 
     #[test]

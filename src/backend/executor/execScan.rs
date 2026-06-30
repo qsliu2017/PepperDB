@@ -47,12 +47,19 @@ pub fn exec_scan(ss: &mut ScanState) -> Option<&mut TupleTableSlot> {
     let passes = exec_qual(ss.ps.qual.as_deref_mut(), &mut econtext);
 
     if passes {
+        // The scan tuple's TID (PG `tts_tid`), carried onto the projection output slot
+        // so a ModifyTable/LockRows parent reads the row identity off it (PG threads
+        // ctid via a junk Var; here the slot carries it -- see nodeModifyTable).
+        let scan_tid = econtext.ecxt_scantuple.as_ref().map(|s| s.tid);
         let proj = ss
             .ps
             .ps_proj_info
             .as_mut()
             .unwrap_or_else(|| unimplemented!("ExecScan: scan node has no projection"));
         run_projection(&mut proj.state, &mut econtext);
+        if let (Some(tid), Some(result)) = (scan_tid, proj.state.resultslot.as_mut()) {
+            result.tid = tid;
+        }
     }
 
     // Restore the scan slot to the node and the exprcontext to the PlanState.

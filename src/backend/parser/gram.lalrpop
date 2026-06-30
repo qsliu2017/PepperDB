@@ -20,9 +20,13 @@ use crate::backend::parser::parser::{
     make_nullif_expr, make_string_const_cast, make_agg_star_call, make_distinct_func_call,
     make_sortby, insert_select_options, make_index_stmt, make_index_elem,
     make_join_expr, make_alias, apply_rangevar_alias, apply_join_alias,
+    make_update_stmt, make_delete_stmt, make_merge_stmt, make_set_target,
+    make_returning_clause, make_locking_clause, make_merge_when, set_select_locking,
 };
-use crate::nodes::nodes::{JoinType, Node};
-use crate::nodes::parsenodes::{ResTarget, SelectStmt, SortByDir, SortByNulls, TypeName};
+use crate::nodes::nodes::{CmdType, JoinType, Node};
+use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
+use crate::nodes::primnodes::MergeMatchKind;
+use crate::nodes::parsenodes::{LockingClause, ResTarget, SelectStmt, SortByDir, SortByNulls, TypeName};
 
 grammar;
 
@@ -98,6 +102,23 @@ extern {
         "FULL"     => Token::Keyword("full"),
         "OUTER"    => Token::Keyword("outer"),
         "CROSS"    => Token::Keyword("cross"),
+        // M8 (step 34): UPDATE / DELETE / MERGE / RETURNING / FOR UPDATE keywords.
+        "UPDATE"   => Token::Keyword("update"),
+        "SET"      => Token::Keyword("set"),
+        "DELETE"   => Token::Keyword("delete"),
+        "RETURNING" => Token::Keyword("returning"),
+        "FOR"      => Token::Keyword("for"),
+        "SHARE"    => Token::Keyword("share"),
+        "KEY"      => Token::Keyword("key"),
+        "NO"       => Token::Keyword("no"),
+        "OF"       => Token::Keyword("of"),
+        "NOWAIT"   => Token::Keyword("nowait"),
+        "SKIP"     => Token::Keyword("skip"),
+        "LOCKED"   => Token::Keyword("locked"),
+        "MERGE"    => Token::Keyword("merge"),
+        "MATCHED"  => Token::Keyword("matched"),
+        "DO"       => Token::Keyword("do"),
+        "NOTHING"  => Token::Keyword("nothing"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -155,7 +176,90 @@ Stmt: Option<Node> = {
     <s:CreateStmt> => Some(s),
     <s:IndexStmt> => Some(s),
     <s:InsertStmt> => Some(s),
+    <s:UpdateStmt> => Some(s),
+    <s:DeleteStmt> => Some(s),
+    <s:MergeStmt> => Some(s),
     => None,            // empty statement (e.g. trailing ';')
+};
+
+// ===========================================================================
+//  UPDATE / DELETE / MERGE  (M8, step 34)
+// ===========================================================================
+
+// gram.y `UpdateStmt`: opt_with_clause UPDATE relation_expr_opt_alias SET
+// set_clause_list from_clause where_or_current_clause returning_clause. M8 reaches
+// `UPDATE t SET col = expr, ... [FROM ...] [WHERE ...] [RETURNING ...]`; WITH and
+// WHERE CURRENT OF grow at their milestones.
+UpdateStmt: Node = {
+    "UPDATE" <rel:QualifiedName> "SET" <sets:SetClauseList>
+        <frm:FromClause> <whr:WhereClause> <ret:ReturningClause> =>
+        make_update_stmt(rel, sets, frm, whr, ret),
+};
+
+// gram.y `set_clause_list: set_clause (',' set_clause)*`.
+SetClauseList: Vec<Node> = {
+    <c:SetClause> => vec![c],
+    <mut list:SetClauseList> "," <c:SetClause> => { list.push(c); list },
+};
+
+// gram.y `set_clause: set_target '=' a_expr` (the multiple-column form
+// `(a,b) = (...)` grows later). Builds a ResTarget naming the column with the
+// assigned expression as its `val`.
+SetClause: Node = {
+    <col:ColId> "=" <val:AExpr> => make_set_target(col, val),
+};
+
+// gram.y `DeleteStmt`: opt_with_clause DELETE_P FROM relation_expr_opt_alias
+// using_clause where_or_current_clause returning_clause. M8 reaches
+// `DELETE FROM t [USING ...] [WHERE ...] [RETURNING ...]`.
+DeleteStmt: Node = {
+    "DELETE" "FROM" <rel:QualifiedName> <using:UsingClause> <whr:WhereClause>
+        <ret:ReturningClause> =>
+        make_delete_stmt(rel, using, whr, ret),
+};
+
+// gram.y `using_clause: USING from_list | /*EMPTY*/`.
+UsingClause: Vec<Node> = {
+    "USING" <list:FromList> => list,
+    => Vec::new(),
+};
+
+// gram.y `returning_clause: RETURNING returning_with_clause target_list | /*EMPTY*/`.
+// M8 covers the plain `RETURNING target_list` (the OLD/NEW alias form grows later).
+ReturningClause: Vec<Node> = {
+    "RETURNING" <list:TargetList> => list,
+    => Vec::new(),
+};
+
+// gram.y `MergeStmt`: opt_with_clause MERGE INTO relation_expr_opt_alias USING
+// table_ref ON a_expr merge_when_list returning_clause. M8 reaches the basic
+// `MERGE INTO t USING src ON cond WHEN ...` shape.
+MergeStmt: Node = {
+    "MERGE" "INTO" <rel:QualifiedName> "USING" <src:TableRef> "ON" <cond:AExpr>
+        <whens:MergeWhenList> <ret:ReturningClause> =>
+        make_merge_stmt(rel, src, cond, whens, ret),
+};
+
+// gram.y `merge_when_list: merge_when_clause+`.
+MergeWhenList: Vec<Node> = {
+    <w:MergeWhenClause> => vec![w],
+    <mut list:MergeWhenList> <w:MergeWhenClause> => { list.push(w); list },
+};
+
+// gram.y `merge_when_clause`. M8 covers the common forms:
+//   WHEN MATCHED THEN UPDATE SET ...    /  WHEN MATCHED THEN DELETE
+//   WHEN NOT MATCHED THEN INSERT VALUES (...)  /  ... DO NOTHING
+MergeWhenClause: Node = {
+    "WHEN" "MATCHED" "THEN" "UPDATE" "SET" <sets:SetClauseList> =>
+        make_merge_when(MergeMatchKind::MATCHED, CmdType::UPDATE, sets, Vec::new()),
+    "WHEN" "MATCHED" "THEN" "DELETE" =>
+        make_merge_when(MergeMatchKind::MATCHED, CmdType::DELETE, Vec::new(), Vec::new()),
+    "WHEN" "MATCHED" "THEN" "DO" "NOTHING" =>
+        make_merge_when(MergeMatchKind::MATCHED, CmdType::NOTHING, Vec::new(), Vec::new()),
+    "WHEN" "NOT" "MATCHED" "THEN" "INSERT" "VALUES" "(" <vals:ExprList> ")" =>
+        make_merge_when(MergeMatchKind::NOT_MATCHED_BY_TARGET, CmdType::INSERT, Vec::new(), vals),
+    "WHEN" "NOT" "MATCHED" "THEN" "DO" "NOTHING" =>
+        make_merge_when(MergeMatchKind::NOT_MATCHED_BY_TARGET, CmdType::NOTHING, Vec::new(), Vec::new()),
 };
 
 // ===========================================================================
@@ -391,6 +495,11 @@ SelectNoParens: Node = {
         insert_select_options(s, Vec::new(), lim.0, lim.1),
     <s:SimpleSelect> <sort:SortClause> <lim:SelectLimit> =>
         insert_select_options(s, sort, lim.0, lim.1),
+    // M8 (step 34): the `for_locking_clause` wrapper (`SELECT ... FOR UPDATE`).
+    // The grammar allows it after an optional ORDER BY (PG's opt_sort_clause).
+    <s:SimpleSelect> <lock:ForLockingClause> => set_select_locking(s, lock),
+    <s:SimpleSelect> <sort:SortClause> <lock:ForLockingClause> =>
+        set_select_locking(insert_select_options(s, sort, None, None), lock),
 };
 
 SelectClause: Node = {
@@ -509,6 +618,43 @@ LimitClause: Option<Node> = {
 // gram.y `offset_clause: OFFSET select_offset_value`.
 OffsetClause: Node = {
     "OFFSET" <e:AExpr> => e,
+};
+
+// ===========================================================================
+//  FOR locking clause  (gram.y for_locking_clause -> for_locking_items -> for_locking_item)
+//  M8 (step 34): `FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE [OF rel,...] [NOWAIT|SKIP LOCKED]`.
+// ===========================================================================
+
+ForLockingClause: LockingClause = {
+    "FOR" <s:LockStrength> <of:LockedRelsList> <wp:OptNowait> =>
+        make_locking_clause(s, of, wp),
+};
+
+LockStrength: LockClauseStrength = {
+    "UPDATE"          => LockClauseStrength::FORUPDATE,
+    "NO" "KEY" "UPDATE" => LockClauseStrength::FORNOKEYUPDATE,
+    "SHARE"           => LockClauseStrength::FORSHARE,
+    "KEY" "SHARE"     => LockClauseStrength::FORKEYSHARE,
+};
+
+// gram.y `locked_rels_list: OF qualified_name_list | /*EMPTY*/`. Each named rel
+// is a RangeVar marking which FROM items the lock applies to.
+LockedRelsList: Vec<Node> = {
+    "OF" <list:QualifiedNameList> => list,
+    => Vec::new(),
+};
+
+QualifiedNameList: Vec<Node> = {
+    <n:QualifiedName> => vec![Node::RangeVar(Box::new(n))],
+    <mut list:QualifiedNameList> "," <n:QualifiedName> =>
+        { list.push(Node::RangeVar(Box::new(n))); list },
+};
+
+// gram.y `opt_nowait_or_skip: NOWAIT | SKIP LOCKED | /*EMPTY*/`.
+OptNowait: LockWaitPolicy = {
+    "NOWAIT"        => LockWaitPolicy::LockWaitError,
+    "SKIP" "LOCKED" => LockWaitPolicy::LockWaitSkip,
+    => LockWaitPolicy::LockWaitBlock,
 };
 
 // ===========================================================================

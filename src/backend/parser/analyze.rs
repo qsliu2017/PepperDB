@@ -20,7 +20,8 @@ use std::sync::Arc;
 
 use crate::nodes::nodes::{CmdType, Node};
 use crate::nodes::parsenodes::{
-    AclMode, InsertStmt, Query, QuerySource, RawStmt, SelectStmt, SetOperation,
+    AclMode, DeleteStmt, InsertStmt, MergeStmt, Query, QuerySource, RawStmt, SelectStmt,
+    SetOperation, UpdateStmt,
 };
 use crate::nodes::primnodes::OverridingKind;
 use crate::parser::parse_collate::assign_query_collations;
@@ -307,6 +308,9 @@ async fn transform_stmt_async(
             }
         }
         Node::InsertStmt(n) => transform_insert_stmt(shared, pstate, n).await,
+        Node::UpdateStmt(n) => transform_update_stmt(shared, pstate, n).await,
+        Node::DeleteStmt(n) => transform_delete_stmt(shared, pstate, n).await,
+        Node::MergeStmt(n) => transform_merge_stmt(shared, pstate, n).await,
         other => {
             let mut q = make_query();
             q.commandType = CmdType::UTILITY;
@@ -390,6 +394,12 @@ async fn transform_select_stmt_async(
     reject_unsupported_select_clauses(stmt);
 
     finish_query(pstate, &mut qry, qual);
+
+    // FOR UPDATE/SHARE locking clause -> rowMarks (M8, step 34). Must run after the
+    // rangetable is final (finish_query flattens it onto the Query).
+    if !stmt.lockingClause.is_empty() {
+        transform_locking_clause(&mut qry, &stmt.lockingClause);
+    }
 
     // parseCheckAggregates runs only when the query is an aggregate/grouped query.
     if qry.hasAggs || !qry.groupClause.is_empty() || qry.havingQual.is_some() {
@@ -1027,6 +1037,299 @@ async fn transform_insert_stmt(
     qry
 }
 
+/// PG `transformUpdateStmt`: build a `Query` for `UPDATE t SET ... [FROM ...]
+/// [WHERE ...] [RETURNING ...]`. The target relation is opened as both result rel
+/// and source (its columns are referenceable in SET/WHERE/RETURNING). The SET list
+/// is resolved to attno-keyed TargetEntries (transformUpdateTargetList); the FROM
+/// list / WHERE qual / RETURNING list are transformed against the namespace.
+async fn transform_update_stmt(
+    shared: &Arc<SharedState>,
+    pstate: &mut ParseState,
+    stmt: &UpdateStmt,
+) -> Box<Query> {
+    let mut qry = make_query();
+    qry.commandType = CmdType::UPDATE;
+
+    if stmt.withClause.is_some() {
+        not_yet_reachable("transformUpdateStmt: WITH clause");
+    }
+
+    let relation = stmt
+        .relation
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("transformUpdateStmt: missing target relation"));
+    // setTargetTable(inh=true, alsoSource=true): the target is also a source rel.
+    qry.resultRelation = crate::backend::parser::parse_clause::set_target_table(
+        shared, pstate, relation, true, true, AclMode::UPDATE,
+    )
+    .await;
+
+    // Additional FROM relations (UPDATE ... FROM other) extend the namespace.
+    crate::backend::parser::parse_clause::transform_from_clause(
+        shared,
+        pstate,
+        stmt.fromClause.clone(),
+    )
+    .await;
+
+    // Warm the caches the SET / WHERE / RETURNING expressions reference, then run
+    // the (sync) expression transforms.
+    let set_targets = stmt.targetList.clone();
+    warm_expr_caches(shared, pstate, &set_targets, stmt.whereClause.as_ref()).await;
+
+    // SET targetlist -> attno-keyed TargetEntries (transformUpdateTargetList).
+    qry.targetList = transform_update_target_list(pstate, &set_targets);
+
+    // WHERE qual.
+    let qual = crate::backend::parser::parse_clause::transform_where_clause(
+        pstate,
+        stmt.whereClause.clone(),
+        ParseExprKind::Where,
+        "WHERE",
+    );
+
+    // RETURNING.
+    transform_returning(pstate, &mut qry, stmt.returningClause.as_deref());
+
+    finish_query(pstate, &mut qry, qual);
+    qry
+}
+
+/// PG `transformDeleteStmt`: build a `Query` for `DELETE FROM t [USING ...]
+/// [WHERE ...] [RETURNING ...]`.
+async fn transform_delete_stmt(
+    shared: &Arc<SharedState>,
+    pstate: &mut ParseState,
+    stmt: &DeleteStmt,
+) -> Box<Query> {
+    let mut qry = make_query();
+    qry.commandType = CmdType::DELETE;
+
+    if stmt.withClause.is_some() {
+        not_yet_reachable("transformDeleteStmt: WITH clause");
+    }
+
+    let relation = stmt
+        .relation
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("transformDeleteStmt: missing target relation"));
+    qry.resultRelation = crate::backend::parser::parse_clause::set_target_table(
+        shared, pstate, relation, true, true, AclMode::DELETE,
+    )
+    .await;
+
+    // USING relations extend the namespace (DELETE ... USING other).
+    crate::backend::parser::parse_clause::transform_from_clause(
+        shared,
+        pstate,
+        stmt.usingClause.clone(),
+    )
+    .await;
+
+    warm_expr_caches(shared, pstate, &[], stmt.whereClause.as_ref()).await;
+
+    let qual = crate::backend::parser::parse_clause::transform_where_clause(
+        pstate,
+        stmt.whereClause.clone(),
+        ParseExprKind::Where,
+        "WHERE",
+    );
+
+    transform_returning(pstate, &mut qry, stmt.returningClause.as_deref());
+
+    finish_query(pstate, &mut qry, qual);
+    qry
+}
+
+/// PG `transformMergeStmt` (M8 basic form): parse+analyze `MERGE INTO t USING src
+/// ON cond WHEN ...`. The full executor path is staged (planner emits a
+/// not_yet_reachable ModifyTable for MERGE this milestone); the transform builds the
+/// Query (target + source join, the merge action list) so MERGE parses and analyzes.
+async fn transform_merge_stmt(
+    shared: &Arc<SharedState>,
+    pstate: &mut ParseState,
+    stmt: &MergeStmt,
+) -> Box<Query> {
+    let mut qry = make_query();
+    qry.commandType = CmdType::MERGE;
+
+    if stmt.withClause.is_some() {
+        not_yet_reachable("transformMergeStmt: WITH clause");
+    }
+
+    let relation = stmt
+        .relation
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("transformMergeStmt: missing target relation"));
+    qry.resultRelation = crate::backend::parser::parse_clause::set_target_table(
+        shared, pstate, relation, true, true, AclMode::INSERT,
+    )
+    .await;
+    qry.mergeTargetRelation = qry.resultRelation;
+
+    // The source relation (USING table_ref) joins the target.
+    let source = stmt
+        .sourceRelation
+        .clone()
+        .unwrap_or_else(|| not_yet_reachable("transformMergeStmt: missing source relation"));
+    crate::backend::parser::parse_clause::transform_from_clause(shared, pstate, vec![source]).await;
+
+    // The ON join condition.
+    qry.mergeJoinCondition = crate::backend::parser::parse_clause::transform_where_clause(
+        pstate,
+        stmt.joinCondition.clone(),
+        ParseExprKind::JoinOn,
+        "MERGE ON",
+    );
+
+    // Transform the WHEN clauses into MergeActions. The action exprs resolve against
+    // the joined namespace (target + source).
+    qry.mergeActionList = transform_merge_when_clauses(pstate, &stmt.mergeWhenClauses);
+
+    transform_returning(pstate, &mut qry, stmt.returningClause.as_deref());
+
+    // The join qual is folded into the jointree (the source RTE is in the joinlist).
+    finish_query(pstate, &mut qry, None);
+    qry
+}
+
+/// PG `transformUpdateTargetList`: resolve each SET ResTarget to a TargetEntry keyed
+/// to the target column's attno. The assigned expression is transformed
+/// (UpdateSource kind) and coerced to the column type. `resname` is the column name;
+/// `resjunk` false. The result is attno-ordered by preptlist::expand_targetlist.
+fn transform_update_target_list(pstate: &mut ParseState, origtlist: &[Node]) -> Vec<Node> {
+    use crate::nodes::makefuncs::makeTargetEntry;
+    use crate::nodes::primnodes::{CoercionContext, CoercionForm};
+
+    let rel = pstate
+        .p_target_relation
+        .as_ref()
+        .unwrap_or_else(|| unreachable!("UPDATE target relation set by set_target_table"))
+        .clone();
+    let tupdesc = rel
+        .rd_att
+        .as_ref()
+        .unwrap_or_else(|| unreachable!("UPDATE target relation has a descriptor"));
+
+    origtlist
+        .iter()
+        .map(|node| {
+            let Node::ResTarget(rt) = node else {
+                not_yet_reachable("transformUpdateTargetList: SET item is not a ResTarget");
+            };
+            let colname = rt
+                .name
+                .clone()
+                .unwrap_or_else(|| not_yet_reachable("transformUpdateTargetList: SET column has no name"));
+            // attribute_to_attnum: find the named column's attno + type.
+            let (attno, atttypid, atttypmod) = lookup_column(tupdesc, &colname);
+
+            // Transform the assigned expression (UPDATE_SOURCE kind).
+            let raw = rt
+                .val
+                .clone()
+                .unwrap_or_else(|| not_yet_reachable("transformUpdateTargetList: SET value is SetToDefault"));
+            let expr = crate::parser::parse_expr::transformExpr(
+                pstate,
+                Some(raw),
+                ParseExprKind::UpdateSource,
+            )
+            .unwrap_or_else(|| not_yet_reachable("transformUpdateTargetList: NULL SET expression"));
+
+            // Coerce the value to the column type (assignment context).
+            let exprtype = crate::backend::nodes::nodeFuncs::exprType(&expr);
+            let coerced = crate::backend::parser::parse_coerce::coerce_to_target_type(
+                pstate,
+                Some(expr),
+                exprtype,
+                atttypid,
+                atttypmod,
+                CoercionContext::ASSIGNMENT,
+                CoercionForm::IMPLICIT_CAST,
+                -1,
+            )
+            .unwrap_or_else(|| not_yet_reachable("transformUpdateTargetList: cannot coerce SET value to column type"));
+
+            Node::TargetEntry(Box::new(makeTargetEntry(Some(coerced), attno, Some(colname), false)))
+        })
+        .collect()
+}
+
+/// PG `transformReturningList`: transform the RETURNING target list (a SELECT-like
+/// projection over the modified rows). Sets `qry.returningList` and marks the query.
+/// `RETURNING *` expands to all the target relation's columns.
+fn transform_returning(
+    pstate: &mut ParseState,
+    qry: &mut Query,
+    returning: Option<&crate::nodes::parsenodes::ReturningClause>,
+) {
+    let Some(returning) = returning else { return };
+    if !returning.options.is_empty() {
+        not_yet_reachable("transformReturningList: RETURNING WITH (OLD/NEW alias)");
+    }
+    let save_next_resno = pstate.p_next_resno;
+    pstate.p_next_resno = 1;
+    qry.returningList =
+        transformTargetList(pstate, returning.exprs.clone(), ParseExprKind::Returning);
+    pstate.p_next_resno = save_next_resno;
+}
+
+/// PG `transformMergeStmt`'s action-clause loop (M8 subset): turn each
+/// `MergeWhenClause` into a `MergeAction`. The UPDATE SET list and INSERT VALUES list
+/// are transformed against the joined namespace. The extra `WHEN MATCHED AND <qual>`
+/// condition and RETURNING-from-MERGE are staged.
+fn transform_merge_when_clauses(pstate: &mut ParseState, clauses: &[Node]) -> Vec<Node> {
+    clauses
+        .iter()
+        .map(|node| {
+            let Node::MergeWhenClause(wc) = node else {
+                not_yet_reachable("transformMergeStmt: WHEN item is not a MergeWhenClause");
+            };
+            if wc.condition.is_some() {
+                not_yet_reachable("transformMergeStmt: WHEN ... AND <condition>");
+            }
+            let target_list = match wc.commandType {
+                CmdType::UPDATE => transform_update_target_list(pstate, &wc.targetList),
+                CmdType::INSERT => {
+                    not_yet_reachable("transformMergeStmt: WHEN NOT MATCHED THEN INSERT action transform")
+                }
+                CmdType::DELETE | CmdType::NOTHING => Vec::new(),
+                other => not_yet_reachable(&format!("transformMergeStmt: WHEN action {other:?}")),
+            };
+            Node::MergeAction(Box::new(crate::nodes::primnodes::MergeAction {
+                matchKind: wc.matchKind,
+                commandType: wc.commandType,
+                r#override: wc.r#override,
+                qual: None,
+                targetList: target_list,
+                updateColnos: Vec::new(),
+            }))
+        })
+        .collect()
+}
+
+/// Find a column by name in a tuple descriptor, returning its 1-based attno, type
+/// OID, and typmod (PG `attnameAttNum` + the pg_attribute lookup).
+fn lookup_column(
+    tupdesc: &crate::access::tupdesc::TupleDescData,
+    colname: &str,
+) -> (crate::access::attnum::AttrNumber, Oid, i32) {
+    for i in 0..tupdesc.natts as usize {
+        let attr = tupdesc.attr(i);
+        if attr.attisdropped {
+            continue;
+        }
+        if attr_name(attr) == colname {
+            return ((i + 1) as crate::access::attnum::AttrNumber, attr.atttypid, attr.atttypmod);
+        }
+    }
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_COLUMN)
+            .errmsg(format!("column \"{colname}\" of relation does not exist"));
+    });
+    unreachable!("ereport(ERROR) diverges");
+}
+
 /// PG's `isGeneralSelect` test: a VALUES source with sort/limit/locking/with is
 /// treated as a general SELECT. M2 only constructs a bare VALUES SelectStmt, so a
 /// non-VALUES SelectStmt source is the only general-select case.
@@ -1129,8 +1432,54 @@ fn reject_unsupported_select_clauses(stmt: &SelectStmt) {
     if !stmt.windowClause.is_empty() {
         not_yet_reachable("transformSelectStmt: WINDOW clause");
     }
-    if !stmt.lockingClause.is_empty() {
-        not_yet_reachable("transformSelectStmt: locking clause");
+    // The locking clause (FOR UPDATE/SHARE) is handled by transform_locking_clause
+    // after finish_query (M8, step 34).
+}
+
+/// PG `transformLockingClause`: turn each `FOR UPDATE/SHARE [OF ...]` clause into
+/// `Query.rowMarks` (a `RowMarkClause` per locked relation RTE). With no `OF` list
+/// the lock applies to every plain-relation RTE in the rangetable. `NOWAIT` / `SKIP
+/// LOCKED` carry through the wait policy. Sets `hasForUpdate`.
+fn transform_locking_clause(qry: &mut Query, locking: &[Node]) {
+    use crate::nodes::lockoptions::LockClauseStrength;
+    use crate::nodes::parsenodes::{RTEKind, RowMarkClause};
+
+    for clause_node in locking {
+        let Node::LockingClause(lc) = clause_node else {
+            not_yet_reachable("transformLockingClause: not a LockingClause");
+        };
+        if !lc.lockedRels.is_empty() {
+            not_yet_reachable("transformLockingClause: FOR UPDATE OF <rel> list");
+        }
+        // applyLockingClause to every plain-relation RTE (no OF list).
+        for (i, rte_node) in qry.rtable.iter().enumerate() {
+            let Node::RangeTblEntry(rte) = rte_node else { continue };
+            if rte.rtekind != RTEKind::RELATION {
+                continue;
+            }
+            let rti = (i + 1) as crate::nodes::primnodes::Index;
+            // applyLockingClause: add (or strengthen) the rowmark for this RTI.
+            if let Some(existing) = qry.rowMarks.iter_mut().find_map(|n| match n {
+                Node::RowMarkClause(rmc) if rmc.rti == rti => Some(rmc),
+                _ => None,
+            }) {
+                if (lc.strength as i32) > (existing.strength as i32) {
+                    existing.strength = lc.strength;
+                }
+                if (lc.waitPolicy as i32) > (existing.waitPolicy as i32) {
+                    existing.waitPolicy = lc.waitPolicy;
+                }
+            } else {
+                qry.rowMarks.push(Node::RowMarkClause(Box::new(RowMarkClause {
+                    rti,
+                    strength: lc.strength,
+                    waitPolicy: lc.waitPolicy,
+                    pushedDown: false,
+                })));
+            }
+        }
+        // PG sets hasForUpdate for FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE alike.
+        qry.hasForUpdate = true;
     }
 }
 

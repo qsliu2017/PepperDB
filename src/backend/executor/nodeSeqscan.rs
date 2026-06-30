@@ -190,6 +190,7 @@ async fn seq_next(shared: &Arc<SharedState>, run: &mut SeqScanRun<'_>) -> bool {
     // body is an owned copy of the page item; deform reads the header + data bytes.
     let desc = scan_slot_desc(&run.state.ss);
     let htd = unsafe { &*tuple };
+    let t_self = htd.t_self;
     let (values, isnull) = unsafe { heap_deform_tuple(htd, &desc) };
 
     let slot = run
@@ -203,6 +204,10 @@ async fn seq_next(shared: &Arc<SharedState>, run: &mut SeqScanRun<'_>) -> bool {
     slot.values[..n].copy_from_slice(&values);
     slot.isnull[..n].copy_from_slice(&isnull);
     crate::backend::executor::execTuples::exec_store_virtual_tuple(slot);
+    // Carry the row's TID on the slot (PG's tts_tid). UPDATE/DELETE/LockRows read it
+    // as the row identity (the system-column ctid-junk-Var path is staged); a plain
+    // SELECT ignores it.
+    slot.tid = t_self;
     true
 }
 

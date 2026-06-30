@@ -47,8 +47,14 @@ use crate::backend::executor::nodeIndexscan::{
     exec_end_index_scan, exec_index_scan, exec_init_index_scan, IndexScanRun,
 };
 use crate::backend::executor::nodeLimit::{exec_end_limit, exec_init_limit, exec_limit, LimitRun};
+use crate::backend::executor::nodeLockRows::{
+    exec_end_lock_rows, exec_init_lock_rows, exec_lock_rows, LockRowsRun,
+};
 use crate::backend::executor::nodeMaterial::{
     exec_end_material, exec_init_material, exec_material, MaterialRun,
+};
+use crate::backend::executor::nodeTidscan::{
+    exec_end_tid_scan, exec_init_tid_scan, exec_tid_scan, TidScanRun,
 };
 use crate::backend::executor::nodeHash::{exec_end_hash, exec_init_hash, HashRun};
 use crate::backend::executor::nodeHashjoin::{
@@ -109,6 +115,10 @@ pub enum PlanStateNode<'rel> {
     BitmapOr(Box<BitmapOrRun<'rel>>),
     /// T_ModifyTableState (+ its child plan-state).
     ModifyTable(Box<ModifyTableRun<'rel>>),
+    /// T_LockRowsState (+ its child plan-state + the resolved row marks).
+    LockRows(Box<LockRowsRun<'rel>>),
+    /// T_TidScanState (+ the borrowed relation/snapshot + the TID list).
+    TidScan(Box<TidScanRun<'rel>>),
     /// T_SortState (+ child + tuplesort).
     Sort(Box<SortRun<'rel>>),
     /// T_LimitState (+ child).
@@ -174,6 +184,9 @@ pub fn result_type_of(node: &PlanStateNode<'_>) -> Option<TupleDesc> {
         | PlanStateNode::BitmapAnd(_)
         | PlanStateNode::BitmapOr(_) => None,
         PlanStateNode::ModifyTable(mt) => mt.state.ps.ps_result_tuple_desc.clone(),
+        // LockRows projects its child unchanged -> the child's rowtype.
+        PlanStateNode::LockRows(l) => result_type_of(&l.subplan),
+        PlanStateNode::TidScan(t) => t.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Sort(s) => s.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Limit(l) => l.state.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Material(m) => m.state.ss.ps.ps_result_tuple_desc.clone(),
@@ -228,6 +241,8 @@ pub fn exec_init_node<'rel>(
         Node::ModifyTable(m) => Some(PlanStateNode::ModifyTable(exec_init_modify_table(
             m, estate, eflags,
         ))),
+        Node::LockRows(l) => Some(PlanStateNode::LockRows(exec_init_lock_rows(l, estate, eflags))),
+        Node::TidScan(t) => Some(PlanStateNode::TidScan(exec_init_tid_scan(t, estate, eflags))),
         Node::Sort(s) => {
             // We shield the child from REWIND/BACKWARD/MARK (the sort materializes).
             let child = init_child(s.plan.lefttree.as_ref(), estate, child_eflags(eflags));
@@ -342,6 +357,8 @@ pub async fn exec_proc_node<'n>(
             unimplemented!("ExecProcNode: a bitmap producer is driven via MultiExecProcNode")
         }
         PlanStateNode::ModifyTable(mt) => exec_modify_table(expect_shared(shared), mt).await,
+        PlanStateNode::LockRows(l) => exec_lock_rows(shared, l).await,
+        PlanStateNode::TidScan(t) => exec_tid_scan(expect_shared(shared), t).await,
         PlanStateNode::Sort(s) => exec_sort(shared, s).await,
         PlanStateNode::Limit(l) => exec_limit(shared, l).await,
         PlanStateNode::Material(m) => exec_material(shared, m).await,
@@ -408,6 +425,8 @@ pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode
         PlanStateNode::BitmapAnd(ba) => exec_end_bitmap_and(shared, ba),
         PlanStateNode::BitmapOr(bo) => exec_end_bitmap_or(shared, bo),
         PlanStateNode::ModifyTable(mt) => exec_end_modify_table(expect_shared(shared), mt),
+        PlanStateNode::LockRows(l) => exec_end_lock_rows(shared, l),
+        PlanStateNode::TidScan(t) => exec_end_tid_scan(expect_shared(shared), t),
         PlanStateNode::Sort(s) => exec_end_sort(shared, s),
         PlanStateNode::Limit(l) => exec_end_limit(shared, l),
         PlanStateNode::Material(m) => exec_end_material(shared, m),

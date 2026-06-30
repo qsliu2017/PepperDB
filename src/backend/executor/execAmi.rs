@@ -47,6 +47,12 @@ pub fn exec_rescan(shared: &Arc<SharedState>, node: &mut PlanStateNode) {
         PlanStateNode::ModifyTable(_) => {
             unimplemented!("ExecReScan: ModifyTable rescan not reachable")
         }
+        PlanStateNode::LockRows(_) => {
+            unimplemented!("ExecReScan: LockRows rescan not yet reachable")
+        }
+        PlanStateNode::TidScan(_) => {
+            unimplemented!("ExecReScan: TidScan rescan not yet reachable")
+        }
         // M5 upper nodes: rescan resets the node (and forgets/rewinds buffered
         // output); the child rescan is driven by the node's own rescan helper.
         PlanStateNode::Sort(s) => crate::backend::executor::nodeSort::exec_rescan_sort(s),

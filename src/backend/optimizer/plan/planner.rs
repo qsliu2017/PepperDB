@@ -137,11 +137,22 @@ pub fn standard_planner(
         top_plan = crate::backend::optimizer::plan::createplan::build_upper_plan(&root, top_plan);
     }
 
+    // FOR UPDATE/SHARE: wrap the scan plan in a LockRows node that locks the
+    // selected rows (M8, step 34). PG builds a LockRowsPath in grouping_planner; the
+    // port assembles it here from root.row_marks (set by preprocess_rowmarks). The
+    // ModifyTable below (if any) sits ABOVE the LockRows.
+    if !root.row_marks.is_empty() && parse.commandType == CmdType::SELECT {
+        top_plan = make_lockrows_plan(&root, top_plan);
+    }
+
     // For a data-modifying statement, wrap the source plan in a ModifyTable. PG
-    // builds a ModifyTablePath in grouping_planner; M2 wraps the source plan here
-    // for the single, non-inherited target (the ModifyTablePath/bitmapset path for
-    // inherited targets grows later). Records the result relation on glob.
-    if parse.commandType == CmdType::INSERT {
+    // builds a ModifyTablePath in grouping_planner; the port wraps the source plan
+    // here for the single, non-inherited target (the ModifyTablePath/bitmapset path
+    // for inherited targets grows later). Records the result relation on glob.
+    if matches!(
+        parse.commandType,
+        CmdType::INSERT | CmdType::UPDATE | CmdType::DELETE | CmdType::MERGE
+    ) {
         top_plan = make_modifytable_plan(&mut root, parse, top_plan);
     }
 
@@ -193,10 +204,11 @@ pub fn standard_planner(
     }
 }
 
-/// PG `create_modifytable_plan` (M2 subset): wrap `subplan` (the source rows) in a
-/// `ModifyTable` plan targeting the query's single result relation. Records the
-/// result relation in `glob.result_relations`. Inherited targets, RETURNING, WCO,
-/// ON CONFLICT, and the FDW/merge fields grow at their milestones.
+/// PG `create_modifytable_plan`: wrap `subplan` (the source rows) in a `ModifyTable`
+/// plan targeting the query's single result relation. Records the result relation in
+/// `glob.result_relations`. M8 (step 34) adds the UPDATE/DELETE/MERGE operations, the
+/// RETURNING projection lists, and the row marks; inherited targets, WCO, ON
+/// CONFLICT, and the FDW fields grow at their milestones.
 fn make_modifytable_plan(
     root: &mut PlannerInfo,
     parse: &Query,
@@ -205,6 +217,17 @@ fn make_modifytable_plan(
     let result_relation = parse.resultRelation;
     crate::assert!(result_relation > 0);
     root.glob.result_relations = vec![result_relation];
+
+    // The plan's own tlist is the RETURNING projection (empty otherwise). PG keeps
+    // `returningLists` as a list-of-lists (one per result relation); with a single
+    // target the port stores the RETURNING TargetEntries directly in the plan's
+    // targetlist and mirrors a per-rel copy in `returning_lists` for the executor's
+    // per-result-rel setup. M8's RETURNING Vars are resolved against the subplan slot.
+    let plan_tlist = parse.returningList.clone();
+    let returning_lists = parse.returningList.clone();
+
+    // The merge action list (the single target's actions), carried for MERGE.
+    let merge_action_lists = parse.mergeActionList.clone();
 
     let modify = crate::nodes::plannodes::ModifyTable {
         plan: crate::nodes::plannodes::Plan {
@@ -217,8 +240,7 @@ fn make_modifytable_plan(
             parallel_safe: false,
             async_capable: false,
             plan_node_id: 0,
-            // ModifyTable's own tlist is empty unless RETURNING (none in M2).
-            targetlist: Vec::new(),
+            targetlist: plan_tlist,
             qual: Vec::new(),
             lefttree: Some(subplan),
             righttree: None,
@@ -226,7 +248,7 @@ fn make_modifytable_plan(
             ext_param: None,
             all_param: None,
         },
-        operation: CmdType::INSERT,
+        operation: parse.commandType,
         can_set_tag: parse.canSetTag,
         nominal_relation: result_relation as crate::nodes::primnodes::Index,
         root_relation: 0,
@@ -234,11 +256,14 @@ fn make_modifytable_plan(
         result_relations: vec![result_relation],
         update_colnos_lists: Vec::new(),
         with_check_option_lists: Vec::new(),
-        returning_old_alias: None,
-        returning_new_alias: None,
-        returning_lists: Vec::new(),
+        returning_old_alias: parse.returningOldAlias.clone(),
+        returning_new_alias: parse.returningNewAlias.clone(),
+        returning_lists,
         fdw_priv_lists: Vec::new(),
         fdw_direct_modify_plans: None,
+        // The row marks (FOR UPDATE rows being modified) are owned by the ModifyTable
+        // in PG when there is no separate LockRows; M8's UPDATE/DELETE locks the row
+        // via the heap update/delete tuple-lock itself, so no row marks here.
         row_marks: Vec::new(),
         epq_param: -1,
         on_conflict_action: crate::nodes::nodes::OnConflictAction::NONE,
@@ -248,10 +273,130 @@ fn make_modifytable_plan(
         on_conflict_where: None,
         excl_rel_rti: 0,
         excl_rel_tlist: Vec::new(),
-        merge_action_lists: Vec::new(),
+        merge_action_lists,
         merge_join_conditions: Vec::new(),
     };
     Node::ModifyTable(Box::new(modify))
+}
+
+/// PG `create_lockrows_plan`: wrap `subplan` in a `LockRows` node carrying the
+/// query's row marks (a `PlanRowMark` per locked relation). The executor's
+/// ExecLockRows locks each row from the subplan per its mark (M8, step 34).
+fn make_lockrows_plan(root: &PlannerInfo, subplan: Node) -> Node {
+    let row_marks = root.row_marks.clone();
+    let lockrows = crate::nodes::plannodes::LockRows {
+        plan: crate::nodes::plannodes::Plan {
+            disabled_nodes: 0,
+            startup_cost: 0.0,
+            total_cost: 0.0,
+            plan_rows: 0.0,
+            plan_width: 0,
+            parallel_aware: false,
+            parallel_safe: false,
+            async_capable: false,
+            plan_node_id: 0,
+            // LockRows projects its child's tlist unchanged.
+            targetlist: top_plan_tlist_clone(&subplan),
+            qual: Vec::new(),
+            lefttree: Some(subplan),
+            righttree: None,
+            init_plan: Vec::new(),
+            ext_param: None,
+            all_param: None,
+        },
+        row_marks,
+        epq_param: -1,
+    };
+    Node::LockRows(Box::new(lockrows))
+}
+
+/// The targetlist of the child plan node (LockRows projects its child unchanged).
+fn top_plan_tlist_clone(node: &Node) -> Vec<Node> {
+    match node {
+        Node::SeqScan(s) => s.scan.plan.targetlist.clone(),
+        Node::IndexScan(s) => s.scan.plan.targetlist.clone(),
+        Node::IndexOnlyScan(s) => s.scan.plan.targetlist.clone(),
+        Node::BitmapHeapScan(s) => s.scan.plan.targetlist.clone(),
+        Node::Result(r) => r.plan.targetlist.clone(),
+        Node::Sort(s) => s.plan.targetlist.clone(),
+        Node::Limit(l) => l.plan.targetlist.clone(),
+        Node::Agg(a) => a.plan.targetlist.clone(),
+        Node::NestLoop(n) => n.join.plan.targetlist.clone(),
+        Node::HashJoin(h) => h.join.plan.targetlist.clone(),
+        Node::MergeJoin(m) => m.join.plan.targetlist.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// PG `preprocess_rowmarks`: convert the query's `RowMarkClause`s (FOR UPDATE/SHARE)
+/// into `PlanRowMark`s on `root.row_marks`, and mirror them into
+/// `glob.finalrowmarks` (the PlannedStmt's row marks). The non-target/non-locked
+/// REFERENCE rowmarks PG also adds (for EPQ rechecks of other rels) are not needed in
+/// the single-rel M8 case. MERGE / inheritance rowmark handling grows later.
+fn preprocess_rowmarks(root: &mut PlannerInfo) {
+    use crate::nodes::nodes::Node;
+    use crate::nodes::plannodes::PlanRowMark;
+
+    if root.parse.rowMarks.is_empty() {
+        return;
+    }
+    // PG bails to "no marks" for MERGE / a query with no real locked rels; M8 only
+    // reaches FOR UPDATE on a plain SELECT.
+    if root.parse.commandType != CmdType::SELECT {
+        not_yet_reachable("preprocess_rowmarks: FOR UPDATE on a non-SELECT");
+    }
+
+    let mut prowmarks: Vec<PlanRowMark> = Vec::new();
+    for rc_node in &root.parse.rowMarks {
+        let Node::RowMarkClause(rc) = rc_node else {
+            not_yet_reachable("preprocess_rowmarks: not a RowMarkClause");
+        };
+        let rte = &root.parse.rtable[rc.rti - 1];
+        let mark_type = select_rowmark_type(rte, rc.strength);
+        root.glob.last_row_mark_id += 1;
+        prowmarks.push(PlanRowMark {
+            rti: rc.rti,
+            prti: rc.rti,
+            rowmark_id: root.glob.last_row_mark_id,
+            mark_type,
+            all_mark_types: 1 << (mark_type as i32),
+            strength: rc.strength,
+            wait_policy: rc.waitPolicy,
+            is_parent: false,
+        });
+    }
+
+    let mark_nodes: Vec<Node> = prowmarks
+        .into_iter()
+        .map(|m| Node::PlanRowMark(Box::new(m)))
+        .collect();
+    root.glob.finalrowmarks.clone_from(&mark_nodes);
+    root.row_marks = mark_nodes;
+}
+
+/// PG `select_rowmark_type`: pick the `RowMarkType` for an RTE under a lock strength.
+/// A plain relation under FOR UPDATE / NO KEY UPDATE marks ROW_MARK_EXCLUSIVE /
+/// NOKEYEXCLUSIVE; FOR SHARE / KEY SHARE marks SHARE / KEYSHARE. Non-relations use
+/// ROW_MARK_COPY (not reachable in M8). Foreign tables grow later.
+fn select_rowmark_type(
+    rte: &crate::nodes::nodes::Node,
+    strength: crate::nodes::lockoptions::LockClauseStrength,
+) -> crate::nodes::plannodes::RowMarkType {
+    use crate::nodes::lockoptions::LockClauseStrength as S;
+    use crate::nodes::plannodes::RowMarkType;
+    let crate::nodes::nodes::Node::RangeTblEntry(rte) = rte else {
+        return RowMarkType::COPY;
+    };
+    if rte.rtekind != crate::nodes::parsenodes::RTEKind::RELATION {
+        return RowMarkType::COPY;
+    }
+    match strength {
+        S::FORUPDATE => RowMarkType::EXCLUSIVE,
+        S::FORNOKEYUPDATE => RowMarkType::NOKEYEXCLUSIVE,
+        S::FORSHARE => RowMarkType::SHARE,
+        S::FORKEYSHARE => RowMarkType::KEYSHARE,
+        S::NONE => RowMarkType::REFERENCE,
+    }
 }
 
 /// PG `subquery_planner`: the per-Query planning driver. Sets up the
@@ -321,7 +466,9 @@ pub fn subquery_planner(
         }
     }
 
-    // preprocess_rowmarks: none in M1/M2.
+    // preprocess_rowmarks: convert the query's RowMarkClauses (FOR UPDATE/SHARE) into
+    // PlanRowMarks on root.row_marks (M8, step 34).
+    preprocess_rowmarks(&mut root);
 
     root.has_having_qual = root.parse.havingQual.is_some();
     if root.has_having_qual {
@@ -338,11 +485,12 @@ pub fn subquery_planner(
     }
     // LIMIT/OFFSET expressions are int8 Consts (transformLimitClause const-folds the
     // literal form), so preprocess_expression over them is an identity; they need no
-    // guard. RETURNING/WCO/onConflict/merge/window expression preprocessing grows.
-    if !root.parse.returningList.is_empty()
-        || !root.parse.withCheckOptions.is_empty()
+    // guard. M8's RETURNING list is simple Vars/consts (preprocess_expression is an
+    // identity over them), so it needs no guard either. WCO / onConflict / window
+    // expression preprocessing grows with those features. MERGE action preprocessing
+    // is staged (MERGE execution is staged this milestone).
+    if !root.parse.withCheckOptions.is_empty()
         || root.parse.onConflict.is_some()
-        || !root.parse.mergeActionList.is_empty()
         || !root.parse.windowClause.is_empty()
     {
         not_yet_reachable("subquery_planner: expression preprocessing");
@@ -510,13 +658,9 @@ fn grouping_planner(root: &mut PlannerInfo, tuple_fraction: f64, setops: Option<
         *slot = Some(scan_target.clone());
     }
 
-    if !root.parse.rowMarks.is_empty() {
-        not_yet_reachable("grouping_planner: LockRows (FOR UPDATE/SHARE)");
-    }
-    match root.parse.commandType {
-        CmdType::SELECT | CmdType::INSERT => {}
-        other => not_yet_reachable(&format!("grouping_planner: {other:?} ModifyTable")),
-    }
+    // The LockRows (FOR UPDATE) and ModifyTable (INSERT/UPDATE/DELETE/MERGE) plan
+    // nodes are assembled in standard_planner from the scan/join plan (the port's
+    // flat-Path precedent), so grouping_planner just records the scan/join rel here.
     root.upper_rels[UpperRelationKind::FINAL as usize] = vec![Box::new(current_rel)];
 }
 
