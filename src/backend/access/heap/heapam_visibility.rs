@@ -27,11 +27,13 @@ use crate::access::htup_details::{
     HeapTupleHeaderData, HEAP_MOVED_IN, HEAP_MOVED_OFF, HEAP_XMAX_COMMITTED, HEAP_XMAX_INVALID,
     HEAP_XMAX_IS_LOCKED_ONLY, HEAP_XMAX_IS_MULTI,
 };
+use crate::access::tableam::TM_Result;
 use crate::backend::access::transam::transam::transaction_id_did_commit;
 use crate::backend::access::transam::xact::TransactionIdIsCurrentTransactionId;
 use crate::backend::storage::ipc::procarray::transaction_xmin;
+use crate::backend::utils::time::combocid::{HeapTupleHeaderGetCmax, HeapTupleHeaderGetCmin};
 use crate::backend::utils::time::snapmgr::XidInMVCCSnapshot;
-use crate::c::TransactionId;
+use crate::c::{CommandId, TransactionId};
 use crate::shared_state::SharedState;
 use crate::utils::snapshot::SnapshotData;
 
@@ -202,6 +204,184 @@ async fn did_commit(shared: &Arc<SharedState>, xid: TransactionId) -> bool {
     transaction_id_did_commit(shared.clog(), shared.subtrans(), xid, transaction_xmin()).await
 }
 
+/// `TransactionIdIsInProgress` over the procarray (consults clog/subtrans).
+async fn xid_is_in_progress(shared: &Arc<SharedState>, xid: TransactionId) -> bool {
+    shared
+        .proc_array()
+        .transaction_id_is_in_progress(
+            shared.variable_cache(),
+            shared.clog(),
+            shared.subtrans(),
+            xid,
+        )
+        .await
+}
+
+/// `HeapTupleSatisfiesUpdate`: classify whether `tuple` (the on-page header,
+/// located at `t_self`) is updatable/deletable by the command `curcid`, returning
+/// a `TM_Result`. Translated from `HeapTupleSatisfiesUpdate` in
+/// backend/access/heap/heapam_visibility.c.
+///
+/// The C signature is `(HeapTuple htup, CommandId curcid, Buffer buffer)`; here
+/// the header + its `t_self` line-pointer TID are passed directly (the `buffer`
+/// existed only to address the page for `SetHintBits`, which we defer like the
+/// MVCC variant). `Updated` vs `Deleted` is decided by comparing `t_self` against
+/// the header's forward `ctid`.
+///
+/// Async (clog/subtrans/procarray probes). The caller holds the buffer content
+/// lock + pin; since the header is passed by value (copied out of the page) there
+/// is no lock held across these `.await`s.
+///
+/// Staged (multixact, rules.md s4): the `HEAP_XMAX_IS_MULTI` arms call
+/// `MultiXactIdIsRunning`/`HeapTupleGetUpdateXid`, which are not yet reachable;
+/// they `unimplemented!()` with a clear message. The common single-xid
+/// locker/updater paths are complete.
+#[allow(
+    clippy::too_many_lines,
+    clippy::if_not_else,
+    clippy::collapsible_if,
+    reason = "faithful 1:1 translation of HeapTupleSatisfiesUpdate's branch structure; reshaping would obscure the correspondence to the C"
+)]
+pub async fn HeapTupleSatisfiesUpdate(
+    shared: &Arc<SharedState>,
+    tuple: &HeapTupleHeaderData,
+    t_self: &crate::storage::itemptr::ItemPointerData,
+    curcid: CommandId,
+) -> TM_Result {
+    if !tuple.xmin_committed() {
+        if tuple.xmin_invalid() {
+            return TM_Result::Invisible;
+        }
+
+        // Used by pre-9.0 binary upgrades.
+        if (tuple.t_infomask & HEAP_MOVED_OFF) != 0 {
+            let xvac = tuple.get_xvac();
+            if TransactionIdIsCurrentTransactionId(xvac) {
+                return TM_Result::Invisible;
+            }
+            if !xid_is_in_progress(shared, xvac).await {
+                if did_commit(shared, xvac).await {
+                    return TM_Result::Invisible;
+                }
+                // else: treat xmin as committed (hint bit deferred).
+            }
+        }
+        // Used by pre-9.0 binary upgrades.
+        else if (tuple.t_infomask & HEAP_MOVED_IN) != 0 {
+            let xvac = tuple.get_xvac();
+            if !TransactionIdIsCurrentTransactionId(xvac) {
+                if xid_is_in_progress(shared, xvac).await {
+                    return TM_Result::Invisible;
+                }
+                if !did_commit(shared, xvac).await {
+                    return TM_Result::Invisible;
+                }
+            }
+        } else if TransactionIdIsCurrentTransactionId(tuple.get_raw_xmin()) {
+            if HeapTupleHeaderGetCmin(tuple).0 >= curcid.0 {
+                return TM_Result::Invisible; // inserted after scan started
+            }
+
+            if (tuple.t_infomask & HEAP_XMAX_INVALID) != 0 {
+                return TM_Result::Ok; // xid invalid
+            }
+
+            if HEAP_XMAX_IS_LOCKED_ONLY(tuple.t_infomask) {
+                // Even though this tuple was created by our own transaction, it
+                // might be locked by other transactions, if the original version
+                // was key-share locked when we updated it.
+                if (tuple.t_infomask & HEAP_XMAX_IS_MULTI) != 0 {
+                    unimplemented!(
+                        "HeapTupleSatisfiesUpdate: own-xact LOCKED_ONLY multixact -- staged with multixact (step 33)"
+                    );
+                }
+
+                // If the locker is gone, nothing of interest is left in this
+                // Xmax; otherwise report the tuple as locked/updated.
+                if !xid_is_in_progress(shared, tuple.get_raw_xmax()).await {
+                    return TM_Result::Ok;
+                }
+                return TM_Result::BeingModified;
+            }
+
+            if (tuple.t_infomask & HEAP_XMAX_IS_MULTI) != 0 {
+                unimplemented!(
+                    "HeapTupleSatisfiesUpdate: own-xact updater multixact -- staged with multixact (step 33)"
+                );
+            }
+
+            if !TransactionIdIsCurrentTransactionId(tuple.get_raw_xmax()) {
+                // deleting subtransaction must have aborted
+                return TM_Result::Ok;
+            }
+
+            if HeapTupleHeaderGetCmax(tuple).0 >= curcid.0 {
+                return TM_Result::SelfModified; // updated after scan started
+            }
+            return TM_Result::Invisible; // updated before scan started
+        } else if xid_is_in_progress(shared, tuple.get_raw_xmin()).await {
+            return TM_Result::Invisible;
+        } else if did_commit(shared, tuple.get_raw_xmin()).await {
+            // xmin committed (hint bit deferred).
+        } else {
+            // it must have aborted or crashed
+            return TM_Result::Invisible;
+        }
+    }
+
+    // by here, the inserting transaction has committed
+
+    if (tuple.t_infomask & HEAP_XMAX_INVALID) != 0 {
+        return TM_Result::Ok; // xid invalid or aborted
+    }
+
+    if (tuple.t_infomask & HEAP_XMAX_COMMITTED) != 0 {
+        if HEAP_XMAX_IS_LOCKED_ONLY(tuple.t_infomask) {
+            return TM_Result::Ok;
+        }
+        if *t_self != tuple.ctid {
+            return TM_Result::Updated; // updated by other
+        }
+        return TM_Result::Deleted; // deleted by other
+    }
+
+    if (tuple.t_infomask & HEAP_XMAX_IS_MULTI) != 0 {
+        unimplemented!(
+            "HeapTupleSatisfiesUpdate: committed-xmin multixact xmax -- staged with multixact (step 33)"
+        );
+    }
+
+    if TransactionIdIsCurrentTransactionId(tuple.get_raw_xmax()) {
+        if HEAP_XMAX_IS_LOCKED_ONLY(tuple.t_infomask) {
+            return TM_Result::BeingModified;
+        }
+        if HeapTupleHeaderGetCmax(tuple).0 >= curcid.0 {
+            return TM_Result::SelfModified; // updated after scan started
+        }
+        return TM_Result::Invisible; // updated before scan started
+    }
+
+    if xid_is_in_progress(shared, tuple.get_raw_xmax()).await {
+        return TM_Result::BeingModified;
+    }
+
+    if !did_commit(shared, tuple.get_raw_xmax()).await {
+        // it must have aborted or crashed
+        return TM_Result::Ok;
+    }
+
+    // xmax transaction committed
+
+    if HEAP_XMAX_IS_LOCKED_ONLY(tuple.t_infomask) {
+        return TM_Result::Ok;
+    }
+
+    if *t_self != tuple.ctid {
+        return TM_Result::Updated; // updated by other
+    }
+    TM_Result::Deleted // deleted by other
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +447,90 @@ mod tests {
 
         let snap = mvcc_snapshot(100, 200, 0);
         assert!(!heap_tuple_satisfies_mvcc(&shared, &hdr, &snap).await);
+    }
+
+    use crate::access::htup_details::HEAP_XMAX_COMMITTED;
+    use crate::access::tableam::TM_Result;
+    use crate::storage::itemptr::ItemPointerData;
+
+    fn tid(block: u32, off: u16) -> ItemPointerData {
+        let mut ip = ItemPointerData {
+            blkid: crate::storage::block::BlockIdData { hi: 0, lo: 0 },
+            posid: 0,
+        };
+        ip.set(block, off);
+        ip
+    }
+
+    // HeapTupleSatisfiesUpdate: a committed-xmin tuple with no xmax is updatable
+    // (TM_Ok) -- the committed-frozen-xmin early path, no clog probe.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn htsu_live_committed_is_ok() {
+        use crate::shared_state::{SharedState, SharedStateConfig};
+        let shared = SharedState::new(SharedStateConfig::default());
+
+        let mut hdr = zeroed_header();
+        hdr.set_xmin(FROZEN_TRANSACTION_ID);
+        hdr.set_xmin_frozen();
+        hdr.t_infomask |= HEAP_XMAX_INVALID;
+        let self_tid = tid(0, 1);
+        hdr.ctid = self_tid;
+
+        assert_eq!(
+            HeapTupleSatisfiesUpdate(&shared, &hdr, &self_tid, CommandId(5)).await,
+            TM_Result::Ok
+        );
+    }
+
+    // A committed-xmin tuple whose xmax is committed and whose t_ctid points at a
+    // DIFFERENT tuple -> TM_Updated (updated by another xact). ctid == self would
+    // be TM_Deleted.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn htsu_committed_xmax_updated_vs_deleted() {
+        use crate::shared_state::{SharedState, SharedStateConfig};
+        let shared = SharedState::new(SharedStateConfig::default());
+        let self_tid = tid(0, 1);
+
+        // xmax committed, ctid -> different tuple: updated by other.
+        let mut upd = zeroed_header();
+        upd.set_xmin(FROZEN_TRANSACTION_ID);
+        upd.set_xmin_frozen();
+        upd.set_xmax(TransactionId(50));
+        upd.t_infomask |= HEAP_XMAX_COMMITTED;
+        upd.ctid = tid(0, 2); // forward link
+        assert_eq!(
+            HeapTupleSatisfiesUpdate(&shared, &upd, &self_tid, CommandId(5)).await,
+            TM_Result::Updated
+        );
+
+        // xmax committed, ctid self-points: deleted by other.
+        let mut del = zeroed_header();
+        del.set_xmin(FROZEN_TRANSACTION_ID);
+        del.set_xmin_frozen();
+        del.set_xmax(TransactionId(50));
+        del.t_infomask |= HEAP_XMAX_COMMITTED;
+        del.ctid = self_tid;
+        assert_eq!(
+            HeapTupleSatisfiesUpdate(&shared, &del, &self_tid, CommandId(5)).await,
+            TM_Result::Deleted
+        );
+    }
+
+    // An xmin-invalid tuple is TM_Invisible.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn htsu_xmin_invalid_is_invisible() {
+        use crate::access::htup_details::HEAP_XMIN_INVALID;
+        use crate::shared_state::{SharedState, SharedStateConfig};
+        let shared = SharedState::new(SharedStateConfig::default());
+
+        let mut hdr = zeroed_header();
+        hdr.set_xmin(TransactionId(10));
+        hdr.t_infomask |= HEAP_XMIN_INVALID;
+        let self_tid = tid(0, 1);
+
+        assert_eq!(
+            HeapTupleSatisfiesUpdate(&shared, &hdr, &self_tid, CommandId(5)).await,
+            TM_Result::Invisible
+        );
     }
 }

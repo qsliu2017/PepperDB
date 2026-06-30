@@ -124,12 +124,43 @@ async fn create_main_fork(shared: &Arc<SharedState>, locator: RelFileLocator) {
 
 /// Insert one (a, b) int4 tuple into `relation` via heap_insert.
 async fn insert_row(shared: &Arc<SharedState>, relation: &Arc<RelationData>, a: i32, b: i32) {
+    let _ = insert_row_tid(shared, relation, a, b).await;
+}
+
+/// Insert one (a, b) int4 tuple, returning its stored TID.
+async fn insert_row_tid(
+    shared: &Arc<SharedState>,
+    relation: &Arc<RelationData>,
+    a: i32,
+    b: i32,
+) -> crate::storage::itemptr::ItemPointerData {
     let desc = relation.rd_att.clone().unwrap();
     let values = [Int32GetDatum(a), Int32GetDatum(b)];
     let isnull = [false, false];
     let mut tuple = heap_form_tuple(&desc, &values, &isnull);
     let cid = GetCurrentCommandId(true);
     heap_insert(shared, relation, &mut tuple, cid, 0).await;
+    tuple.t_self
+}
+
+/// Read the on-page tuple header at `tid` (a copy), for asserting xmax/infomask.
+async fn read_header_at(
+    shared: &Arc<SharedState>,
+    relation: &Arc<RelationData>,
+    tid: &crate::storage::itemptr::ItemPointerData,
+) -> crate::access::htup_details::HeapTupleHeaderData {
+    let buffer = super::read_relation_block(shared, relation, tid.block_number()).await;
+    let hdr = {
+        let pool = shared.buffers();
+        let _g = pool.content_share(buffer);
+        let page = pool.buffer_get_page(buffer);
+        let item_id = page.get_item_id(tid.offset_number());
+        let item = page.get_item(&item_id);
+        // SAFETY: a normal heap item begins with a HeapTupleHeaderData.
+        unsafe { std::ptr::read_unaligned(item.as_ptr().cast::<crate::access::htup_details::HeapTupleHeaderData>()) }
+    };
+    shared.buffers().release_buffer(buffer);
+    hdr
 }
 
 /// Scan `relation` under the current transaction snapshot, returning each tuple's
@@ -227,6 +258,213 @@ async fn own_command_insert_invisible_until_cci() {
         CommandCounterIncrement();
         let rows_next_command = scan_rows(&shared, &rel).await;
         assert_eq!(rows_next_command, vec![(7, 7)]);
+    }))
+    .await;
+}
+
+// ---------------------------------------------------------------------------
+// M8: update / delete / row-lock (step 33).
+// ---------------------------------------------------------------------------
+
+use crate::access::htup_details::{
+    HEAP_XMAX_EXCL_LOCK, HEAP_XMAX_INVALID, HEAP_XMAX_LOCK_ONLY,
+};
+use crate::access::tableam::TM_Result;
+use crate::backend::access::heap::heapam_visibility::HeapTupleSatisfiesUpdate;
+use crate::nodes::lockoptions::{LockTupleMode, LockWaitPolicy};
+
+// heap_delete on a live own-xact tuple -> TM_Ok; xmax is set (XMAX_INVALID
+// cleared) and the tuple is invisible to a fresh post-CCI snapshot.
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_live_tuple_then_invisible() {
+    let shared = new_shared();
+    Box::pin(in_all_scopes(shared.clone(), |shared| async move {
+        StartTransactionCommand(&shared).await;
+        let loc = rloc(10);
+        create_main_fork(&shared, loc).await;
+        let rel = make_relation(loc, two_int4_desc());
+
+        let tid = insert_row_tid(&shared, &rel, 11, 22).await;
+        CommandCounterIncrement();
+        // Visible before delete.
+        assert_eq!(scan_rows(&shared, &rel).await, vec![(11, 22)]);
+
+        let cid = GetCurrentCommandId(true);
+        let (res, _tmfd) =
+            super::heap_delete(&shared, &rel, &tid, cid, None, true, false).await;
+        assert_eq!(res, TM_Result::Ok);
+
+        // xmax was stamped (HEAP_XMAX_INVALID cleared).
+        let hdr = read_header_at(&shared, &rel, &tid).await;
+        assert!(hdr.get_raw_xmax().is_valid(), "xmax must be set after delete");
+        assert_eq!(hdr.t_infomask & HEAP_XMAX_INVALID, 0);
+
+        // Invisible to a fresh snapshot in the next command.
+        CommandCounterIncrement();
+        assert_eq!(scan_rows(&shared, &rel).await, Vec::<(i32, i32)>::new());
+    }))
+    .await;
+}
+
+// heap_update on a live tuple -> TM_Ok; old version's t_ctid points to the new
+// version, the new (a,b) is visible, and the old (a,b) is not.
+#[tokio::test(flavor = "multi_thread")]
+async fn update_live_tuple_chains_and_swaps_visibility() {
+    let shared = new_shared();
+    Box::pin(in_all_scopes(shared.clone(), |shared| async move {
+        StartTransactionCommand(&shared).await;
+        let loc = rloc(11);
+        create_main_fork(&shared, loc).await;
+        let rel = make_relation(loc, two_int4_desc());
+
+        let otid = insert_row_tid(&shared, &rel, 1, 2).await;
+        CommandCounterIncrement();
+        assert_eq!(scan_rows(&shared, &rel).await, vec![(1, 2)]);
+
+        // Build the new version (3, 4).
+        let desc = rel.rd_att.clone().unwrap();
+        let mut newtup =
+            heap_form_tuple(&desc, &[Int32GetDatum(3), Int32GetDatum(4)], &[false, false]);
+
+        let cid = GetCurrentCommandId(true);
+        let (res, _lm, _ui) =
+            super::heap_update(&shared, &rel, &otid, &mut newtup, cid, None, true).await;
+        assert_eq!(res, TM_Result::Ok);
+
+        // Old version's xmax set + t_ctid points at the new version.
+        let old_hdr = read_header_at(&shared, &rel, &otid).await;
+        assert!(old_hdr.get_raw_xmax().is_valid());
+        assert_eq!(old_hdr.t_infomask & HEAP_XMAX_INVALID, 0);
+        assert_eq!(old_hdr.ctid, newtup.t_self);
+        assert_ne!(old_hdr.ctid, otid, "old ctid must point forward to new version");
+
+        // New version visible, old not, after the command boundary.
+        CommandCounterIncrement();
+        assert_eq!(scan_rows(&shared, &rel).await, vec![(3, 4)]);
+    }))
+    .await;
+}
+
+// heap_lock_tuple FOR UPDATE on a live tuple -> TM_Ok; the lock bits are set
+// (exclusive lock-only xmax), and the tuple stays visible.
+#[tokio::test(flavor = "multi_thread")]
+async fn lock_tuple_for_update_sets_lock_bits() {
+    let shared = new_shared();
+    Box::pin(in_all_scopes(shared.clone(), |shared| async move {
+        StartTransactionCommand(&shared).await;
+        let loc = rloc(12);
+        create_main_fork(&shared, loc).await;
+        let rel = make_relation(loc, two_int4_desc());
+
+        let tid = insert_row_tid(&shared, &rel, 5, 6).await;
+        CommandCounterIncrement();
+
+        let mut tuple = HeapTupleData::null(tid, rel.rd_id);
+        tuple.t_self = tid;
+        let cid = GetCurrentCommandId(true);
+        let (res, _tmfd, buffer) = super::heap_lock_tuple(
+            &shared,
+            &rel,
+            &mut tuple,
+            cid,
+            LockTupleMode::LockTupleExclusive,
+            LockWaitPolicy::LockWaitBlock,
+            false,
+        )
+        .await;
+        assert_eq!(res, TM_Result::Ok);
+        // heap_lock_tuple leaves the buffer pinned (PG's *buffer out-param).
+        shared.buffers().release_buffer(buffer);
+
+        let hdr = read_header_at(&shared, &rel, &tid).await;
+        assert!(hdr.get_raw_xmax().is_valid(), "lock xmax must be set");
+        assert_eq!(hdr.t_infomask & HEAP_XMAX_INVALID, 0);
+        assert_ne!(hdr.t_infomask & HEAP_XMAX_LOCK_ONLY, 0, "lock-only bit set");
+        assert_ne!(hdr.t_infomask & HEAP_XMAX_EXCL_LOCK, 0, "exclusive lock bit set");
+
+        // A FOR UPDATE lock does not affect visibility.
+        CommandCounterIncrement();
+        assert_eq!(scan_rows(&shared, &rel).await, vec![(5, 6)]);
+    }))
+    .await;
+}
+
+// HeapTupleSatisfiesUpdate classification: a live own-xact tuple (from a prior
+// command) is updatable (TM_Ok); after delete it is self-modified-this-command
+// (TM_SelfModified); a fresh snapshot in the next command sees it deleted-by-self
+// as TM_Invisible (own deleter, cmax < curcid).
+#[tokio::test(flavor = "multi_thread")]
+async fn htsu_live_then_deleted_classification() {
+    let shared = new_shared();
+    Box::pin(in_all_scopes(shared.clone(), |shared| async move {
+        StartTransactionCommand(&shared).await;
+        let loc = rloc(13);
+        create_main_fork(&shared, loc).await;
+        let rel = make_relation(loc, two_int4_desc());
+
+        let tid = insert_row_tid(&shared, &rel, 9, 9).await;
+        CommandCounterIncrement();
+
+        // Live tuple, inserted by a prior command -> updatable.
+        let cid_now = GetCurrentCommandId(false);
+        let hdr = read_header_at(&shared, &rel, &tid).await;
+        assert_eq!(
+            HeapTupleSatisfiesUpdate(&shared, &hdr, &tid, cid_now).await,
+            TM_Result::Ok
+        );
+
+        // Delete it in the current command.
+        let del_cid = GetCurrentCommandId(true);
+        let (res, _tmfd) =
+            super::heap_delete(&shared, &rel, &tid, del_cid, None, true, false).await;
+        assert_eq!(res, TM_Result::Ok);
+
+        // HTSU at the deleting command's curcid: deleted after scan started by us
+        // -> TM_SelfModified (cmax >= curcid).
+        let hdr_after = read_header_at(&shared, &rel, &tid).await;
+        assert_eq!(
+            HeapTupleSatisfiesUpdate(&shared, &hdr_after, &tid, del_cid).await,
+            TM_Result::SelfModified
+        );
+
+        // From a later command (curcid past the delete) -> deleted before scan
+        // started by us -> TM_Invisible.
+        CommandCounterIncrement();
+        let later_cid = GetCurrentCommandId(false);
+        assert_eq!(
+            HeapTupleSatisfiesUpdate(&shared, &hdr_after, &tid, later_cid).await,
+            TM_Result::Invisible
+        );
+    }))
+    .await;
+}
+
+// Deleting an already-(self-)deleted tuple returns a clean TM_Result, not a panic.
+// The first delete is in command N; after the command boundary, the second delete
+// in command N+1 sees the tuple deleted-before-scan-by-self -> TM_Invisible, which
+// heap_delete reports via an ERROR ("invisible tuple"), so use the HTSU classify +
+// the in-command SelfModified path instead.
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_already_self_deleted_same_command_self_modified() {
+    let shared = new_shared();
+    Box::pin(in_all_scopes(shared.clone(), |shared| async move {
+        StartTransactionCommand(&shared).await;
+        let loc = rloc(14);
+        create_main_fork(&shared, loc).await;
+        let rel = make_relation(loc, two_int4_desc());
+
+        let tid = insert_row_tid(&shared, &rel, 8, 8).await;
+        CommandCounterIncrement();
+
+        let cid = GetCurrentCommandId(true);
+        let (r1, _t1) = super::heap_delete(&shared, &rel, &tid, cid, None, true, false).await;
+        assert_eq!(r1, TM_Result::Ok);
+
+        // Second delete in the SAME command: the tuple's cmax == curcid, so HTSU
+        // returns TM_SelfModified and heap_delete returns it (no panic, no ERROR).
+        let (r2, tmfd) = super::heap_delete(&shared, &rel, &tid, cid, None, true, false).await;
+        assert_eq!(r2, TM_Result::SelfModified);
+        assert!(tmfd.ctid.is_valid());
     }))
     .await;
 }
