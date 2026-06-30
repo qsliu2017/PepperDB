@@ -220,6 +220,23 @@ pub fn send_row_description_message(typeinfo: &TupleDesc, formats: &[i16]) {
     pqcomm::pq_putmessage_sync(buf.msgtype, &buf.data);
 }
 
+/// Send one all-text DataRow ('D') to the frontend: one column per `values`
+/// entry, each sent as counted text (a `None` is a SQL NULL). Mirrors the
+/// `do_text_output_*` row emission used by SHOW / the utility tuple-output path,
+/// without the executor slot machinery. SYNC (buffers via `pq_putmessage_sync`).
+pub fn send_text_data_row(values: &[Option<&str>]) {
+    let mut buf = PqMsg::default();
+    buf.begin_message(PQMSG_DATA_ROW);
+    buf.send_int16(values.len() as u16);
+    for v in values {
+        match v {
+            Some(s) => buf.send_counted_text(s),
+            None => buf.send_int32(u32::MAX), // -1 length == SQL NULL
+        }
+    }
+    pqcomm::pq_putmessage_sync(buf.msgtype, &buf.data);
+}
+
 /// Decode a NUL-padded `NameData` to its `&str` (up to the first NUL). M1 names
 /// are ASCII (e.g. "?column?"), so a lossy decode is faithful.
 fn name_str(name: &crate::c::NameData) -> &str {

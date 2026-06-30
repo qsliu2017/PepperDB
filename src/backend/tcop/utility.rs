@@ -61,11 +61,95 @@ pub async fn standard_process_utility(
         .as_ref()
         .unwrap_or_else(|| unreachable!("a CMD_UTILITY PlannedStmt carries its utilityStmt"));
 
+    let is_top_level = context == ProcessUtilityContext::Toplevel;
+
     match parsetree {
         Node::CreateStmt(_) | Node::IndexStmt(_) => {
             process_utility_slow(shared, pstmt, parsetree, query_string, context, dest, qc).await;
         }
+        Node::TransactionStmt(stmt) => {
+            process_transaction_stmt(stmt, is_top_level, qc);
+        }
+        Node::VariableSetStmt(stmt) => {
+            crate::backend::utils::misc::guc_funcs::ExecSetVariableStmt(stmt, is_top_level);
+        }
+        Node::VariableShowStmt(stmt) => {
+            let name = stmt.name.as_deref().unwrap_or("");
+            crate::backend::utils::misc::guc_funcs::GetPGVariable(name, dest);
+        }
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
+    }
+}
+
+/// PG `standard_ProcessUtility`'s `T_TransactionStmt` arm: dispatch each
+/// `TransactionStmtKind` to the xact transaction-block layer (xact.rs). The
+/// underlying block-state machine drives the per-statement commit/abort wrapping in
+/// the main loop. COMMIT/PREPARE that the block layer turns into a rollback report
+/// the `ROLLBACK` completion tag (PG's "report unsuccessful commit").
+fn process_transaction_stmt(
+    stmt: &crate::nodes::parsenodes::TransactionStmt,
+    is_top_level: bool,
+    qc: Option<&mut QueryCompletion>,
+) {
+    use crate::backend::access::transam::xact::{
+        BeginTransactionBlock, DefineSavepoint, EndTransactionBlock, PrepareTransactionBlock,
+        ReleaseSavepoint, RequireTransactionBlock, RollbackToSavepoint, UserAbortTransactionBlock,
+    };
+    use crate::nodes::parsenodes::TransactionStmtKind as Kind;
+    use crate::nodes::nodes::Node as N;
+
+    match stmt.kind {
+        // START TRANSACTION (SQL99) is identical to BEGIN.
+        Kind::BEGIN | Kind::START => {
+            BeginTransactionBlock();
+            // Apply any transaction_mode_list items as SET LOCAL on the GUCs.
+            for item in &stmt.options {
+                let N::DefElem(item) = item else { continue };
+                let defname = item.defname.as_deref().unwrap_or("");
+                if matches!(
+                    defname,
+                    "transaction_isolation" | "transaction_read_only" | "transaction_deferrable"
+                ) {
+                    let args: Vec<N> = item.arg.iter().cloned().collect();
+                    crate::backend::utils::misc::guc_funcs::SetPGVariable(defname, &args, true);
+                }
+            }
+        }
+        Kind::COMMIT => {
+            // A COMMIT the block layer turns into a rollback reports ROLLBACK.
+            if !EndTransactionBlock(stmt.chain)
+                && let Some(qc) = qc
+            {
+                qc.set(CommandTag::Rollback, 0);
+            }
+        }
+        Kind::PREPARE => {
+            // Two-phase commit is deferred; the block-state transition is faithful.
+            if !PrepareTransactionBlock(stmt.gid.as_deref().unwrap_or(""))
+                && let Some(qc) = qc
+            {
+                qc.set(CommandTag::Rollback, 0);
+            }
+        }
+        Kind::COMMIT_PREPARED | Kind::ROLLBACK_PREPARED => {
+            not_yet_reachable("ProcessUtility: two-phase COMMIT/ROLLBACK PREPARED");
+        }
+        Kind::ROLLBACK => {
+            UserAbortTransactionBlock(stmt.chain);
+        }
+        Kind::SAVEPOINT => {
+            RequireTransactionBlock(is_top_level, "SAVEPOINT");
+            DefineSavepoint(stmt.savepoint_name.as_deref());
+        }
+        Kind::RELEASE => {
+            RequireTransactionBlock(is_top_level, "RELEASE SAVEPOINT");
+            ReleaseSavepoint(stmt.savepoint_name.as_deref().unwrap_or(""));
+        }
+        Kind::ROLLBACK_TO => {
+            RequireTransactionBlock(is_top_level, "ROLLBACK TO SAVEPOINT");
+            RollbackToSavepoint(stmt.savepoint_name.as_deref().unwrap_or(""));
+            // CommitTransactionCommand re-defines the savepoint (SubRestart).
+        }
     }
 }
 
@@ -133,9 +217,26 @@ async fn process_utility_slow(
 /// PG `CreateCommandTag` (the M2-reachable arms): the completion tag for a raw
 /// parse node. `CreateStmt` -> `CREATE TABLE`; other tags grow at their milestones.
 pub fn create_command_tag(parsetree: &Node) -> CommandTag {
+    use crate::nodes::parsenodes::{TransactionStmtKind as TxKind, VariableSetKind};
     match parsetree {
         Node::CreateStmt(_) => CommandTag::CreateTable,
         Node::IndexStmt(_) => CommandTag::CreateIndex,
+        Node::TransactionStmt(stmt) => match stmt.kind {
+            TxKind::BEGIN => CommandTag::Begin,
+            TxKind::START => CommandTag::StartTransaction,
+            TxKind::COMMIT => CommandTag::Commit,
+            TxKind::ROLLBACK | TxKind::ROLLBACK_TO => CommandTag::Rollback,
+            TxKind::SAVEPOINT => CommandTag::Savepoint,
+            TxKind::RELEASE => CommandTag::Release,
+            TxKind::PREPARE => CommandTag::PrepareTransaction,
+            TxKind::COMMIT_PREPARED => CommandTag::CommitPrepared,
+            TxKind::ROLLBACK_PREPARED => CommandTag::RollbackPrepared,
+        },
+        Node::VariableSetStmt(stmt) => match stmt.kind {
+            VariableSetKind::RESET | VariableSetKind::RESET_ALL => CommandTag::Reset,
+            _ => CommandTag::Set,
+        },
+        Node::VariableShowStmt(_) => CommandTag::Show,
         other => not_yet_reachable(&format!("CreateCommandTag: {other:?}")),
     }
 }

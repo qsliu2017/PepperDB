@@ -587,11 +587,17 @@ pub fn InitializeSystemUser(authn_id: &str, auth_method: &str) {
 pub fn GetSystemUser() -> Option<String> {
     unimplemented!()
 }
+/// PG `superuser`: is the current effective user a superuser?
 pub fn superuser() -> bool {
-    unimplemented!()
+    superuser_arg(crate::backend::utils::init::miscinit::get_user_id())
 }
+
+/// PG `superuser_arg`: is `roleid` a superuser? The pg_authid syscache lookup is
+/// staged (catalog roles are deferred); the bootstrap superuser is recognized
+/// directly (PG's "special escape path"), which covers the seeded `postgres` role
+/// every backend authenticates as today.
 pub fn superuser_arg(roleid: Oid) -> bool {
-    unimplemented!()
+    roleid == crate::catalog::pg_authid::BOOTSTRAP_SUPERUSERID
 }
 
 /// The three POSTGRES processing modes. (C enum, sequential.)

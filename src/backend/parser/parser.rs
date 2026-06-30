@@ -12,7 +12,8 @@ use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
 use crate::nodes::parsenodes::{
     A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, DeleteStmt, IndexElem, IndexStmt,
     InsertStmt, LockingClause, MergeStmt, MergeWhenClause, RawStmt, ResTarget, ReturningClause,
-    SelectStmt, SetOperation, SortByDir, SortByNulls, TypeName, UpdateStmt, ValUnion,
+    SelectStmt, SetOperation, SortByDir, SortByNulls, TransactionStmt, TransactionStmtKind,
+    TypeName, UpdateStmt, ValUnion, VariableSetKind, VariableSetStmt, VariableShowStmt,
 };
 use crate::nodes::primnodes::{MergeMatchKind, OnCommitAction, OverridingKind, RangeVar};
 use crate::nodes::value::{makeFloat, makeInteger, makeString};
@@ -681,6 +682,121 @@ pub fn make_raw_stmt(stmt: Node) -> Node {
     }))
 }
 
+// --- M9 (step 36): transaction-control + SET/SHOW/RESET node builders ---------
+
+/// gram.y `TransactionStmt`/`TransactionStmtLegacy` actions.
+pub fn make_transaction_stmt(
+    kind: TransactionStmtKind,
+    options: Vec<Node>,
+    savepoint_name: Option<String>,
+    gid: Option<String>,
+    chain: bool,
+) -> Node {
+    Node::TransactionStmt(Box::new(TransactionStmt {
+        kind,
+        options,
+        savepoint_name,
+        gid,
+        chain,
+        location: -1,
+    }))
+}
+
+/// gram.y `transaction_mode_item` -> makeDefElem(name, makeStringConst(value)).
+pub fn make_def_elem_str(name: &str, value: &str) -> Node {
+    let de =
+        crate::nodes::makefuncs::makeDefElem(name, Some(make_string_const(value.to_string())), -1);
+    Node::DefElem(Box::new(de))
+}
+
+/// gram.y `transaction_mode_item` -> makeDefElem(name, makeIntConst(bool)).
+pub fn make_def_elem_bool(name: &str, value: bool) -> Node {
+    let de = crate::nodes::makefuncs::makeDefElem(name, Some(make_int_const(i32::from(value))), -1);
+    Node::DefElem(Box::new(de))
+}
+
+/// Build a VariableSetStmt node from its parts.
+fn variable_set_stmt(kind: VariableSetKind, name: Option<String>, args: Vec<Node>) -> Node {
+    Node::VariableSetStmt(Box::new(VariableSetStmt {
+        kind,
+        name,
+        args,
+        jumble_args: false,
+        is_local: false,
+        location: -1,
+    }))
+}
+
+/// gram.y `VariableSetStmt`: stamp `is_local` onto a `set_rest` result.
+pub fn set_variable_local(stmt: Node, is_local: bool) -> Node {
+    let Node::VariableSetStmt(mut n) = stmt else {
+        unreachable!("set_rest yields a VariableSetStmt");
+    };
+    n.is_local = is_local;
+    Node::VariableSetStmt(n)
+}
+
+/// gram.y `generic_set`: SET var {TO|=} value-list.
+pub fn make_set_value(name: String, args: Vec<Node>) -> Node {
+    variable_set_stmt(VariableSetKind::SET_VALUE, Some(name), args)
+}
+
+/// gram.y `generic_set`: SET var {TO|=} DEFAULT.
+pub fn make_set_default(name: String) -> Node {
+    variable_set_stmt(VariableSetKind::SET_DEFAULT, Some(name), Vec::new())
+}
+
+/// gram.y `set_rest_more`: SET var FROM CURRENT.
+pub fn make_set_current(name: String) -> Node {
+    variable_set_stmt(VariableSetKind::SET_CURRENT, Some(name), Vec::new())
+}
+
+/// gram.y `set_rest`: SET TRANSACTION / SESSION CHARACTERISTICS (VAR_SET_MULTI).
+pub fn make_set_multi(name: &str, args: Vec<Node>) -> Node {
+    let mut n = variable_set_stmt(VariableSetKind::SET_MULTI, Some(name.to_string()), args);
+    if let Node::VariableSetStmt(s) = &mut n {
+        s.jumble_args = true;
+    }
+    n
+}
+
+/// gram.y `set_rest_more`: SET TIME ZONE value (-> "timezone", or DEFAULT if empty).
+pub fn make_set_timezone(value: Option<String>) -> Node {
+    let Some(v) = value else {
+        return make_set_default("timezone".to_string());
+    };
+    let mut n = variable_set_stmt(VariableSetKind::SET_VALUE, Some("timezone".to_string()), vec![
+        make_string_const(v),
+    ]);
+    if let Node::VariableSetStmt(s) = &mut n {
+        s.jumble_args = true;
+    }
+    n
+}
+
+/// gram.y `set_rest_more`: SET TRANSACTION SNAPSHOT 'id' (VAR_SET_MULTI). The
+/// snapshot-import execution itself is staged (guc_funcs.rs).
+pub fn make_set_transaction_snapshot(id: String) -> Node {
+    variable_set_stmt(VariableSetKind::SET_MULTI, Some("TRANSACTION SNAPSHOT".to_string()), vec![
+        make_string_const(id),
+    ])
+}
+
+/// gram.y `reset_rest`/`generic_reset`: RESET var.
+pub fn make_reset(name: String) -> Node {
+    variable_set_stmt(VariableSetKind::RESET, Some(name), Vec::new())
+}
+
+/// gram.y `reset_rest`: RESET ALL.
+pub fn make_reset_all() -> Node {
+    variable_set_stmt(VariableSetKind::RESET_ALL, None, Vec::new())
+}
+
+/// gram.y `VariableShowStmt`.
+pub fn make_variable_show(name: String) -> Node {
+    Node::VariableShowStmt(Box::new(VariableShowStmt { name: Some(name) }))
+}
+
 /// PG `raw_parser`: parse `s` into a list of RawStmt nodes. Only RAW_PARSE_DEFAULT
 /// (a `;`-separated command list) is supported in M1; the MODE_* alternate entry
 /// points (type-name / plpgsql) are added with that grammar.
@@ -1163,5 +1279,100 @@ mod tests {
         assert_eq!(edata.elevel, crate::utils::elog::ERROR);
         assert_eq!(edata.sqlerrcode, crate::utils::errcodes::ERRCODE_SYNTAX_ERROR);
         assert!(edata.message.as_deref().unwrap_or("").contains("syntax error"));
+    }
+
+    // --- M9: transaction control + SET/SHOW/RESET parsing --------------------
+
+    fn one_tx(s: &str) -> TransactionStmt {
+        let list = parse(s);
+        let Node::TransactionStmt(t) = one_stmt(&list) else {
+            panic!("not a TransactionStmt: {s}");
+        };
+        (**t).clone()
+    }
+
+    fn one_set(s: &str) -> VariableSetStmt {
+        let list = parse(s);
+        let Node::VariableSetStmt(v) = one_stmt(&list) else {
+            panic!("not a VariableSetStmt: {s}");
+        };
+        (**v).clone()
+    }
+
+    #[test]
+    fn transaction_stmt_kinds() {
+        use TransactionStmtKind as K;
+        assert_eq!(one_tx("BEGIN").kind, K::BEGIN);
+        assert_eq!(one_tx("BEGIN WORK").kind, K::BEGIN);
+        assert_eq!(one_tx("BEGIN TRANSACTION").kind, K::BEGIN);
+        assert_eq!(one_tx("START TRANSACTION").kind, K::START);
+        assert_eq!(one_tx("COMMIT").kind, K::COMMIT);
+        assert_eq!(one_tx("END").kind, K::COMMIT);
+        assert_eq!(one_tx("COMMIT WORK").kind, K::COMMIT);
+        assert_eq!(one_tx("ROLLBACK").kind, K::ROLLBACK);
+        assert_eq!(one_tx("ABORT").kind, K::ROLLBACK);
+
+        let sp = one_tx("SAVEPOINT s");
+        assert_eq!(sp.kind, K::SAVEPOINT);
+        assert_eq!(sp.savepoint_name.as_deref(), Some("s"));
+
+        assert_eq!(one_tx("RELEASE s").kind, K::RELEASE);
+        assert_eq!(one_tx("RELEASE SAVEPOINT s").savepoint_name.as_deref(), Some("s"));
+        assert_eq!(one_tx("ROLLBACK TO s").kind, K::ROLLBACK_TO);
+        assert_eq!(one_tx("ROLLBACK TO SAVEPOINT s").savepoint_name.as_deref(), Some("s"));
+    }
+
+    #[test]
+    fn transaction_chain_and_modes() {
+        assert!(one_tx("COMMIT AND CHAIN").chain);
+        assert!(!one_tx("COMMIT AND NO CHAIN").chain);
+        assert!(!one_tx("COMMIT").chain);
+
+        // BEGIN with a transaction_mode_list -> options DefElems.
+        let b = one_tx("BEGIN ISOLATION LEVEL SERIALIZABLE, READ ONLY");
+        assert_eq!(b.options.len(), 2, "two transaction modes");
+        assert_eq!(one_tx("PREPARE TRANSACTION 'gid1'").gid.as_deref(), Some("gid1"));
+    }
+
+    #[test]
+    fn variable_set_kinds() {
+        use crate::nodes::parsenodes::VariableSetKind as K;
+        let v = one_set("SET search_path = 'x'");
+        assert_eq!(v.kind, K::SET_VALUE);
+        assert_eq!(v.name.as_deref(), Some("search_path"));
+        assert!(!v.is_local);
+
+        assert_eq!(one_set("SET x TO 5").kind, K::SET_VALUE);
+        assert_eq!(one_set("SET x TO DEFAULT").kind, K::SET_DEFAULT);
+        assert_eq!(one_set("SET x = DEFAULT").kind, K::SET_DEFAULT);
+        assert_eq!(one_set("SET x FROM CURRENT").kind, K::SET_CURRENT);
+        assert!(one_set("SET LOCAL x = 1").is_local);
+        assert!(!one_set("SET SESSION x = 1").is_local);
+        assert_eq!(one_set("RESET x").kind, K::RESET);
+        assert_eq!(one_set("RESET ALL").kind, K::RESET_ALL);
+
+        // SET TRANSACTION -> VAR_SET_MULTI named "TRANSACTION".
+        let m = one_set("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+        assert_eq!(m.kind, K::SET_MULTI);
+        assert_eq!(m.name.as_deref(), Some("TRANSACTION"));
+
+        // SET TIME ZONE -> name "timezone".
+        assert_eq!(one_set("SET TIME ZONE 'UTC'").name.as_deref(), Some("timezone"));
+        assert_eq!(one_set("SET TIME ZONE DEFAULT").kind, K::SET_DEFAULT);
+    }
+
+    #[test]
+    fn variable_show_names() {
+        let names = |s: &str| {
+            let list = parse(s);
+            let Node::VariableShowStmt(v) = one_stmt(&list) else {
+                panic!("not a VariableShowStmt: {s}");
+            };
+            v.name.clone().unwrap_or_default()
+        };
+        assert_eq!(names("SHOW search_path"), "search_path");
+        assert_eq!(names("SHOW ALL"), "all");
+        assert_eq!(names("SHOW TIME ZONE"), "timezone");
+        assert_eq!(names("SHOW TRANSACTION ISOLATION LEVEL"), "transaction_isolation");
     }
 }

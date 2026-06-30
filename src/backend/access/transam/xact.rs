@@ -804,7 +804,10 @@ fn start_transaction(shared: &Arc<SharedState>) {
         with_xact(|x| x.xact_start_timestamp = x.stmt_start_timestamp);
     }
 
-    // AtStart_GUC / AtStart_Cache / AfterTriggerBeginXact: stubs.
+    // AtStart_GUC: enter GUC nest level 1 so this transaction's SET / SET LOCAL
+    // changes stack at level 1 and are committed/reverted by AtEOXact_GUC. (Cache /
+    // AfterTriggerBeginXact remain stubs.)
+    crate::backend::utils::misc::guc::AtStart_GUC();
     at_start_cache();
 
     with_xact(|x| x.top_mut().state = TransState::InProgress);
@@ -999,6 +1002,9 @@ async fn commit_transaction(shared: &Arc<SharedState>) {
     release_resources_phased(true);
 
     // AtEOXact_* coordinators: most are deferred subsystems (stubs).
+    // AtEOXact_GUC(true, 1): commit transient GUC changes (SET LOCAL is discarded,
+    // session SET is kept) down to the transaction-start nest level.
+    crate::backend::utils::misc::guc::AtEOXact_GUC(true, 1);
     at_eoxact_combo_cid();
     at_eoxact_snapshot(true, false);
 
@@ -1137,6 +1143,9 @@ async fn abort_transaction(shared: &Arc<SharedState>) {
     // Post-abort cleanup (phased, is_commit=false).
     call_xact_callbacks(XactEvent::Abort);
     release_resources_phased(false);
+    // AtEOXact_GUC(false, 1): roll back ALL transient GUC changes (both SET and SET
+    // LOCAL) made since transaction start.
+    crate::backend::utils::misc::guc::AtEOXact_GUC(false, 1);
     at_eoxact_combo_cid();
 
     crate::session::current().dec_interrupt_holdoff_count();

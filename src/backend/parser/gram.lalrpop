@@ -22,7 +22,11 @@ use crate::backend::parser::parser::{
     make_join_expr, make_alias, apply_rangevar_alias, apply_join_alias,
     make_update_stmt, make_delete_stmt, make_merge_stmt, make_set_target,
     make_returning_clause, make_locking_clause, make_merge_when, set_select_locking,
+    make_transaction_stmt, make_def_elem_str, make_def_elem_bool, set_variable_local,
+    make_set_value, make_set_default, make_set_current, make_set_multi, make_set_timezone,
+    make_set_transaction_snapshot, make_reset, make_reset_all, make_variable_show,
 };
+use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
 use crate::nodes::nodes::{CmdType, JoinType, Node};
 use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
 use crate::nodes::primnodes::MergeMatchKind;
@@ -119,6 +123,43 @@ extern {
         "MATCHED"  => Token::Keyword("matched"),
         "DO"       => Token::Keyword("do"),
         "NOTHING"  => Token::Keyword("nothing"),
+        // M9 (step 36): transaction control + SET/SHOW/RESET keywords.
+        "BEGIN"    => Token::Keyword("begin"),
+        "COMMIT"   => Token::Keyword("commit"),
+        "ROLLBACK" => Token::Keyword("rollback"),
+        "ABORT"    => Token::Keyword("abort"),
+        "START"    => Token::Keyword("start"),
+        "SAVEPOINT" => Token::Keyword("savepoint"),
+        "RELEASE"  => Token::Keyword("release"),
+        "PREPARE"  => Token::Keyword("prepare"),
+        "PREPARED" => Token::Keyword("prepared"),
+        "TRANSACTION" => Token::Keyword("transaction"),
+        "WORK"     => Token::Keyword("work"),
+        "CHAIN"    => Token::Keyword("chain"),
+        "TO"       => Token::Keyword("to"),
+        "SHOW"     => Token::Keyword("show"),
+        "RESET"    => Token::Keyword("reset"),
+        "LOCAL"    => Token::Keyword("local"),
+        "SESSION"  => Token::Keyword("session"),
+        "CHARACTERISTICS" => Token::Keyword("characteristics"),
+        "DEFAULT"  => Token::Keyword("default"),
+        "CURRENT"  => Token::Keyword("current"),
+        "ISOLATION" => Token::Keyword("isolation"),
+        "LEVEL"    => Token::Keyword("level"),
+        "READ"     => Token::Keyword("read"),
+        "WRITE"    => Token::Keyword("write"),
+        "ONLY"     => Token::Keyword("only"),
+        "DEFERRABLE" => Token::Keyword("deferrable"),
+        "COMMITTED" => Token::Keyword("committed"),
+        "UNCOMMITTED" => Token::Keyword("uncommitted"),
+        "REPEATABLE" => Token::Keyword("repeatable"),
+        "SERIALIZABLE" => Token::Keyword("serializable"),
+        "TIME"     => Token::Keyword("time"),
+        "ZONE"     => Token::Keyword("zone"),
+        "SNAPSHOT" => Token::Keyword("snapshot"),
+        "AUTHORIZATION" => Token::Keyword("authorization"),
+        "TRUE"     => Token::Keyword("true"),
+        "FALSE"    => Token::Keyword("false"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -164,9 +205,11 @@ pub Stmtmulti: RawStmtVec = {
     },
 };
 
-// gram.y `toplevel_stmt`: stmt (+ TransactionStmtLegacy, added with BEGIN/END).
+// gram.y `toplevel_stmt`: stmt | TransactionStmtLegacy. BEGIN/END are accepted
+// only at top level (PG's toplevel_stmt), keeping them usable as labels elsewhere.
 TopLevelStmt: Option<Node> = {
     Stmt,
+    <s:TransactionStmtLegacy> => Some(s),
 };
 
 // gram.y `stmt`: the giant alternation over every statement kind. Grows one
@@ -179,6 +222,9 @@ Stmt: Option<Node> = {
     <s:UpdateStmt> => Some(s),
     <s:DeleteStmt> => Some(s),
     <s:MergeStmt> => Some(s),
+    <s:TransactionStmt> => Some(s),
+    <s:VariableSetStmt> => Some(s),
+    <s:VariableShowStmt> => Some(s),
     => None,            // empty statement (e.g. trailing ';')
 };
 
@@ -471,6 +517,183 @@ GenericType: TypeName = {
 // the grammar; M2 accepts a bare IDENT.
 ColId: String = {
     <n:"IDENT"> => n,
+};
+
+// ===========================================================================
+//  Transaction control (M9, step 36): gram.y `TransactionStmt` +
+//  `TransactionStmtLegacy`.
+// ===========================================================================
+
+// gram.y `TransactionStmt`: the non-legacy transaction-control statements.
+TransactionStmt: Node = {
+    "ABORT" OptTransaction <chain:OptTransactionChain> =>
+        make_transaction_stmt(TxKind::ROLLBACK, Vec::new(), None, None, chain),
+    "START" "TRANSACTION" <m:TransactionModeListOrEmpty> =>
+        make_transaction_stmt(TxKind::START, m, None, None, false),
+    "COMMIT" OptTransaction <chain:OptTransactionChain> =>
+        make_transaction_stmt(TxKind::COMMIT, Vec::new(), None, None, chain),
+    "ROLLBACK" OptTransaction <chain:OptTransactionChain> =>
+        make_transaction_stmt(TxKind::ROLLBACK, Vec::new(), None, None, chain),
+    "SAVEPOINT" <n:ColId> =>
+        make_transaction_stmt(TxKind::SAVEPOINT, Vec::new(), Some(n), None, false),
+    "RELEASE" "SAVEPOINT" <n:ColId> =>
+        make_transaction_stmt(TxKind::RELEASE, Vec::new(), Some(n), None, false),
+    "RELEASE" <n:ColId> =>
+        make_transaction_stmt(TxKind::RELEASE, Vec::new(), Some(n), None, false),
+    "ROLLBACK" OptTransaction "TO" "SAVEPOINT" <n:ColId> =>
+        make_transaction_stmt(TxKind::ROLLBACK_TO, Vec::new(), Some(n), None, false),
+    "ROLLBACK" OptTransaction "TO" <n:ColId> =>
+        make_transaction_stmt(TxKind::ROLLBACK_TO, Vec::new(), Some(n), None, false),
+    "PREPARE" "TRANSACTION" <gid:"SCONST"> =>
+        make_transaction_stmt(TxKind::PREPARE, Vec::new(), None, Some(gid), false),
+    "COMMIT" "PREPARED" <gid:"SCONST"> =>
+        make_transaction_stmt(TxKind::COMMIT_PREPARED, Vec::new(), None, Some(gid), false),
+    "ROLLBACK" "PREPARED" <gid:"SCONST"> =>
+        make_transaction_stmt(TxKind::ROLLBACK_PREPARED, Vec::new(), None, Some(gid), false),
+};
+
+// gram.y `TransactionStmtLegacy`: BEGIN / END (top level only).
+TransactionStmtLegacy: Node = {
+    "BEGIN" OptTransaction <m:TransactionModeListOrEmpty> =>
+        make_transaction_stmt(TxKind::BEGIN, m, None, None, false),
+    "END" OptTransaction <chain:OptTransactionChain> =>
+        make_transaction_stmt(TxKind::COMMIT, Vec::new(), None, None, chain),
+};
+
+// gram.y `opt_transaction`: WORK | TRANSACTION | empty (noise words).
+OptTransaction: () = {
+    "WORK" => (),
+    "TRANSACTION" => (),
+    => (),
+};
+
+// gram.y `opt_transaction_chain`: AND CHAIN | AND NO CHAIN | empty.
+OptTransactionChain: bool = {
+    "AND" "CHAIN" => true,
+    "AND" "NO" "CHAIN" => false,
+    => false,
+};
+
+// gram.y `transaction_mode_list_or_empty`.
+TransactionModeListOrEmpty: Vec<Node> = {
+    TransactionModeList,
+    => Vec::new(),
+};
+
+// gram.y `transaction_mode_list`: comma-separated OR space-separated (PG historic).
+TransactionModeList: Vec<Node> = {
+    <i:TransactionModeItem> => vec![i],
+    <mut l:TransactionModeList> "," <i:TransactionModeItem> => { l.push(i); l },
+    <mut l:TransactionModeList> <i:TransactionModeItem> => { l.push(i); l },
+};
+
+// gram.y `transaction_mode_item`.
+TransactionModeItem: Node = {
+    "ISOLATION" "LEVEL" <lv:IsoLevel> =>
+        make_def_elem_str("transaction_isolation", lv),
+    "READ" "ONLY" => make_def_elem_bool("transaction_read_only", true),
+    "READ" "WRITE" => make_def_elem_bool("transaction_read_only", false),
+    "DEFERRABLE" => make_def_elem_bool("transaction_deferrable", true),
+    "NOT" "DEFERRABLE" => make_def_elem_bool("transaction_deferrable", false),
+};
+
+// gram.y `iso_level`.
+IsoLevel: &'static str = {
+    "READ" "UNCOMMITTED" => "read uncommitted",
+    "READ" "COMMITTED" => "read committed",
+    "REPEATABLE" "READ" => "repeatable read",
+    "SERIALIZABLE" => "serializable",
+};
+
+// ===========================================================================
+//  SET / RESET / SHOW (M9, step 36): gram.y `VariableSetStmt` / `VariableShowStmt`.
+// ===========================================================================
+
+// gram.y `VariableSetStmt`: SET [SESSION|LOCAL] set_rest | RESET reset_rest.
+VariableSetStmt: Node = {
+    "SET" <r:SetRest> => set_variable_local(r, false),
+    "SET" "LOCAL" <r:SetRest> => set_variable_local(r, true),
+    "SET" "SESSION" <r:SetRest> => set_variable_local(r, false),
+    "RESET" <r:ResetRest> => r,
+};
+
+// gram.y `set_rest`: TRANSACTION / SESSION CHARACTERISTICS + set_rest_more.
+SetRest: Node = {
+    "TRANSACTION" <m:TransactionModeList> => make_set_multi("TRANSACTION", m),
+    "SESSION" "CHARACTERISTICS" "AS" "TRANSACTION" <m:TransactionModeList> =>
+        make_set_multi("SESSION CHARACTERISTICS", m),
+    SetRestMore,
+};
+
+// gram.y `set_rest_more`: generic_set + the special syntaxes M9 reaches.
+SetRestMore: Node = {
+    GenericSet,
+    <n:VarName> "FROM" "CURRENT" => make_set_current(n),
+    "TIME" "ZONE" <v:ZoneValue> => make_set_timezone(v),
+    "TRANSACTION" "SNAPSHOT" <s:"SCONST"> => make_set_transaction_snapshot(s),
+};
+
+// gram.y `generic_set`: var_name {TO|=} {var_list|DEFAULT}.
+GenericSet: Node = {
+    <n:VarName> "TO" <v:VarList> => make_set_value(n, v),
+    <n:VarName> "=" <v:VarList> => make_set_value(n, v),
+    <n:VarName> "TO" "DEFAULT" => make_set_default(n),
+    <n:VarName> "=" "DEFAULT" => make_set_default(n),
+};
+
+// gram.y `reset_rest`: generic_reset | TIME ZONE | TRANSACTION ISOLATION LEVEL.
+ResetRest: Node = {
+    <n:VarName> => make_reset(n),
+    "ALL" => make_reset_all(),
+    "TIME" "ZONE" => make_reset("timezone".to_string()),
+    "TRANSACTION" "ISOLATION" "LEVEL" => make_reset("transaction_isolation".to_string()),
+};
+
+// gram.y `var_name`: ColId | var_name '.' ColId.
+VarName: String = {
+    ColId,
+    <l:VarName> "." <r:ColId> => format!("{l}.{r}"),
+};
+
+// gram.y `var_list`: comma-separated var_value.
+VarList: Vec<Node> = {
+    <v:VarValue> => vec![v],
+    <mut l:VarList> "," <v:VarValue> => { l.push(v); l },
+};
+
+// gram.y `var_value`: opt_boolean_or_string -> string const | NumericOnly -> const.
+VarValue: Node = {
+    <s:BooleanOrString> => make_string_const(s),
+    <i:"ICONST"> => make_int_const(i),
+    <f:"FCONST"> => make_float_const(f),
+    "-" <i:"ICONST"> => make_int_const(-i),
+};
+
+// gram.y `opt_boolean_or_string`: TRUE | FALSE | ON | NonReservedWord | Sconst.
+BooleanOrString: String = {
+    "TRUE" => "true".to_string(),
+    "FALSE" => "false".to_string(),
+    "ON" => "on".to_string(),
+    <n:ColId> => n,
+    <s:"SCONST"> => s,
+};
+
+// gram.y `zone_value` (the M9-reachable forms): Sconst | IDENT | DEFAULT | LOCAL.
+ZoneValue: Option<String> = {
+    <s:"SCONST"> => Some(s),
+    <i:"IDENT"> => Some(i),
+    "DEFAULT" => None,
+    "LOCAL" => None,
+};
+
+// gram.y `VariableShowStmt`.
+VariableShowStmt: Node = {
+    "SHOW" <n:VarName> => make_variable_show(n),
+    "SHOW" "TIME" "ZONE" => make_variable_show("timezone".to_string()),
+    "SHOW" "TRANSACTION" "ISOLATION" "LEVEL" =>
+        make_variable_show("transaction_isolation".to_string()),
+    "SHOW" "SESSION" "AUTHORIZATION" => make_variable_show("session_authorization".to_string()),
+    "SHOW" "ALL" => make_variable_show("all".to_string()),
 };
 
 // ===========================================================================

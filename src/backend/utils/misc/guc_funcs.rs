@@ -203,28 +203,37 @@ pub fn SetPGVariable(name: &str, args: &[Node], is_local: bool) {
     );
 }
 
-/// PG `GetPGVariable`: the SHOW command. SHOW ALL and the per-variable tuple
-/// emission go through the tuple-output machinery (`begin_tup_output_tupdesc` /
-/// `do_text_output_oneline`), which is STAGED -- this stays 1:1 with PG and will
-/// fail loudly until that path lands. The value lookup itself
-/// (`GetConfigOptionByName`) is reachable and is what the tests exercise.
-pub fn GetPGVariable(name: &str, dest: &mut dyn DestReceiver) {
+/// PG `GetPGVariable`: the SHOW command. Emits a one-column result named after the
+/// variable (the value as text). SHOW ALL needs `get_guc_variables()` (the full GUC
+/// registry walk) and is STAGED.
+pub fn GetPGVariable(name: &str, _dest: &mut dyn DestReceiver) {
     if name.eq_ignore_ascii_case("all") {
-        show_all_guc_config(dest);
+        show_all_guc_config();
     } else {
-        show_guc_config_option(name, dest);
+        show_guc_config_option(name);
     }
 }
 
-fn show_guc_config_option(name: &str, _dest: &mut dyn DestReceiver) {
-    let (_varname, _value) = GetConfigOptionByName(name, false)
+/// PG `GetPGVariable`'s single-variable path (`begin_tup_output_tupdesc` +
+/// `do_text_output_oneline`): a one-attr text RowDescription named for the
+/// variable, then one DataRow carrying its current value.
+fn show_guc_config_option(name: &str) {
+    use crate::access::tupdesc::TupleDescData;
+    use crate::backend::access::common::printtup::{send_row_description_message, send_text_data_row};
+    use crate::catalog::genbki::TEXTOID;
+
+    let (varname, value) = GetConfigOptionByName(name, false)
         .unwrap_or_else(|| set_error(&format!("unrecognized configuration parameter \"{name}\"")));
-    // STAGED: emit (_varname, _value) through begin_tup_output_tupdesc /
-    // do_text_output_oneline once the tuple-output machinery is reachable.
-    unimplemented!("SHOW output path: tuple-output machinery not yet translated");
+
+    let mut desc = TupleDescData::create_template(1);
+    desc.init_builtin_entry(1, &varname, TEXTOID, -1, 0);
+    let desc = std::sync::Arc::new(desc);
+
+    send_row_description_message(&desc, &[]);
+    send_text_data_row(&[Some(&value)]);
 }
 
-fn show_all_guc_config(_dest: &mut dyn DestReceiver) {
-    // STAGED: SHOW ALL needs the tuple-output machinery + get_guc_variables().
-    unimplemented!("SHOW ALL: tuple-output machinery not yet translated");
+fn show_all_guc_config() {
+    // STAGED: SHOW ALL needs get_guc_variables() (the full registry walk).
+    unimplemented!("SHOW ALL: GUC registry walk not yet translated");
 }

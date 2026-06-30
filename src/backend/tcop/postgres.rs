@@ -167,6 +167,9 @@ where
     let body = Box::pin(with_insertion(body));
     let body = Box::pin(combocid_scope(body));
     let body = Box::pin(snapmgr_scope(body));
+    // Per-backend GUC store (PG's process-wide GUC globals): so SET/SHOW persist for
+    // the life of the connection. Boot defaults until a SET overrides them.
+    let body = Box::pin(crate::backend::utils::misc::guc::guc_scope(body));
     let body = Box::pin(xact_scope(body));
     resowner::scope(owner, body).await;
 }
@@ -401,18 +404,16 @@ async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
 
     let dest = WHERE_TO_SEND_OUTPUT;
 
-    // start_xact_command(): open the per-statement transaction (autocommit) and push
-    // the active snapshot the analyze/plan/executor read under (mirrors PG's
-    // start_xact_command + the portal snapshot; here it bounds the whole statement).
+    // start_xact_command(): open the per-statement transaction (autocommit). Inside
+    // an explicit transaction block this is a no-op (the block stays open); the
+    // active snapshot is pushed below, after the aborted-block guard.
     start_xact_command_async(shared).await;
-    push_statement_snapshot(shared);
 
     // pg_parse_query: raw parse.
     let mut parsetrees = raw_parser(query_string, RawParseMode::Default);
 
     // Empty query string: tell the frontend and finish.
     if parsetrees.is_empty() {
-        crate::backend::utils::time::snapmgr::PopActiveSnapshot();
         finish_xact_command_async(shared).await;
         crate::backend::tcop::dest::null_command(dest);
         return;
@@ -426,6 +427,25 @@ async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
         unreachable!("raw_parser yields RawStmt nodes");
     };
     let raw: RawStmt = *raw;
+
+    // If we are in an aborted transaction block, reject every command except the
+    // ones that end the block (COMMIT/ROLLBACK/PREPARE/ROLLBACK TO). PG raises this
+    // before analysis so the rejected statement is never planned/executed.
+    if crate::backend::access::transam::xact::IsAbortedTransactionBlockState()
+        && !is_transaction_exit_stmt(raw.stmt.as_ref())
+    {
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_IN_FAILED_SQL_TRANSACTION)
+                .errmsg(
+                    "current transaction is aborted, commands ignored until end of transaction block"
+                        .to_string(),
+                );
+        });
+    }
+
+    // Push the active snapshot the analyze/plan/executor read under, with curcid set
+    // to the current command id so the statement sees its own prior commands.
+    push_statement_snapshot(shared);
 
     crate::backend::tcop::dest::begin_command(CommandTag::Unknown, dest);
 
@@ -492,12 +512,35 @@ async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
     crate::backend::utils::time::snapmgr::PopActiveSnapshot();
 
     // CommandComplete, then commit the autocommit transaction. Capture the xid the
-    // statement may have assigned (a writing INSERT/CREATE) before committing, then
+    // transaction may have assigned (a writing INSERT/CREATE) before committing, then
     // advance the shared latestCompletedXid so the NEXT statement's snapshot sees it.
+    //
+    // Inside an explicit transaction block CommitTransactionCommand does NOT commit
+    // (it just advances the command counter and stays in the block), so the xid must
+    // NOT be published yet -- it would make uncommitted rows visible to other
+    // snapshots. Only publish once the block has actually closed (block_state back to
+    // Default after finish_xact_command); on COMMIT the just-assigned xid is still
+    // live at capture time and is published then.
     crate::backend::tcop::dest::end_command(&qc, dest, false);
-    let committed = crate::backend::access::transam::xact::GetCurrentTransactionIdIfAny();
+    // The TOP transaction id (subtransaction xids roll up to it at subcommit); a
+    // statement run inside a block leaves the current frame on a subxact, so capture
+    // the top frame, not the current one.
+    let committed = crate::backend::access::transam::xact::GetTopTransactionIdIfAny();
     finish_xact_command_async(shared).await;
-    publish_committed_xid(shared, committed);
+    if !crate::backend::access::transam::xact::IsTransactionOrTransactionBlock() {
+        publish_committed_xid(shared, committed);
+    }
+}
+
+/// PG `IsTransactionExitStmt`: a transaction-control statement that ends (or can
+/// end) the current block -- COMMIT / PREPARE / ROLLBACK / ROLLBACK TO. These are
+/// the only statements allowed to run while the block is in the aborted state.
+fn is_transaction_exit_stmt(stmt: Option<&crate::nodes::nodes::Node>) -> bool {
+    use crate::nodes::parsenodes::TransactionStmtKind as Kind;
+    let Some(crate::nodes::nodes::Node::TransactionStmt(s)) = stmt else {
+        return false;
+    };
+    matches!(s.kind, Kind::COMMIT | Kind::PREPARE | Kind::ROLLBACK | Kind::ROLLBACK_TO)
 }
 
 /// Advance the shared `latestCompletedXid` past a just-committed xid so later
@@ -2069,6 +2112,152 @@ mod wire_tests {
         assert_eq!(rvals, vec![596, 597, 598, 599], "a > 595 returns the four rows above 595");
         let cc = rng.iter().find(|m| m.ty == b'C').expect("a CommandComplete");
         assert_eq!(cc.body, b"SELECT 4\0");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// The CommandComplete tag string of a reply (without the trailing NUL).
+    fn complete_tag(msgs: &[Msg]) -> String {
+        let c = msgs.iter().find(|m| m.ty == b'C').expect("a CommandComplete");
+        let end = c.body.iter().position(|&x| x == 0).unwrap_or(c.body.len());
+        String::from_utf8_lossy(&c.body[..end]).into_owned()
+    }
+
+    /// The single-column text value of every DataRow in a reply.
+    fn reply_single_col(msgs: &[Msg]) -> Vec<String> {
+        msgs.iter().filter(|m| m.ty == b'D').map(|m| datarow_single_text(&m.body)).collect()
+    }
+
+    /// THE M9 MILESTONE: transaction control + SET/SHOW/RESET over the wire.
+    ///   - BEGIN; INSERT; COMMIT;          -> the row persists.
+    ///   - BEGIN; INSERT; ROLLBACK;        -> the row is gone.
+    ///   - BEGIN; INSERT a; SAVEPOINT s; INSERT b; ROLLBACK TO s; COMMIT;
+    ///       -> a persists, b is gone.
+    ///   - BEGIN; <error>; SELECT; ROLLBACK;
+    ///       -> the failed block reports RFQ status 'E' and the SELECT returns no
+    ///          rows (rejected with "current transaction is aborted"); ROLLBACK
+    ///          recovers.
+    ///   - SET / SHOW / RESET round-trips; SET LOCAL reverts on ROLLBACK.
+    ///   - COMMIT with no open block -> not an error (RFQ idle).
+    ///
+    /// NOTE: ErrorResponse / NoticeResponse are not yet sent to the client
+    /// (send_message_to_frontend is a deferred stub, elog.rs), so the test reads the
+    /// ReadyForQuery transaction-status byte ('I'/'T'/'E') and the observable
+    /// behavior rather than 'E'/'N' messages.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m9_transaction_control_and_set_show_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+        let c = &mut client;
+        let b = &mut buf;
+
+        simple_query(c, b, "CREATE TABLE t (a int)").await;
+
+        // --- BEGIN/COMMIT: the row persists. -----------------------------------
+        let begin = simple_query(c, b, "BEGIN").await;
+        assert_eq!(complete_tag(&begin), "BEGIN", "BEGIN completion tag");
+        assert_eq!(begin.iter().find(|m| m.ty == b'Z').unwrap().body, b"T", "RFQ status 'T' in xact");
+        simple_query(c, b, "INSERT INTO t VALUES (1)").await;
+        let commit = simple_query(c, b, "COMMIT").await;
+        assert_eq!(complete_tag(&commit), "COMMIT", "COMMIT completion tag");
+        assert_eq!(commit.iter().find(|m| m.ty == b'Z').unwrap().body, b"I", "RFQ idle after COMMIT");
+        let sel = simple_query(c, b, "SELECT a FROM t").await;
+        assert_eq!(reply_single_col(&sel), vec!["1"], "committed row persists");
+
+        // --- BEGIN/ROLLBACK: the row is gone. ----------------------------------
+        simple_query(c, b, "BEGIN").await;
+        simple_query(c, b, "INSERT INTO t VALUES (2)").await;
+        let rb = simple_query(c, b, "ROLLBACK").await;
+        assert_eq!(complete_tag(&rb), "ROLLBACK", "ROLLBACK completion tag");
+        let sel = simple_query(c, b, "SELECT a FROM t").await;
+        assert_eq!(reply_single_col(&sel), vec!["1"], "rolled-back row is gone");
+
+        // --- SAVEPOINT / ROLLBACK TO: a persists, b is gone. -------------------
+        simple_query(c, b, "BEGIN").await;
+        simple_query(c, b, "INSERT INTO t VALUES (10)").await; // a
+        let sp = simple_query(c, b, "SAVEPOINT s").await;
+        assert_eq!(complete_tag(&sp), "SAVEPOINT", "SAVEPOINT completion tag");
+        simple_query(c, b, "INSERT INTO t VALUES (20)").await; // b
+        let rbto = simple_query(c, b, "ROLLBACK TO s").await;
+        assert_eq!(complete_tag(&rbto), "ROLLBACK", "ROLLBACK TO completion tag");
+        simple_query(c, b, "COMMIT").await;
+        let sel = simple_query(c, b, "SELECT a FROM t").await;
+        let mut vals: Vec<i32> =
+            reply_single_col(&sel).iter().map(|s| s.parse().unwrap()).collect();
+        vals.sort_unstable();
+        assert_eq!(vals, vec![1, 10], "savepoint: a (10) persists, b (20) rolled back");
+
+        // --- Aborted block: an error poisons the block; non-exit stmts rejected. -
+        simple_query(c, b, "BEGIN").await;
+        // A statement that errors: insert into a non-existent table. The errored
+        // command leaves the block in the failed state (RFQ status 'E').
+        let err = simple_query(c, b, "INSERT INTO nosuchtable VALUES (1)").await;
+        assert_eq!(
+            err.iter().find(|m| m.ty == b'Z').unwrap().body,
+            b"E",
+            "errored statement -> RFQ status 'E' (failed transaction)"
+        );
+        // Now SELECT is rejected: no RowDescription / DataRow, still 'E'.
+        let rej = simple_query(c, b, "SELECT a FROM t").await;
+        assert!(!rej.iter().any(|m| m.ty == b'D'), "rejected SELECT returns no rows");
+        assert!(!rej.iter().any(|m| m.ty == b'C'), "rejected SELECT has no CommandComplete");
+        assert_eq!(
+            rej.iter().find(|m| m.ty == b'Z').unwrap().body,
+            b"E",
+            "still in failed-transaction state after rejection"
+        );
+        // ROLLBACK recovers the session (RFQ back to idle).
+        let rb = simple_query(c, b, "ROLLBACK").await;
+        assert_eq!(complete_tag(&rb), "ROLLBACK", "ROLLBACK tag after a failed block");
+        assert_eq!(rb.iter().find(|m| m.ty == b'Z').unwrap().body, b"I", "RFQ idle after ROLLBACK");
+        let sel = simple_query(c, b, "SELECT a FROM t").await;
+        let mut vals: Vec<i32> =
+            reply_single_col(&sel).iter().map(|s| s.parse().unwrap()).collect();
+        vals.sort_unstable();
+        assert_eq!(vals, vec![1, 10], "session recovers after ROLLBACK; table unchanged");
+
+        // --- SET / SHOW / RESET round-trip. ------------------------------------
+        let set = simple_query(c, b, "SET application_name = 'pepper'").await;
+        assert_eq!(complete_tag(&set), "SET", "SET completion tag");
+        let show = simple_query(c, b, "SHOW application_name").await;
+        assert!(show.iter().any(|m| m.ty == b'T'), "SHOW emits a RowDescription");
+        assert_eq!(complete_tag(&show), "SHOW", "SHOW completion tag");
+        assert_eq!(reply_single_col(&show), vec!["pepper"], "SHOW reflects the SET value");
+
+        let reset = simple_query(c, b, "RESET application_name").await;
+        assert_eq!(complete_tag(&reset), "RESET", "RESET completion tag");
+        let show = simple_query(c, b, "SHOW application_name").await;
+        assert_eq!(reply_single_col(&show), vec![""], "RESET restores the boot default (empty)");
+
+        // --- SET LOCAL reverts on ROLLBACK. ------------------------------------
+        simple_query(c, b, "SET application_name = 'outer'").await;
+        simple_query(c, b, "BEGIN").await;
+        simple_query(c, b, "SET LOCAL application_name = 'inner'").await;
+        let show = simple_query(c, b, "SHOW application_name").await;
+        assert_eq!(reply_single_col(&show), vec!["inner"], "SET LOCAL visible inside the block");
+        simple_query(c, b, "ROLLBACK").await;
+        let show = simple_query(c, b, "SHOW application_name").await;
+        assert_eq!(reply_single_col(&show), vec!["outer"], "SET LOCAL reverted after ROLLBACK");
+
+        // --- COMMIT with no open block -> a WARNING, not an error. -------------
+        // PG emits a "there is no transaction in progress" WARNING (a NoticeResponse,
+        // not yet wired to the client) and still completes successfully; the session
+        // stays idle ('I') rather than entering the failed state.
+        let commit = simple_query(c, b, "COMMIT").await;
+        assert_eq!(complete_tag(&commit), "COMMIT", "stray COMMIT still tagged COMMIT");
+        assert_eq!(
+            commit.iter().find(|m| m.ty == b'Z').unwrap().body,
+            b"I",
+            "stray COMMIT leaves the session idle, not failed"
+        );
 
         drop(client);
         sup.shutdown.trigger();
