@@ -125,6 +125,23 @@ async fn delete_one_object(shared: &Arc<SharedState>, object: &ObjectAddress) {
         crate::catalog::pg_namespace::NamespaceRelationId => {
             crate::backend::commands::schemacmds::remove_schema_by_id(shared, object.objectId).await;
         }
+        crate::catalog::pg_proc::ProcedureRelationId => {
+            crate::backend::commands::functioncmds::remove_function(shared, object.objectId).await;
+        }
+        crate::catalog::pg_type::TypeRelationId => {
+            crate::backend::commands::typecmds::remove_type(shared, object.objectId).await;
+        }
+        crate::catalog::pg_collation::CollationRelationId => {
+            crate::backend::commands::collationcmds::remove_collation_by_id(shared, object.objectId)
+                .await;
+        }
+        crate::catalog::pg_conversion::ConversionRelationId => {
+            crate::backend::commands::conversioncmds::remove_conversion_by_id(
+                shared,
+                object.objectId,
+            )
+            .await;
+        }
         other => not_yet_reachable(&format!("deleteOneObject: classId {other:?}")),
     }
 }

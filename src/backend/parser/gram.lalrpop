@@ -656,12 +656,16 @@ DropStmt: Node = {
 };
 
 DropObjectType: ObjType = {
-    "TABLE"    => ObjType::Table,
-    "INDEX"    => ObjType::Index,
-    "VIEW"     => ObjType::View,
-    "SEQUENCE" => ObjType::Sequence,
-    "TYPE"     => ObjType::Type,
-    "SCHEMA"   => ObjType::Schema,
+    "TABLE"      => ObjType::Table,
+    "INDEX"      => ObjType::Index,
+    "VIEW"       => ObjType::View,
+    "SEQUENCE"   => ObjType::Sequence,
+    "TYPE"       => ObjType::Type,
+    "SCHEMA"     => ObjType::Schema,
+    "FUNCTION"   => ObjType::Function,
+    "PROCEDURE"  => ObjType::Procedure,
+    "COLLATION"  => ObjType::Collation,
+    "CONVERSION" => ObjType::Conversion,
 };
 
 OptIfExists: bool = {

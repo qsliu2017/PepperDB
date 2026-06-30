@@ -960,6 +960,10 @@ pub enum ObjType {
     Sequence,
     Type,
     Schema,
+    Function,
+    Procedure,
+    Collation,
+    Conversion,
 }
 
 impl ObjType {
@@ -971,6 +975,10 @@ impl ObjType {
             Self::Sequence => ObjectType::SEQUENCE,
             Self::Type => ObjectType::TYPE,
             Self::Schema => ObjectType::SCHEMA,
+            Self::Function => ObjectType::FUNCTION,
+            Self::Procedure => ObjectType::PROCEDURE,
+            Self::Collation => ObjectType::COLLATION,
+            Self::Conversion => ObjectType::CONVERSION,
         }
     }
 }

@@ -44,6 +44,10 @@ use crate::catalog::pg_class::{RelationRelationId, RelationRelation_Rowtype_Id};
 use crate::catalog::pg_operator::{OperatorRelationId, OperatorRelation_Rowtype_Id};
 use crate::catalog::pg_attrdef::{AttrDefaultRelationId, AttrDefaultRelation_Rowtype_Id};
 use crate::catalog::pg_constraint::{ConstraintRelationId, ConstraintRelation_Rowtype_Id};
+use crate::catalog::pg_database::{DatabaseRelationId, DatabaseRelation_Rowtype_Id};
+use crate::catalog::pg_tablespace::TableSpaceRelationId;
+use crate::catalog::pg_collation::CollationRelationId;
+use crate::catalog::pg_conversion::ConversionRelationId;
 use crate::catalog::pg_description::{DescriptionRelationId, DescriptionRelation_Rowtype_Id};
 use crate::catalog::pg_namespace::{NamespaceRelationId, NamespaceRelation_Rowtype_Id};
 use crate::catalog::pg_proc::{ProcedureRelationId, ProcedureRelation_Rowtype_Id};
@@ -163,6 +167,16 @@ pub static FORMRDESC_CATALOGS: &[BootstrapCatalog] = &[
     catalog!("pg_attrdef", AttrDefaultRelationId, AttrDefaultRelation_Rowtype_Id, isshared => false, SCHEMA_PG_ATTRDEF),
     catalog!("pg_constraint", ConstraintRelationId, ConstraintRelation_Rowtype_Id, isshared => false, SCHEMA_PG_CONSTRAINT),
     catalog!("pg_description", DescriptionRelationId, DescriptionRelation_Rowtype_Id, isshared => false, SCHEMA_PG_DESCRIPTION),
+    // M10 (step 39B): the minor object-DDL catalogs. pg_database/pg_tablespace are
+    // BKI_SHARED_RELATION in PG (db 0); the single-database port nails them local so
+    // their storage lives in the active database. pg_database/pg_tablespace are seeded
+    // (the bootstrap db/tablespace rows); pg_collation/pg_conversion start empty and
+    // are filled by CREATE COLLATION / CREATE CONVERSION. The reltype for the three
+    // catalogs without a BKI_ROWTYPE_OID is their relid (non-load-bearing single-db).
+    catalog!("pg_database", DatabaseRelationId, DatabaseRelation_Rowtype_Id, isshared => false, SCHEMA_PG_DATABASE),
+    catalog!("pg_tablespace", TableSpaceRelationId, TableSpaceRelationId, isshared => false, SCHEMA_PG_TABLESPACE),
+    catalog!("pg_collation", CollationRelationId, CollationRelationId, isshared => false, SCHEMA_PG_COLLATION),
+    catalog!("pg_conversion", ConversionRelationId, ConversionRelationId, isshared => false, SCHEMA_PG_CONVERSION),
 ];
 
 /// Build the compiled-in `TupleDesc` for a nailed bootstrap catalog from its
@@ -1081,6 +1095,29 @@ async fn seed_object_ddl_catalogs(shared: &std::sync::Arc<crate::shared_state::S
         crate::catalog::pg_constraint::Anum_pg_constraint_oid as i16,
     )
     .await;
+    // M10 (step 39B): the minor object-DDL catalogs' oid indexes. The pkey index OIDs
+    // are the upstream DECLARE_UNIQUE_INDEX_PKEY values (defined inline -- the catalog
+    // headers carry them only as comments on M10).
+    build_oid_index(
+        DatabaseRelationId, Oid::new(2672), "pg_database_oid_index", "oid",
+        crate::catalog::pg_database::Anum_pg_database_oid as i16,
+    )
+    .await;
+    build_oid_index(
+        TableSpaceRelationId, Oid::new(2697), "pg_tablespace_oid_index", "oid",
+        crate::catalog::pg_tablespace::Anum_pg_tablespace_oid as i16,
+    )
+    .await;
+    build_oid_index(
+        CollationRelationId, Oid::new(3085), "pg_collation_oid_index", "oid",
+        crate::catalog::pg_collation::Anum_pg_collation_oid as i16,
+    )
+    .await;
+    build_oid_index(
+        ConversionRelationId, Oid::new(2670), "pg_conversion_oid_index", "oid",
+        crate::catalog::pg_conversion::Anum_pg_conversion_oid as i16,
+    )
+    .await;
 
     // Seed pg_namespace with the standard schema rows from SEED_PG_NAMESPACE (the
     // .dat-driven oid/nspname/nspowner; nspacl is NULL).
@@ -1107,6 +1144,96 @@ async fn seed_object_ddl_catalogs(shared: &std::sync::Arc<crate::shared_state::S
     }
     relation_close(pg_namespace);
     let _ = PG_CATALOG_NAMESPACE;
+
+    seed_pg_tablespace(shared).await;
+    seed_pg_database(shared).await;
+}
+
+/// Seed pg_tablespace with the two bootstrap tablespaces (pg_default/pg_global) from
+/// SEED_PG_TABLESPACE. spcacl/spcoptions are NULL.
+async fn seed_pg_tablespace(shared: &std::sync::Arc<crate::shared_state::SharedState>) {
+    use crate::backend::access::common::heaptuple::{heap_form_tuple, heap_freetuple};
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::catalog::indexing::catalog_tuple_insert;
+    use crate::backend::utils::cache::relcache::{relation_close, relation_id_get_relation};
+    use crate::catalog::pg_tablespace as ts;
+    use crate::postgres::{Datum, NameGetDatum, ObjectIdGetDatum};
+
+    let Some(pg_tablespace) = relation_id_get_relation(TableSpaceRelationId) else { return };
+    let desc = pg_tablespace.rd_att.clone().unwrap_or_else(|| unreachable!("pg_tablespace desc"));
+    let natts = desc.natts as usize;
+    for row in SEED_PG_TABLESPACE {
+        let oid: u32 = row.iter().find(|(c, _)| *c == "oid").map_or(0, |(_, v)| v.parse().unwrap_or(0));
+        let name = row.iter().find(|(c, _)| *c == "spcname").map_or("", |(_, v)| v);
+        let spc_name = name_data(name);
+
+        let mut values = vec![Datum(0); natts];
+        let mut isnull = vec![false; natts];
+        values[(ts::Anum_pg_tablespace_oid - 1) as usize] = ObjectIdGetDatum(Oid::new(oid));
+        values[(ts::Anum_pg_tablespace_spcname - 1) as usize] = NameGetDatum(&spc_name);
+        values[(ts::Anum_pg_tablespace_spcowner - 1) as usize] = ObjectIdGetDatum(Oid::new(10));
+        isnull[(ts::Anum_pg_tablespace_spcacl - 1) as usize] = true;
+        isnull[(ts::Anum_pg_tablespace_spcoptions - 1) as usize] = true;
+
+        let mut tuple = heap_form_tuple(&desc, &values, &isnull);
+        catalog_tuple_insert(shared, &pg_tablespace, &mut tuple).await;
+        heap_freetuple(tuple);
+    }
+    relation_close(pg_tablespace);
+}
+
+/// Seed pg_database with the bootstrap rows: template1 (oid 1), template0 (oid 4),
+/// postgres (oid 5). PG's `.dat` carries only template1 (template0/postgres are made
+/// by initdb's bootstrap script); the single-database port seeds all three so DROP
+/// DATABASE against the standard names removes a real row and CREATE DATABASE inserts
+/// alongside them. The varlena locale columns are NULL (single-db: no per-db locale).
+async fn seed_pg_database(shared: &std::sync::Arc<crate::shared_state::SharedState>) {
+    use crate::backend::access::common::heaptuple::{heap_form_tuple, heap_freetuple};
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::catalog::indexing::catalog_tuple_insert;
+    use crate::backend::utils::cache::relcache::{relation_close, relation_id_get_relation};
+    use crate::catalog::pg_database as db;
+    use crate::postgres::{BoolGetDatum, CharGetDatum, Datum, Int32GetDatum, NameGetDatum, ObjectIdGetDatum, TransactionIdGetDatum};
+
+    let Some(pg_database) = relation_id_get_relation(DatabaseRelationId) else { return };
+    let desc = pg_database.rd_att.clone().unwrap_or_else(|| unreachable!("pg_database desc"));
+    let natts = desc.natts as usize;
+
+    // (oid, name, istemplate, allowconn) for the three bootstrap databases.
+    let rows: [(u32, &str, bool, bool); 3] = [
+        (1, "template1", true, true),
+        (db::Template0DbOid.get(), "template0", true, false),
+        (db::PostgresDbOid.get(), "postgres", false, true),
+    ];
+    for (oid, name, istemplate, allowconn) in rows {
+        let dat_name = name_data(name);
+        let mut values = vec![Datum(0); natts];
+        let mut isnull = vec![false; natts];
+        values[(db::Anum_pg_database_oid - 1) as usize] = ObjectIdGetDatum(Oid::new(oid));
+        values[(db::Anum_pg_database_datname - 1) as usize] = NameGetDatum(&dat_name);
+        values[(db::Anum_pg_database_datdba - 1) as usize] = ObjectIdGetDatum(Oid::new(10));
+        values[(db::Anum_pg_database_encoding - 1) as usize] = Int32GetDatum(crate::mb::pg_wchar::pg_enc::PG_UTF8 as i32);
+        values[(db::Anum_pg_database_datlocprovider - 1) as usize] = CharGetDatum(crate::catalog::pg_collation::COLLPROVIDER_LIBC);
+        values[(db::Anum_pg_database_datistemplate - 1) as usize] = BoolGetDatum(istemplate);
+        values[(db::Anum_pg_database_datallowconn - 1) as usize] = BoolGetDatum(allowconn);
+        values[(db::Anum_pg_database_dathasloginevt - 1) as usize] = BoolGetDatum(false);
+        values[(db::Anum_pg_database_datconnlimit - 1) as usize] = Int32GetDatum(db::DATCONNLIMIT_UNLIMITED);
+        values[(db::Anum_pg_database_datfrozenxid - 1) as usize] = TransactionIdGetDatum(crate::c::TransactionId(0));
+        values[(db::Anum_pg_database_datminmxid - 1) as usize] = TransactionIdGetDatum(crate::c::TransactionId(1));
+        values[(db::Anum_pg_database_dattablespace - 1) as usize] = ObjectIdGetDatum(crate::common::relpath::DEFAULTTABLESPACE_OID);
+        // The varlena locale columns + datacl: NULL on the single-db port.
+        isnull[(db::Anum_pg_database_datcollate - 1) as usize] = true;
+        isnull[(db::Anum_pg_database_datctype - 1) as usize] = true;
+        isnull[(db::Anum_pg_database_datlocale - 1) as usize] = true;
+        isnull[(db::Anum_pg_database_daticurules - 1) as usize] = true;
+        isnull[(db::Anum_pg_database_datcollversion - 1) as usize] = true;
+        isnull[(db::Anum_pg_database_datacl - 1) as usize] = true;
+
+        let mut tuple = heap_form_tuple(&desc, &values, &isnull);
+        catalog_tuple_insert(shared, &pg_database, &mut tuple).await;
+        heap_freetuple(tuple);
+    }
+    relation_close(pg_database);
 }
 
 /// PG `boot_get_type_io_data`: 8 out-params folded into a named struct. Returns

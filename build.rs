@@ -1353,6 +1353,14 @@ fn gen_bootstrap_schemas(
         ("pg_attrdef", "pg_attrdef.h"),
         ("pg_constraint", "pg_constraint.h"),
         ("pg_description", "pg_description.h"),
+        // M10 (step 39B): the minor object-DDL catalogs. pg_database/pg_tablespace
+        // are seeded (the bootstrap db/tablespace rows); pg_collation/pg_conversion
+        // start empty and are filled by CREATE COLLATION / CREATE CONVERSION. Nailing
+        // gives their descriptors for those inserts before they have pg_class rows.
+        ("pg_database", "pg_database.h"),
+        ("pg_tablespace", "pg_tablespace.h"),
+        ("pg_collation", "pg_collation.h"),
+        ("pg_conversion", "pg_conversion.h"),
     ];
 
     for (cat, hdr) in catalogs {
@@ -1446,8 +1454,11 @@ fn gen_bootstrap_seeds(inc: &Path) -> String {
     // catalogs are produced by formrdesc + the schema codegen above, not seeded
     // from a .dat. opclass/amop/amproc seed the int4/oid/name/text btree operator
     // classes so the M2 catalog indexes resolve.
-    let m2_catalogs =
-        ["pg_am", "pg_namespace", "pg_collation", "pg_opclass", "pg_amop", "pg_amproc"];
+    let m2_catalogs = [
+        "pg_am", "pg_namespace", "pg_collation", "pg_opclass", "pg_amop", "pg_amproc",
+        // M10 (step 39B): pg_tablespace's two bootstrap rows (pg_default/pg_global).
+        "pg_tablespace",
+    ];
 
     for cat in m2_catalogs {
         let dat = inc.join(format!("{cat}.dat"));

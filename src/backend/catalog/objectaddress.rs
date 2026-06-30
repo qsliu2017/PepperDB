@@ -122,8 +122,90 @@ pub async fn get_object_address(
             get_object_address_type(shared, object, missing_ok).await
         }
         ObjectType::SCHEMA => get_object_address_schema(shared, object, missing_ok).await,
+        ObjectType::FUNCTION | ObjectType::PROCEDURE => {
+            get_object_address_function(shared, object, missing_ok).await
+        }
+        ObjectType::COLLATION => get_object_address_collation(shared, object, missing_ok).await,
+        ObjectType::CONVERSION => get_object_address_conversion(shared, object, missing_ok).await,
         other => not_yet_reachable(&format!("get_object_address: {other:?}")),
     }
+}
+
+/// `get_object_address` for a function/procedure name (pg_proc). The M10 grammar
+/// carries the name only (no argtypes), so the resolution is by name; the
+/// `function_with_argtypes` overload-disambiguation grows with that grammar.
+async fn get_object_address_function(
+    shared: &Arc<SharedState>,
+    rel: &RangeVar,
+    missing_ok: bool,
+) -> ObjectAddress {
+    use crate::catalog::pg_proc::ProcedureRelationId;
+    let name = rel
+        .relname
+        .as_deref()
+        .unwrap_or_else(|| unreachable!("a function reference names the function"));
+    match crate::backend::catalog::pg_proc::proc_lookup_by_name(shared, name).await {
+        Some(oid) => ObjectAddress { classId: ProcedureRelationId, objectId: oid, objectSubId: 0 },
+        None if missing_ok => INVALID_OBJECT_ADDRESS,
+        None => report_missing_object(
+            crate::utils::errcodes::ERRCODE_UNDEFINED_FUNCTION,
+            "function",
+            name,
+        ),
+    }
+}
+
+/// `get_object_address` for a collation name (pg_collation).
+async fn get_object_address_collation(
+    shared: &Arc<SharedState>,
+    rel: &RangeVar,
+    missing_ok: bool,
+) -> ObjectAddress {
+    use crate::catalog::pg_collation::CollationRelationId;
+    let name = rel
+        .relname
+        .as_deref()
+        .unwrap_or_else(|| unreachable!("a collation reference names the collation"));
+    match crate::backend::commands::collationcmds::collation_oid_by_name(shared, name).await {
+        Some(oid) => ObjectAddress { classId: CollationRelationId, objectId: oid, objectSubId: 0 },
+        None if missing_ok => INVALID_OBJECT_ADDRESS,
+        None => report_missing_object(
+            crate::utils::errcodes::ERRCODE_UNDEFINED_OBJECT,
+            "collation",
+            name,
+        ),
+    }
+}
+
+/// `get_object_address` for a conversion name (pg_conversion).
+async fn get_object_address_conversion(
+    shared: &Arc<SharedState>,
+    rel: &RangeVar,
+    missing_ok: bool,
+) -> ObjectAddress {
+    use crate::catalog::pg_conversion::ConversionRelationId;
+    let name = rel
+        .relname
+        .as_deref()
+        .unwrap_or_else(|| unreachable!("a conversion reference names the conversion"));
+    match crate::backend::commands::conversioncmds::conversion_oid_by_name(shared, name).await {
+        Some(oid) => ObjectAddress { classId: ConversionRelationId, objectId: oid, objectSubId: 0 },
+        None if missing_ok => INVALID_OBJECT_ADDRESS,
+        None => report_missing_object(
+            crate::utils::errcodes::ERRCODE_UNDEFINED_OBJECT,
+            "conversion",
+            name,
+        ),
+    }
+}
+
+/// PG's "<kind> does not exist" error for the by-name object kinds.
+#[cold]
+fn report_missing_object(errcode: i32, kind: &str, name: &str) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(errcode).errmsg(format!("{kind} \"{name}\" does not exist"));
+    });
+    unreachable!("ereport(ERROR) diverges");
 }
 
 /// `get_object_address` for a type name (pg_type). The M10 type names resolve
