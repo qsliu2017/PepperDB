@@ -165,6 +165,27 @@ pub async fn standard_process_utility(
             .await;
             crate::backend::access::transam::xact::CommandCounterIncrement();
         }
+        // --- COPY (M13, step 45) ---
+        Node::CopyStmt(stmt) => {
+            let mut pstate = crate::backend::parser::parse_node::make_parsestate(None);
+            pstate.p_sourcetext = Some(query_string.to_string());
+            // Box::pin the (deep) COPY future to cap async stack-frame growth in
+            // debug builds (the relcache build + per-row heap-insert chains are large).
+            let processed = Box::pin(crate::backend::commands::copy::do_copy(
+                shared,
+                &mut pstate,
+                stmt,
+                pstmt.stmt_location,
+                pstmt.stmt_len,
+            ))
+            .await;
+            if let Some(qc) = qc {
+                // PG reports both directions as the rowcount tag "COPY n".
+                qc.command_tag = CommandTag::Copy;
+                qc.nprocessed = processed;
+            }
+            crate::backend::access::transam::xact::CommandCounterIncrement();
+        }
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
     }
 }
@@ -517,6 +538,7 @@ pub fn create_command_tag(parsetree: &Node) -> CommandTag {
                 CommandTag::CloseCursorAll
             }
         }
+        Node::CopyStmt(_) => CommandTag::Copy,
         other => not_yet_reachable(&format!("CreateCommandTag: {other:?}")),
     }
 }

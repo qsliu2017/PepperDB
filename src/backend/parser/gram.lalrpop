@@ -37,6 +37,7 @@ use crate::backend::parser::parser::{
     make_create_conversion_stmt, make_create_tablespace_stmt, make_function_parameter,
     make_ot_column_def, make_view_stmt, make_rule_stmt, make_string_value_node,
     make_create_trig_stmt, make_fk_constraint, make_column_fk_constraint, set_constraint_name,
+    make_copy_stmt,
     make_null_const, TrigTiming, TrigEvent,
     make_set_op, set_select_with_clause, make_with_clause, make_common_table_expr,
     DropBehaviorTok, ObjType,
@@ -293,6 +294,18 @@ extern {
         "INTERSECT"  => Token::Keyword("intersect"),
         "EXCEPT"     => Token::Keyword("except"),
         "MATERIALIZED" => Token::Keyword("materialized"),
+        // M13 (step 45): COPY keywords (TO / WITH / NULL / BINARY / MATCH / TRUE /
+        // FALSE / FORWARD already exist above).
+        "COPY"       => Token::Keyword("copy"),
+        "STDIN"      => Token::Keyword("stdin"),
+        "STDOUT"     => Token::Keyword("stdout"),
+        "PROGRAM"    => Token::Keyword("program"),
+        "DELIMITER"  => Token::Keyword("delimiter"),
+        "CSV"        => Token::Keyword("csv"),
+        "HEADER"     => Token::Keyword("header"),
+        "QUOTE"      => Token::Keyword("quote"),
+        "ESCAPE"     => Token::Keyword("escape"),
+        "FORMAT"     => Token::Keyword("format"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -371,6 +384,7 @@ Stmt: Option<Node> = {
     <s:ViewStmt> => Some(s),
     <s:RuleStmt> => Some(s),
     <s:CreateTrigStmt> => Some(s),
+    <s:CopyStmt> => Some(s),
     <s:InsertStmt> => Some(s),
     <s:UpdateStmt> => Some(s),
     <s:DeleteStmt> => Some(s),
@@ -819,6 +833,101 @@ TriggerFuncArg: Node = {
     <i:"ICONST"> => make_string_value_node(i.to_string()),
     <s:"SCONST"> => make_string_value_node(s),
     <n:ColId>    => make_string_value_node(n),
+};
+
+// gram.y `CopyStmt` (M13, step 45): COPY table [(cols)] {FROM|TO} {'file'|STDIN|
+// STDOUT|PROGRAM 'cmd'} [[WITH] (options)] [WHERE ...], and COPY (query) TO ....
+// The legacy `opt_binary` prefix and `USING DELIMITERS` delimiter forms are
+// staged (the WITH-paren and legacy bare-WITH option lists cover the common
+// syntax). Kept LALR-conflict-free by funneling both option syntaxes through
+// CopyOptions after the (optional) WITH.
+CopyStmt: Node = {
+    "COPY" <rel:QualifiedName> <cols:OptColumnList> <is_from:CopyFrom>
+        <prog:OptProgram> <file:CopyFileName> <opts:CopyOptions> <whr:WhereClause> =>
+        make_copy_stmt(Some(rel), None, cols, is_from, prog, file, opts, whr),
+    "COPY" "(" <q:PreparableStmt> ")" "TO" <prog:OptProgram> <file:CopyFileName>
+        <opts:CopyOptions> =>
+        make_copy_stmt(None, Some(q), Vec::new(), false, prog, file, opts, None),
+};
+
+// gram.y `copy_from`: FROM (true) | TO (false).
+CopyFrom: bool = {
+    "FROM" => true,
+    "TO"   => false,
+};
+
+// gram.y `opt_program`: PROGRAM | /*EMPTY*/.
+OptProgram: bool = {
+    "PROGRAM" => true,
+    => false,
+};
+
+// gram.y `copy_file_name`: Sconst | STDIN | STDOUT. None = stdin/stdout pipe.
+CopyFileName: Option<String> = {
+    <s:"SCONST"> => Some(s),
+    "STDIN"  => None,
+    "STDOUT" => None,
+};
+
+// gram.y `copy_options`: [WITH] '(' copy_generic_opt_list ')' (new syntax) or
+// the legacy bare option list (optionally introduced by WITH). The empty case
+// (no options) is also covered. The option names are explicit keyword tokens
+// (the lexer emits `format`/`csv`/... as keywords, not IDENT, so the generic
+// `ColLabel` form is staged), which keeps the LALR table conflict-free.
+CopyOptions: Vec<Node> = {
+    => Vec::new(),
+    "WITH" "(" <l:CopyGenericOptList> ")" => l,
+    "(" <l:CopyGenericOptList> ")" => l,
+    "WITH" <l:CopyOptList> => l,
+};
+
+// gram.y `copy_generic_opt_list`: copy_generic_opt_elem (',' ...)*.
+CopyGenericOptList: Vec<Node> = {
+    <e:CopyGenericOptElem> => vec![e],
+    <mut l:CopyGenericOptList> "," <e:CopyGenericOptElem> => { l.push(e); l },
+};
+
+// gram.y `copy_generic_opt_elem`: each known option name (a keyword) with its arg.
+CopyGenericOptElem: Node = {
+    "FORMAT" <a:CopyWordArg>    => make_generic_def_elem("format", Some(a)),
+    "DELIMITER" <a:CopyTextArg> => make_generic_def_elem("delimiter", Some(a)),
+    "NULL" <a:CopyTextArg>      => make_generic_def_elem("null", Some(a)),
+    "QUOTE" <a:CopyTextArg>     => make_generic_def_elem("quote", Some(a)),
+    "ESCAPE" <a:CopyTextArg>    => make_generic_def_elem("escape", Some(a)),
+    "HEADER"                    => make_generic_def_elem("header", None),
+    "HEADER" <a:CopyWordArg>    => make_generic_def_elem("header", Some(a)),
+};
+
+// A bare-word or string option value (e.g. FORMAT csv, FORMAT 'csv', HEADER true).
+CopyWordArg: Node = {
+    <s:"SCONST"> => make_string_const(s),
+    "CSV"        => make_string_value_node("csv".to_string()),
+    "BINARY"     => make_string_value_node("binary".to_string()),
+    "TRUE"       => make_string_value_node("true".to_string()),
+    "FALSE"      => make_string_value_node("false".to_string()),
+    "MATCH"      => make_string_value_node("match".to_string()),
+    <n:ColId>    => make_string_value_node(n),
+};
+
+// A string option value (DELIMITER/NULL/QUOTE/ESCAPE require a string literal).
+CopyTextArg: Node = {
+    <s:"SCONST"> => make_string_const(s),
+};
+
+// gram.y legacy `copy_opt_list` / `copy_opt_item`: the bare WITH options.
+CopyOptList: Vec<Node> = {
+    <e:CopyOptItem> => vec![e],
+    <mut l:CopyOptList> <e:CopyOptItem> => { l.push(e); l },
+};
+
+CopyOptItem: Node = {
+    "BINARY"           => make_def_elem_str("format", "binary"),
+    "CSV"              => make_def_elem_str("format", "csv"),
+    "HEADER"           => make_def_elem_bool("header", true),
+    "DELIMITER" <s:"SCONST"> => make_def_elem_str("delimiter", &s),
+    "NULL" <s:"SCONST">      => make_def_elem_str("null", &s),
+    "QUOTE" <s:"SCONST">     => make_def_elem_str("quote", &s),
+    "ESCAPE" <s:"SCONST">    => make_def_elem_str("escape", &s),
 };
 
 // gram.y `opt_drop_behavior: CASCADE | RESTRICT | /*EMPTY*/`.

@@ -1899,6 +1899,32 @@ pub fn make_create_trig_stmt(
     }))
 }
 
+/// gram.y `CopyStmt`: build the COPY parse node. `relation` (table COPY) and
+/// `query` (COPY (query) TO) are mutually exclusive. A `None` filename means the
+/// STDIN/STDOUT pipe. Direction/program/option validation is done in `DoCopy`.
+#[allow(clippy::too_many_arguments, reason = "mirrors gram.y CopyStmt's field set")]
+pub fn make_copy_stmt(
+    relation: Option<crate::nodes::primnodes::RangeVar>,
+    query: Option<Node>,
+    attlist: Vec<Node>,
+    is_from: bool,
+    is_program: bool,
+    filename: Option<String>,
+    options: Vec<Node>,
+    where_clause: Option<Node>,
+) -> Node {
+    Node::CopyStmt(Box::new(crate::nodes::parsenodes::CopyStmt {
+        relation: relation.map(Box::new),
+        query,
+        attlist,
+        is_from,
+        is_program,
+        filename,
+        options,
+        whereClause: where_clause,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

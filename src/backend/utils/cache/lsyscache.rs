@@ -321,6 +321,28 @@ pub fn get_type_input_info(r#type: Oid) -> (Oid, Oid) {
     builtin_type_input(r#type)
 }
 
+/// Async warm-and-read variant of [`get_type_input_info`]: warms the TYPEOID cache
+/// (so a later sync read hits) and returns `(typinput, typioparam)`.
+pub async fn get_type_input_info_populate(shared: &Arc<SharedState>, r#type: Oid) -> (Oid, Oid) {
+    if let Some(tuple) =
+        search_sys_cache_populate(shared, SysCacheIdentifier::TYPEOID, &[ObjectIdGetDatum(r#type)]).await
+    {
+        // SAFETY: held syscache tuple; borrow ends before release_sys_cache.
+        let out = {
+            let pt = unsafe { type_form(&*tuple) };
+            let typioparam = if pt.typelem == crate::postgres_ext::InvalidOid {
+                r#type
+            } else {
+                pt.typelem
+            };
+            (pt.typinput, typioparam)
+        };
+        release_sys_cache(tuple);
+        return out;
+    }
+    builtin_type_input(r#type)
+}
+
 /// The builtin int2/4/8 input map (bootstrap-window fallback; typioparam is the
 /// type's own OID since none is an array type).
 fn builtin_type_input(r#type: Oid) -> (Oid, Oid) {
