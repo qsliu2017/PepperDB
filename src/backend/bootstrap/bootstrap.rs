@@ -117,109 +117,52 @@ pub struct BootstrapCatalog {
     pub schema: &'static [BootstrapAttr],
 }
 
+/// One nailed formrdesc catalog, mirroring the genbki `CATALOG(...)` line.
+/// `catalog!("pg_type", TypeRelationId, TypeRelation_Rowtype_Id, isshared => false, SCHEMA_PG_TYPE)`
+/// expands to a [`BootstrapCatalog`] literal.
+macro_rules! catalog {
+    ($relname:expr, $relid:expr, $reltype:expr, isshared => $shared:expr, $schema:expr $(,)?) => {
+        BootstrapCatalog {
+            relname: $relname,
+            relid: $relid,
+            reltype: $reltype,
+            isshared: $shared,
+            schema: $schema,
+        }
+    };
+}
+
 /// The formrdesc catalog set: the relations whose relcache entries are faked up
 /// before pg_class can be read (PG `RelationCacheInitializePhase2/3`). All four
 /// are non-shared local catalogs (the shared ones -- pg_database/pg_authid/... --
 /// are deep-deferred; they are not on the M2 path).
 pub static FORMRDESC_CATALOGS: &[BootstrapCatalog] = &[
-    BootstrapCatalog {
-        relname: "pg_type",
-        relid: TypeRelationId,
-        reltype: TypeRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_TYPE,
-    },
-    BootstrapCatalog {
-        relname: "pg_attribute",
-        relid: AttributeRelationId,
-        reltype: AttributeRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_ATTRIBUTE,
-    },
-    BootstrapCatalog {
-        relname: "pg_proc",
-        relid: ProcedureRelationId,
-        reltype: ProcedureRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_PROC,
-    },
-    BootstrapCatalog {
-        relname: "pg_class",
-        relid: RelationRelationId,
-        reltype: RelationRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_CLASS,
-    },
+    catalog!("pg_type", TypeRelationId, TypeRelation_Rowtype_Id, isshared => false, SCHEMA_PG_TYPE),
+    catalog!("pg_attribute", AttributeRelationId, AttributeRelation_Rowtype_Id, isshared => false, SCHEMA_PG_ATTRIBUTE),
+    catalog!("pg_proc", ProcedureRelationId, ProcedureRelation_Rowtype_Id, isshared => false, SCHEMA_PG_PROC),
+    catalog!("pg_class", RelationRelationId, RelationRelation_Rowtype_Id, isshared => false, SCHEMA_PG_CLASS),
     // M3: pg_operator is nailed so the operator-resolution syscaches (OPERNAMENSP /
     // OPEROID) can read its descriptor before it has a pg_class self-row. PG builds
     // pg_operator as an ordinary catalog; nailing it here reuses the proven
     // formrdesc path (the row contents are still real on-disk seed rows).
-    BootstrapCatalog {
-        relname: "pg_operator",
-        relid: OperatorRelationId,
-        reltype: OperatorRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_OPERATOR,
-    },
+    catalog!("pg_operator", OperatorRelationId, OperatorRelation_Rowtype_Id, isshared => false, SCHEMA_PG_OPERATOR),
     // M4 (step 23): pg_cast is nailed so the CASTSOURCETARGET syscache can read its
     // descriptor before it has a pg_class self-row -- same rationale as pg_operator.
-    BootstrapCatalog {
-        relname: "pg_cast",
-        relid: CastRelationId,
-        reltype: CastRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_CAST,
-    },
+    catalog!("pg_cast", CastRelationId, CastRelation_Rowtype_Id, isshared => false, SCHEMA_PG_CAST),
     // M5 (step 25B): pg_aggregate is nailed so the AGGFNOID syscache can read its
     // descriptor before pg_aggregate has a pg_class self-row -- same rationale as
     // pg_cast/pg_operator.
-    BootstrapCatalog {
-        relname: "pg_aggregate",
-        relid: AggregateRelationId,
-        reltype: AggregateRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_AGGREGATE,
-    },
+    catalog!("pg_aggregate", AggregateRelationId, AggregateRelation_Rowtype_Id, isshared => false, SCHEMA_PG_AGGREGATE),
     // M10 (step 39): the object-DDL catalogs. pg_namespace is seeded (its standard
     // rows); pg_sequence/pg_attrdef/pg_constraint/pg_description start empty and are
     // filled by the runtime DDL (CREATE SEQUENCE, SET DEFAULT, ADD CONSTRAINT,
     // COMMENT). Nailing gives `relation_id_get_relation` their descriptor for those
     // inserts before they have pg_class self-rows.
-    BootstrapCatalog {
-        relname: "pg_namespace",
-        relid: NamespaceRelationId,
-        reltype: NamespaceRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_NAMESPACE,
-    },
-    BootstrapCatalog {
-        relname: "pg_sequence",
-        relid: SequenceRelationId,
-        reltype: SequenceRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_SEQUENCE,
-    },
-    BootstrapCatalog {
-        relname: "pg_attrdef",
-        relid: AttrDefaultRelationId,
-        reltype: AttrDefaultRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_ATTRDEF,
-    },
-    BootstrapCatalog {
-        relname: "pg_constraint",
-        relid: ConstraintRelationId,
-        reltype: ConstraintRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_CONSTRAINT,
-    },
-    BootstrapCatalog {
-        relname: "pg_description",
-        relid: DescriptionRelationId,
-        reltype: DescriptionRelation_Rowtype_Id,
-        isshared: false,
-        schema: SCHEMA_PG_DESCRIPTION,
-    },
+    catalog!("pg_namespace", NamespaceRelationId, NamespaceRelation_Rowtype_Id, isshared => false, SCHEMA_PG_NAMESPACE),
+    catalog!("pg_sequence", SequenceRelationId, SequenceRelation_Rowtype_Id, isshared => false, SCHEMA_PG_SEQUENCE),
+    catalog!("pg_attrdef", AttrDefaultRelationId, AttrDefaultRelation_Rowtype_Id, isshared => false, SCHEMA_PG_ATTRDEF),
+    catalog!("pg_constraint", ConstraintRelationId, ConstraintRelation_Rowtype_Id, isshared => false, SCHEMA_PG_CONSTRAINT),
+    catalog!("pg_description", DescriptionRelationId, DescriptionRelation_Rowtype_Id, isshared => false, SCHEMA_PG_DESCRIPTION),
 ];
 
 /// Build the compiled-in `TupleDesc` for a nailed bootstrap catalog from its
@@ -410,6 +353,30 @@ struct BootBaseType {
     output: Oid,
 }
 
+/// One M2 built-in base type, mirroring a `pg_type.dat` base-type row.
+/// `basetype!(BOOLOID, "bool", len => 1, byval => true, TYPALIGN_CHAR, TYPSTORAGE_PLAIN, TYPCATEGORY_BOOLEAN, preferred => false, f::F_BOOLIN, f::F_BOOLOUT)`
+/// expands to a [`BootBaseType`] literal.
+macro_rules! basetype {
+    (
+        $oid:expr, $name:expr, len => $len:expr, byval => $byval:expr,
+        $align:expr, $storage:expr, $category:expr, preferred => $preferred:expr,
+        $input:expr, $output:expr $(,)?
+    ) => {
+        BootBaseType {
+            oid: $oid,
+            name: $name,
+            len: $len,
+            byval: $byval,
+            align: $align,
+            storage: $storage,
+            category: $category,
+            preferred: $preferred,
+            input: $input,
+            output: $output,
+        }
+    };
+}
+
 /// The base-type seed set. The M2 set (oid/int2/int4/int8/bool/name/text) plus the
 /// M4 cast-reachable numeric/float types (float4/float8/numeric) and date/time types
 /// (date/timestamp). `typispreferred` matches pg_type.dat (float8 / int4 are the
@@ -427,18 +394,18 @@ fn m2_base_types() -> Vec<BootBaseType> {
     use crate::utils::fmgroids as f;
     // FLOAT8PASSBYVAL is true on 64-bit (Datum is 8 bytes); we target 64-bit only.
     vec![
-        BootBaseType { oid: BOOLOID, name: "bool", len: 1, byval: true, align: TYPALIGN_CHAR, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_BOOLEAN, preferred: false, input: f::F_BOOLIN, output: f::F_BOOLOUT },
-        BootBaseType { oid: NAMEOID, name: "name", len: 64, byval: false, align: TYPALIGN_CHAR, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_STRING, preferred: false, input: f::F_NAMEIN, output: f::F_NAMEOUT },
-        BootBaseType { oid: INT8OID, name: "int8", len: 8, byval: true, align: TYPALIGN_DOUBLE, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_NUMERIC, preferred: false, input: f::F_INT8IN, output: f::F_INT8OUT },
-        BootBaseType { oid: INT2OID, name: "int2", len: 2, byval: true, align: TYPALIGN_SHORT, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_NUMERIC, preferred: false, input: f::F_INT2IN, output: f::F_INT2OUT },
-        BootBaseType { oid: INT4OID, name: "int4", len: 4, byval: true, align: TYPALIGN_INT, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_NUMERIC, preferred: false, input: f::F_INT4IN, output: f::F_INT4OUT },
-        BootBaseType { oid: TEXTOID, name: "text", len: -1, byval: false, align: TYPALIGN_INT, storage: TYPSTORAGE_EXTENDED, category: TYPCATEGORY_STRING, preferred: true, input: f::F_TEXTIN, output: f::F_TEXTOUT },
-        BootBaseType { oid: OIDOID, name: "oid", len: 4, byval: true, align: TYPALIGN_INT, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_NUMERIC, preferred: false, input: f::F_OIDIN, output: f::F_OIDOUT },
-        BootBaseType { oid: FLOAT4OID, name: "float4", len: 4, byval: true, align: TYPALIGN_INT, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_NUMERIC, preferred: false, input: f::F_FLOAT4IN, output: f::F_FLOAT4OUT },
-        BootBaseType { oid: FLOAT8OID, name: "float8", len: 8, byval: true, align: TYPALIGN_DOUBLE, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_NUMERIC, preferred: true, input: f::F_FLOAT8IN, output: f::F_FLOAT8OUT },
-        BootBaseType { oid: NUMERICOID, name: "numeric", len: -1, byval: false, align: TYPALIGN_INT, storage: TYPSTORAGE_MAIN, category: TYPCATEGORY_NUMERIC, preferred: false, input: f::F_NUMERIC_IN, output: f::F_NUMERIC_OUT },
-        BootBaseType { oid: DATEOID, name: "date", len: 4, byval: true, align: TYPALIGN_INT, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_DATETIME, preferred: false, input: f::F_DATE_IN, output: f::F_DATE_OUT },
-        BootBaseType { oid: TIMESTAMPOID, name: "timestamp", len: 8, byval: true, align: TYPALIGN_DOUBLE, storage: TYPSTORAGE_PLAIN, category: TYPCATEGORY_DATETIME, preferred: false, input: f::F_TIMESTAMP_IN, output: f::F_TIMESTAMP_OUT },
+        basetype!(BOOLOID, "bool", len => 1, byval => true, TYPALIGN_CHAR, TYPSTORAGE_PLAIN, TYPCATEGORY_BOOLEAN, preferred => false, f::F_BOOLIN, f::F_BOOLOUT),
+        basetype!(NAMEOID, "name", len => 64, byval => false, TYPALIGN_CHAR, TYPSTORAGE_PLAIN, TYPCATEGORY_STRING, preferred => false, f::F_NAMEIN, f::F_NAMEOUT),
+        basetype!(INT8OID, "int8", len => 8, byval => true, TYPALIGN_DOUBLE, TYPSTORAGE_PLAIN, TYPCATEGORY_NUMERIC, preferred => false, f::F_INT8IN, f::F_INT8OUT),
+        basetype!(INT2OID, "int2", len => 2, byval => true, TYPALIGN_SHORT, TYPSTORAGE_PLAIN, TYPCATEGORY_NUMERIC, preferred => false, f::F_INT2IN, f::F_INT2OUT),
+        basetype!(INT4OID, "int4", len => 4, byval => true, TYPALIGN_INT, TYPSTORAGE_PLAIN, TYPCATEGORY_NUMERIC, preferred => false, f::F_INT4IN, f::F_INT4OUT),
+        basetype!(TEXTOID, "text", len => -1, byval => false, TYPALIGN_INT, TYPSTORAGE_EXTENDED, TYPCATEGORY_STRING, preferred => true, f::F_TEXTIN, f::F_TEXTOUT),
+        basetype!(OIDOID, "oid", len => 4, byval => true, TYPALIGN_INT, TYPSTORAGE_PLAIN, TYPCATEGORY_NUMERIC, preferred => false, f::F_OIDIN, f::F_OIDOUT),
+        basetype!(FLOAT4OID, "float4", len => 4, byval => true, TYPALIGN_INT, TYPSTORAGE_PLAIN, TYPCATEGORY_NUMERIC, preferred => false, f::F_FLOAT4IN, f::F_FLOAT4OUT),
+        basetype!(FLOAT8OID, "float8", len => 8, byval => true, TYPALIGN_DOUBLE, TYPSTORAGE_PLAIN, TYPCATEGORY_NUMERIC, preferred => true, f::F_FLOAT8IN, f::F_FLOAT8OUT),
+        basetype!(NUMERICOID, "numeric", len => -1, byval => false, TYPALIGN_INT, TYPSTORAGE_MAIN, TYPCATEGORY_NUMERIC, preferred => false, f::F_NUMERIC_IN, f::F_NUMERIC_OUT),
+        basetype!(DATEOID, "date", len => 4, byval => true, TYPALIGN_INT, TYPSTORAGE_PLAIN, TYPCATEGORY_DATETIME, preferred => false, f::F_DATE_IN, f::F_DATE_OUT),
+        basetype!(TIMESTAMPOID, "timestamp", len => 8, byval => true, TYPALIGN_DOUBLE, TYPSTORAGE_PLAIN, TYPCATEGORY_DATETIME, preferred => false, f::F_TIMESTAMP_IN, f::F_TIMESTAMP_OUT),
     ]
 }
 
