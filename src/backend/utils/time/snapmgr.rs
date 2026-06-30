@@ -268,6 +268,18 @@ pub fn GetNonHistoricCatalogSnapshot(shared: &Arc<SharedState>, relid: Oid) -> S
         // The catalog snapshot participates in xmin tracking via being valid;
         // its xmin is consulted by snapshot_reset_xmin().
     }
+
+    // PG `GetNonHistoricCatalogSnapshot`: mark the snapshot as valid for the
+    // current command id. A cached catalog snapshot reused across commands within a
+    // transaction must see rows written by earlier commands (e.g. CREATE VIEW reads
+    // its just-created relation after a CommandCounterIncrement), so refresh curcid.
+    let curcid = crate::access::xact::GetCurrentCommandId(false);
+    SNAPMGR.with(|s| {
+        if let Some(arc) = s.borrow_mut().catalog.as_mut() {
+            Arc::make_mut(arc).curcid = curcid;
+        }
+    });
+
     SNAPMGR.with(|s| s.borrow().catalog.clone())
 }
 

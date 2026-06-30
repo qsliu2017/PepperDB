@@ -17,3 +17,4 @@ pub mod tablecmds;
 pub mod tablespace;
 pub mod typecmds;
 pub mod variable;
+pub mod view;

@@ -5,6 +5,13 @@ use crate::postgres_ext::Oid;
 
 pub const RewriteRelationId: Oid = Oid::new(2618);
 
+/// pg_rewrite has no `BKI_ROWTYPE_OID`; the single-database port uses its relid as
+/// the nailed-catalog rowtype identity (non-load-bearing, mirrors pg_collation).
+pub const RewriteRelation_Rowtype_Id: Oid = Oid::new(2618);
+
+/// The pg_rewrite OID b-tree index (`pg_rewrite_oid_index`, OID 2692).
+pub const RewriteOidIndexId: Oid = Oid::new(2692);
+
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
 pub struct FormData_pg_rewrite {

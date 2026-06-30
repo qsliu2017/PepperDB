@@ -218,7 +218,20 @@ pub fn FigureColname(node: &Node) -> String {
 /// arms with constant/recursive names are live now. A bare `A_Const` (and any
 /// other unnamed leaf) falls through to strength 0 -> "?column?".
 fn figure_colname_internal<'a>(node: &'a Node, name: &mut Option<&'a str>) -> i32 {
+    use crate::nodes::parsenodes::ColumnRefField;
     match node {
+        Node::ColumnRef(c) => {
+            // find last field name, if any, ignoring "*"
+            let fname = c.fields.iter().rev().find_map(|f| match f {
+                ColumnRefField::String(s) => Some(s.sval.as_str()),
+                ColumnRefField::Star(_) => None,
+            });
+            if let Some(fname) = fname {
+                *name = Some(fname);
+                return 2;
+            }
+            0
+        }
         Node::A_Expr(a) => {
             if a.kind == A_Expr_Kind::NULLIF {
                 // make nullif() act like a regular function
@@ -239,9 +252,9 @@ fn figure_colname_internal<'a>(node: &'a Node, name: &mut Option<&'a str>) -> i3
             2
         }
         // A_Const and every other unnamed leaf fall through to strength 0
-        // ("?column?"). ColumnRef / FuncCall / TypeCast / A_Indirection (value-
-        // node names) and SubLink / CaseExpr / JsonExpr (subquery/JSON names)
-        // grow in later milestones.
+        // ("?column?"). FuncCall / TypeCast / A_Indirection (value-node names)
+        // and SubLink / CaseExpr / JsonExpr (subquery/JSON names) grow in later
+        // milestones.
         _ => 0,
     }
 }

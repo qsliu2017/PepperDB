@@ -440,6 +440,13 @@ pub async fn heap_drop_with_catalog(shared: &Arc<SharedState>, relid: Oid) {
     // Drop the catalog-index registry entry if this relation is an index.
     crate::backend::catalog::indexing::unregister_catalog_index(relid);
 
+    // Drop any rewrite rules on this relation (PG deletes the pg_rewrite rows via
+    // dependency; the port forgets the in-memory registry entry so a later relation
+    // reusing this OID is not mistaken for a view).
+    if let Some(reg) = crate::backend::rewrite::rule_registry::RuleRegistry::get() {
+        reg.forget(relid);
+    }
+
     // Evict the relcache entry so the next open rebuilds (and finds it gone).
     relation_forget_relation(relid);
 }

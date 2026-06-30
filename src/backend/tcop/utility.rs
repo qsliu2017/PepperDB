@@ -152,7 +152,42 @@ pub async fn standard_process_utility(
         | Node::CreateTableSpaceStmt(_) => {
             process_object_ddl(shared, parsetree).await;
         }
+        // --- CREATE VIEW / CREATE RULE (M11, step 40) ---
+        Node::ViewStmt(_) | Node::RuleStmt(_) => {
+            process_view_rule_stmt(shared, pstmt, parsetree, query_string).await;
+        }
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
+    }
+}
+
+/// The `T_ViewStmt` / `T_RuleStmt` arms (M11, step 40): CREATE [OR REPLACE] VIEW
+/// stores the view's `_RETURN` rule, CREATE RULE defines a rewrite rule. Each bumps
+/// the command counter so the next command sees the new relation/rule. Split out of
+/// `standard_process_utility` to keep that dispatcher small.
+async fn process_view_rule_stmt(
+    shared: &Arc<SharedState>,
+    pstmt: &PlannedStmt,
+    parsetree: &Node,
+    query_string: &str,
+) {
+    use crate::backend::access::transam::xact::CommandCounterIncrement;
+    match parsetree {
+        Node::ViewStmt(stmt) => {
+            crate::backend::commands::view::define_view(
+                shared,
+                stmt,
+                query_string,
+                pstmt.stmt_location,
+                pstmt.stmt_len,
+            )
+            .await;
+            CommandCounterIncrement();
+        }
+        Node::RuleStmt(stmt) => {
+            crate::backend::rewrite::rewriteDefine::define_rule(shared, stmt, query_string).await;
+            CommandCounterIncrement();
+        }
+        other => not_yet_reachable(&format!("process_view_rule_stmt: {other:?}")),
     }
 }
 
@@ -431,6 +466,8 @@ pub fn create_command_tag(parsetree: &Node) -> CommandTag {
         Node::CreatedbStmt(_) => CommandTag::CreateDatabase,
         Node::DropdbStmt(_) => CommandTag::DropDatabase,
         Node::CreateTableSpaceStmt(_) => CommandTag::CreateTablespace,
+        Node::ViewStmt(_) => CommandTag::CreateView,
+        Node::RuleStmt(_) => CommandTag::CreateRule,
         Node::TransactionStmt(stmt) => match stmt.kind {
             TxKind::BEGIN => CommandTag::Begin,
             TxKind::START => CommandTag::StartTransaction,

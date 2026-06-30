@@ -178,6 +178,11 @@ shared_state! {
     /// Mutex (PG `BackgroundWorkerLock`). Published process-wide so dynamic
     /// registration / handle polling reach one struct without a SharedState handle.
     bgworker: crate::backend::postmaster::bgworker::BackgroundWorkerShmem,
+
+    /// In-memory rewrite-rule action store (no C shmem analog; stands in for the
+    /// `pg_rewrite.ev_action` pg_node_tree until nodeToString/stringToNode land).
+    /// Keyed by relation OID; the relcache reads it to build `rd_rules`.
+    rule_registry: crate::backend::rewrite::rule_registry::RuleRegistry,
 }
 
 /// Default `PROCARRAY_MAXPROCS` (MaxBackends + max_prepared_xacts) when the
@@ -324,6 +329,16 @@ impl SharedState {
         // SharedState handle.
         let autovacuum = crate::backend::postmaster::autovacuum::AutoVacuumShmem::new();
         crate::backend::postmaster::autovacuum::set_autovacuum_shmem(autovacuum.clone());
+
+        // Rewrite-rule action store (no ipci.c line; a heap structure standing in
+        // for the pg_rewrite action-tree storage). Built last among the modules.
+        // A fresh per-database rule store, published process-wide so query_rewrite
+        // reaches it without a SharedState handle. The publish is re-bound on every
+        // SharedState::new (a new tempdir in tests gets a clean store), and the same
+        // Arc is kept in the field so the field and the global never diverge.
+        let rule_registry =
+            Arc::new(crate::backend::rewrite::rule_registry::RuleRegistry::new());
+        crate::backend::rewrite::rule_registry::RuleRegistry::set(rule_registry.clone());
         //   (Replication* / WalSnd / WalRcv / WalSummarizer / PgArch /
         //    ApplyLauncher / SlotSync -- deferred)
 
@@ -352,6 +367,7 @@ impl SharedState {
             checkpointer,
             autovacuum,
             bgworker,
+            rule_registry,
         })
     }
 

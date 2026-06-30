@@ -59,9 +59,7 @@ pub fn combine_range_tables(
     unimplemented!()
 }
 
-pub fn offset_var_nodes(_node: &mut Node, _offset: i32, _sublevels_up: i32) {
-    unimplemented!()
-}
+pub use crate::backend::rewrite::rewriteManip::offset_var_nodes;
 
 pub fn change_var_nodes(_node: &mut Node, _rt_index: i32, _new_index: i32, _sublevels_up: i32) {
     unimplemented!()
@@ -81,9 +79,7 @@ pub fn change_var_nodes_walk_expression(_node: &mut Node, _context: &mut ChangeV
     unimplemented!()
 }
 
-pub fn increment_var_sublevels_up(_node: &mut Node, _delta_sublevels_up: i32, _min_sublevels_up: i32) {
-    unimplemented!()
-}
+pub use crate::backend::rewrite::rewriteManip::increment_var_sublevels_up;
 
 pub fn increment_var_sublevels_up_rtable(
     _rtable: &mut [Node],
@@ -93,18 +89,14 @@ pub fn increment_var_sublevels_up_rtable(
     unimplemented!()
 }
 
-pub fn range_table_entry_used(_node: &Node, _rt_index: i32, _sublevels_up: i32) -> bool {
-    unimplemented!()
-}
+pub use crate::backend::rewrite::rewriteManip::range_table_entry_used;
 
 /// Returns the INSERT...SELECT subquery, plus a handle to the slot holding it.
 pub fn get_insert_select_query(_parsetree: &mut Query) -> Option<&mut Query> {
     unimplemented!()
 }
 
-pub fn add_qual(_parsetree: &mut Query, _qual: Option<Node>) {
-    unimplemented!()
-}
+pub use crate::backend::rewrite::rewriteManip::add_qual;
 pub fn add_inverted_qual(_parsetree: &mut Query, _qual: Option<Node>) {
     unimplemented!()
 }

@@ -1361,6 +1361,11 @@ fn gen_bootstrap_schemas(
         ("pg_tablespace", "pg_tablespace.h"),
         ("pg_collation", "pg_collation.h"),
         ("pg_conversion", "pg_conversion.h"),
+        // M11 (step 40): pg_rewrite is nailed so DefineQueryRewrite's InsertRule can
+        // write the view _RETURN rule's metadata row before pg_rewrite has a pg_class
+        // self-row. The action/qual trees live in the in-memory rule registry; the
+        // ev_action/ev_qual varlena columns hold a deparsed placeholder.
+        ("pg_rewrite", "pg_rewrite.h"),
     ];
 
     for (cat, hdr) in catalogs {

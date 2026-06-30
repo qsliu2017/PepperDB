@@ -72,32 +72,118 @@ fn rewrite_query(
     vec![parsetree]
 }
 
-/// PG `fireRIRrules`: apply ON SELECT (RIR) rules and expand views/RLS, recursing
-/// through sublinks and subquery RTEs.
+/// PG `fireRIRrules`: apply ON SELECT (RIR) rules and expand views, recursing
+/// through subquery RTEs. A RELATION RTE that is a view (has an ON SELECT
+/// `_RETURN` rule in the registry) is replaced by a SUBQUERY RTE holding the
+/// view's query (`apply_retrieve_rule`); a SUBQUERY RTE is recursed into. Plain
+/// tables and the planner-injected RTE_RESULT have no rule and pass through.
 ///
-/// M1 live path: a table-less SELECT has no RTEs to expand, no view to inline,
-/// no RLS policies, and no sublinks, so this is a pass-through returning the
-/// input query unchanged. The per-RTE view/RLS expansion and sublink recursion
-/// grow with the range-table and rule machinery.
-fn fire_rir_rules(parsetree: Query, _active_rirs: &mut Vec<crate::postgres_ext::Oid>) -> Query {
-    // PG walks parsetree->rtable expanding view/subquery RTEs and applying RLS,
-    // then recurses into sublinks. A plain RTE_RELATION (an ordinary table) and the
-    // planner-injected RTE_RESULT have no ON SELECT rule, view, or RLS to expand,
-    // so the pass is a no-op for them. View/subquery RTE expansion and RLS grow at
-    // their milestone (M11); a non-relation/result RTE still routes to the guard.
-    for rte in &parsetree.rtable {
-        let crate::nodes::nodes::Node::RangeTblEntry(rte) = rte else {
-            not_yet_reachable("fireRIRrules: rangetable entry is not an RTE");
+/// `active_rirs` is the OID stack used to detect infinite recursion in
+/// self-referencing views. RLS policies and sublink RIR recursion are staged.
+fn fire_rir_rules(mut parsetree: Query, active_rirs: &mut Vec<crate::postgres_ext::Oid>) -> Query {
+    use crate::nodes::nodes::Node;
+    use crate::nodes::parsenodes::RTEKind;
+
+    // The rtable grows as views expand into subquery RTEs; walk by index and
+    // re-read the length each iteration (PG's manual rt_index loop).
+    let mut rt_index = 0usize;
+    while rt_index < parsetree.rtable.len() {
+        // Snapshot the RTE kind / relid for this index without holding a borrow.
+        let (rtekind, relid) = match &parsetree.rtable[rt_index] {
+            Node::RangeTblEntry(rte) => (rte.rtekind, rte.relid),
+            _ => not_yet_reachable("fireRIRrules: rangetable entry is not an RTE"),
         };
-        match rte.rtekind {
-            crate::nodes::parsenodes::RTEKind::RELATION
-            | crate::nodes::parsenodes::RTEKind::RESULT => {}
+
+        match rtekind {
+            // A subquery RTE: recurse into its query (e.g. an already-expanded view
+            // referencing another view).
+            RTEKind::SUBQUERY => {
+                if let Node::RangeTblEntry(rte) = &mut parsetree.rtable[rt_index]
+                    && let Some(sub) = rte.subquery.take()
+                {
+                    let expanded = fire_rir_rules(*sub, active_rirs);
+                    if let Node::RangeTblEntry(rte) = &mut parsetree.rtable[rt_index] {
+                        rte.subquery = Some(Box::new(expanded));
+                    }
+                }
+            }
+            // A relation RTE: if it is a view (has an ON SELECT rule), expand it.
+            RTEKind::RELATION => {
+                if let Some(view_query) = on_select_rule_action(relid) {
+                    // Recursion guard: a view referencing itself.
+                    if active_rirs.contains(&relid) {
+                        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                            e.errcode(crate::utils::errcodes::ERRCODE_INVALID_OBJECT_DEFINITION)
+                                .errmsg("infinite recursion detected in rules for relation".to_owned());
+                        });
+                        unreachable!("ereport(ERROR) diverges");
+                    }
+                    active_rirs.push(relid);
+                    parsetree = apply_retrieve_rule(parsetree, view_query, rt_index, active_rirs);
+                    active_rirs.pop();
+                }
+            }
+            RTEKind::RESULT => {}
             _ => not_yet_reachable("fireRIRrules: range-table / view / RLS expansion"),
         }
+        rt_index += 1;
     }
+
     if parsetree.hasSubLinks {
         not_yet_reachable("fireRIRrules: sublink RIR recursion");
     }
+    parsetree
+}
+
+/// The view query stored as relation `relid`'s ON SELECT `_RETURN` rule action, or
+/// `None` if `relid` is not a view. Reads the process-wide rule registry.
+fn on_select_rule_action(relid: crate::postgres_ext::Oid) -> Option<Query> {
+    let registry = crate::backend::rewrite::rule_registry::RuleRegistry::get()?;
+    let rules = registry.rules_for(relid)?;
+    rules
+        .rules
+        .iter()
+        .find(|r| r.event == CmdType::SELECT && r.is_instead)
+        .and_then(|r| r.actions.first().cloned())
+}
+
+/// PG `ApplyRetrieveRule` (the plain `SELECT FROM view` path): splice the view's
+/// query into the host query's RTE at `rt_index`, turning that RTE into a
+/// SUBQUERY RTE. The view's query is first expanded itself (recursive
+/// `fire_rir_rules`) so a view-on-a-view inlines fully. The result-relation
+/// (view as DML target), FOR UPDATE markup, RLS, and security-barrier handling
+/// are staged (rules.md s4).
+fn apply_retrieve_rule(
+    mut parsetree: Query,
+    view_query: Query,
+    rt_index: usize,
+    active_rirs: &mut Vec<crate::postgres_ext::Oid>,
+) -> Query {
+    use crate::nodes::nodes::Node;
+    use crate::nodes::parsenodes::RTEKind;
+
+    // The view is the SELECT's result relation only for DML on a view (staged).
+    if parsetree.resultRelation == (rt_index as i32 + 1) {
+        not_yet_reachable("ApplyRetrieveRule: view as INSERT/UPDATE/DELETE target");
+    }
+
+    // Deep-copy the rule action (the registry's tree must not be scribbled on) and
+    // expand views referenced inside it. `active_rirs` still holds this view's OID,
+    // so a self-reference is caught.
+    let rule_action = fire_rir_rules(view_query, active_rirs);
+
+    // Splice: turn the relation RTE into a subquery RTE holding the view's query.
+    // relid/relkind/perminfoindex are deliberately left set (PG keeps them so the
+    // view itself can be locked + permission-checked), but the planner's M11 path
+    // reads only rtekind/subquery, so they are inert here.
+    let Node::RangeTblEntry(rte) = &mut parsetree.rtable[rt_index] else {
+        not_yet_reachable("ApplyRetrieveRule: target RTE is not an RTE");
+    };
+    rte.rtekind = RTEKind::SUBQUERY;
+    rte.subquery = Some(Box::new(rule_action));
+    rte.inh = false; // never set on a subquery RTE
+    rte.tablesample = None;
+
     parsetree
 }
 

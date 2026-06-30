@@ -445,6 +445,16 @@ pub fn subquery_planner(
     // PG, and is the source of the M2 RTE_RESULT.
     crate::backend::optimizer::prep::prepjointree::replace_empty_jointree(&mut root.parse);
 
+    // pull_up_subqueries: flatten subqueries-in-FROM (e.g. an expanded view's
+    // SUBQUERY RTE) into the parent jointree. A pulled-up subquery's RTE is left in
+    // the rangetable with `subquery = None` (dead, unreferenced); the survey below
+    // treats it as a no-op. M11: this is where a `SELECT FROM view` (rewritten to a
+    // subquery RTE) becomes a flat base-relation query the join search can plan.
+    crate::backend::optimizer::prep::prepjointree::pull_up_subqueries(&mut root);
+    // Flatten any nested FromExpr the pullup spliced in (the view's FromExpr lands
+    // as a child of the parent FromExpr) so the jointree is a flat fromlist again.
+    crate::backend::optimizer::prep::prepjointree::flatten_jointree(&mut root.parse);
+
     // Survey the rangetable. M2 supports an RTE_RELATION (a base rel) and an
     // RTE_RESULT (the empty-FROM placeholder). JOIN/SUBQUERY/FUNCTION/VALUES/GROUP
     // RTEs, lateral refs, and security quals grow with their milestones.
@@ -462,6 +472,9 @@ pub fn subquery_planner(
         match rte.rtekind {
             crate::nodes::parsenodes::RTEKind::RELATION => rte.inh = false,
             crate::nodes::parsenodes::RTEKind::RESULT => {}
+            // A subquery RTE flattened by pull_up_subqueries: dead (subquery = None),
+            // no RangeTblRef left in the jointree, nothing references its varno.
+            crate::nodes::parsenodes::RTEKind::SUBQUERY if rte.subquery.is_none() => {}
             other => not_yet_reachable(&format!("subquery_planner: RTE kind {other:?}")),
         }
     }

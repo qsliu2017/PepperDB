@@ -99,7 +99,7 @@ fn pull_up_subqueries_recurse(root: &mut PlannerInfo, jtnode: Node, in_outer_joi
                 && let Some(subquery) = rte.subquery.as_deref()
                 && is_simple_subquery(root, subquery, rte, in_outer_join)
             {
-                return pull_up_simple_subquery(root, jtnode);
+                return pull_up_simple_subquery(root, &jtnode);
             }
             // Simple UNION ALL subquery -> flatten to an append relation.
             if rte.rtekind == RTEKind::SUBQUERY
@@ -148,21 +148,157 @@ fn pull_up_subqueries_recurse(root: &mut PlannerInfo, jtnode: Node, in_outer_joi
 }
 
 /// PG `pull_up_simple_subquery`: splice a pullable subquery's jointree into the
-/// parent, replacing the parent's Vars that reference the subquery's outputs.
+/// parent, replacing the parent's Vars that reference the subquery's outputs with
+/// the subquery's targetlist expressions.
 ///
-/// STAGED (rules.md s4): the splice depends on `pullup_replace_vars` (the ~2700-
-/// line Var-substitution pass), `OffsetVarNodes`/`IncrementVarSublevelsUp`,
-/// `substitute_phv_relids`, and recursive subquery planning -- none translated
-/// yet. `is_simple_subquery` already gated us here, so reaching this means a
-/// genuine `FROM (subquery)`, which M7 does not plan.
-fn pull_up_simple_subquery(_root: &mut PlannerInfo, _jtnode: Node) -> Node {
-    not_yet_reachable("pull_up_simple_subquery: subquery flattening (pullup_replace_vars)");
+/// M11 inner-join / no-LATERAL / no-PHV path (rules.md s4 for the staged tail):
+/// renumber the subquery into the parent's varno space (`OffsetVarNodes` by the
+/// parent rtable length, `IncrementVarSublevelsUp(-1, 1)` for its outer refs),
+/// replace the parent's Vars on this varno with the (renumbered) subquery tlist
+/// exprs, append the subquery's rangetable to the parent, and return the
+/// subquery's jointree `FromExpr` to splice into the parent (carrying the view's
+/// own WHERE quals). The grouping-sets / appendrel / rowmark / PHV-relid fixups
+/// are staged.
+fn pull_up_simple_subquery(root: &mut PlannerInfo, jtnode: &Node) -> Node {
+    use crate::backend::rewrite::rewriteManip::{increment_var_sublevels_up, offset_var_nodes};
+    use crate::nodes::makefuncs::makeFromExpr;
+
+    let Node::RangeTblRef(rtr) = jtnode else {
+        not_yet_reachable("pull_up_simple_subquery: jtnode is not a RangeTblRef");
+    };
+    let varno = rtr.rtindex;
+
+    // Take the subquery out of its RTE (a clone of the view's query). The RTE stays
+    // in the rtable as a now-unreferenced subquery RTE (subquery = None).
+    let mut subquery = {
+        let Some(Node::RangeTblEntry(rte)) = root.parse.rtable.get_mut((varno - 1) as usize) else {
+            not_yet_reachable("pull_up_simple_subquery: missing subquery RTE");
+        };
+        *rte
+            .subquery
+            .take()
+            .unwrap_or_else(|| not_yet_reachable("pull_up_simple_subquery: empty subquery RTE"))
+    };
+
+    // Recursively pull up any subqueries inside this one first (view-on-view).
+    {
+        let saved = std::mem::replace(&mut root.parse, Box::new(subquery));
+        pull_up_subqueries(root);
+        subquery = *std::mem::replace(&mut root.parse, saved);
+    }
+
+    // Renumber the subquery into the parent's varno space.
+    let rtoffset = root.parse.rtable.len() as i32;
+    let mut subquery_node = Node::Query(Box::new(subquery));
+    offset_var_nodes(&mut subquery_node, rtoffset, 0);
+    increment_var_sublevels_up(&mut subquery_node, -1, 1);
+    let Node::Query(subquery) = subquery_node else { unreachable!("round-trips a Query node") };
+    let mut subquery = *subquery;
+
+    // Replace every parent Var on `varno` with the matching subquery tlist expr.
+    let tlist = subquery.targetList.clone();
+    replace_parent_vars(&mut root.parse, varno, &tlist);
+
+    // Append the subquery's rangetable + permission infos to the parent (the
+    // offset above made the subquery's Vars index these appended entries).
+    let sub_rtable = std::mem::take(&mut subquery.rtable);
+    let sub_perminfos = std::mem::take(&mut subquery.rteperminfos);
+    root.parse.rtable.extend(sub_rtable);
+    root.parse.rteperminfos.extend(sub_perminfos);
+
+    // Merge flags PG ORs back in (a pullable subquery has no aggs/windows/SRFs).
+    root.parse.hasSubLinks |= subquery.hasSubLinks;
+    root.parse.hasRowSecurity |= subquery.hasRowSecurity;
+
+    // Return the subquery's jointree to splice in place of the RangeTblRef. It is
+    // a FromExpr carrying the view's fromlist + WHERE quals; the planner flattens
+    // a nested FromExpr before the join search.
+    match subquery.jointree {
+        Some(node @ Node::FromExpr(_)) => node,
+        // FROM-less view (e.g. SELECT 1): a result placeholder was injected by
+        // replace_empty_jointree during the recursive pull_up_subqueries above.
+        _ => Node::FromExpr(Box::new(makeFromExpr(Vec::new(), None))),
+    }
+}
+
+/// Replace, in the parent query's targetlist / jointree quals / RETURNING list,
+/// every Var referencing `varno` (level 0) with its subquery targetlist expr.
+fn replace_parent_vars(parse: &mut Query, varno: i32, tlist: &[Node]) {
+    use crate::backend::rewrite::rewriteManip::replace_vars_from_targetlist;
+
+    let targets = std::mem::take(&mut parse.targetList);
+    parse.targetList = targets
+        .into_iter()
+        .map(|te| replace_vars_from_targetlist(te, varno, 0, tlist))
+        .collect();
+
+    if let Some(jt) = parse.jointree.take() {
+        parse.jointree = Some(replace_vars_from_targetlist(jt, varno, 0, tlist));
+    }
+
+    if !parse.returningList.is_empty() {
+        let ret = std::mem::take(&mut parse.returningList);
+        parse.returningList = ret
+            .into_iter()
+            .map(|n| replace_vars_from_targetlist(n, varno, 0, tlist))
+            .collect();
+    }
 }
 
 /// PG `pull_up_simple_union_all` / `flatten_simple_union_all`: flatten a simple
 /// `UNION ALL` subquery into an append relation. STAGED (appendrel expansion).
 fn pull_up_simple_union_all(_root: &mut PlannerInfo, _jtnode: Node) -> Node {
     not_yet_reachable("pull_up_simple_union_all: UNION ALL appendrel flattening");
+}
+
+/// Flatten the top-level jointree so its fromlist holds only RangeTblRef /
+/// JoinExpr items: a child `FromExpr` (spliced in by `pull_up_simple_subquery`)
+/// is dissolved -- its fromlist items are hoisted into the parent and its quals
+/// are ANDed into the parent's quals. This keeps the jointree the flat shape the
+/// M11 join search expects (PG instead leaves the nesting for deconstruct_jointree
+/// to flatten; the port flattens here, before query_planner reads the fromlist).
+pub fn flatten_jointree(parse: &mut Query) {
+    let Some(Node::FromExpr(top)) = parse.jointree.as_mut() else { return };
+
+    let children = std::mem::take(&mut top.fromlist);
+    let mut new_fromlist: Vec<Node> = Vec::with_capacity(children.len());
+    let mut extra_quals: Vec<Node> = Vec::new();
+    for child in children {
+        flatten_fromexpr_child(child, &mut new_fromlist, &mut extra_quals);
+    }
+    top.fromlist = new_fromlist;
+
+    // AND the hoisted quals into the parent's quals.
+    for q in extra_quals {
+        top.quals = Some(match top.quals.take() {
+            None => q,
+            Some(existing) => and_two(existing, q),
+        });
+    }
+}
+
+/// Dissolve a jointree child: a `FromExpr` (a view spliced in by
+/// `pull_up_simple_subquery`, possibly itself holding a spliced child for a
+/// view-on-view) has its fromlist hoisted into `out` and its quals collected into
+/// `quals`, recursively; any other node (RangeTblRef / JoinExpr) is kept as is.
+fn flatten_fromexpr_child(child: Node, out: &mut Vec<Node>, quals: &mut Vec<Node>) {
+    match child {
+        Node::FromExpr(inner) => {
+            if let Some(q) = inner.quals {
+                quals.push(q);
+            }
+            for grandchild in inner.fromlist {
+                flatten_fromexpr_child(grandchild, out, quals);
+            }
+        }
+        other => out.push(other),
+    }
+}
+
+/// AND two qualification clauses into a 2-arg AND BoolExpr.
+fn and_two(a: Node, b: Node) -> Node {
+    use crate::nodes::primnodes::{BoolExpr, BoolExprType};
+    Node::BoolExpr(Box::new(BoolExpr { boolop: BoolExprType::AND_EXPR, args: vec![a, b], location: -1 }))
 }
 
 /// PG `flatten_simple_union_all`: the top-level UNION ALL flattening entry. The

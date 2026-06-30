@@ -3142,4 +3142,173 @@ mod wire_tests {
             .expect("supervisor drains")
             .expect("supervisor task ok");
     }
+
+    /// All text values of every DataRow in a result message stream.
+    fn datarow_values(msgs: &[Msg]) -> Vec<Vec<String>> {
+        msgs.iter().filter(|m| m.ty == b'D').map(|m| datarow_texts(&m.body)).collect()
+    }
+
+    /// THE M11 MILESTONE: CREATE VIEW + SELECT through it. The view's query is stored
+    /// as its ON SELECT _RETURN rule; `SELECT * FROM v` is rewritten (view RTE ->
+    /// subquery RTE) then the subquery is pulled up into the host query, so the rows
+    /// match the underlying SELECT. A further WHERE on top of the view composes.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m11_create_view_and_select_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let r = simple_query(&mut client, &mut buf, "CREATE TABLE t (a int, b int)").await;
+        assert_eq!(r[0].body, b"CREATE TABLE\0");
+        for (a, b) in [(-1, 10), (1, 20), (2, 30), (3, 40)] {
+            let ins = simple_query(
+                &mut client, &mut buf, &format!("INSERT INTO t VALUES ({a}, {b})"),
+            )
+            .await;
+            assert_eq!(ins[0].body, b"INSERT 0 1\0");
+        }
+
+        // CREATE VIEW v AS SELECT a, b FROM t WHERE a > 0 -> CREATE VIEW tag.
+        let r = simple_query(
+            &mut client, &mut buf, "CREATE VIEW v AS SELECT a, b FROM t WHERE a > 0",
+        )
+        .await;
+        assert_eq!(r[0].body, b"CREATE VIEW\0", "CREATE VIEW tag");
+
+        // SELECT * FROM v -> the same rows as the underlying SELECT (a>0): {1,2,3}.
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM v").await;
+        let vals: Vec<String> = datarow_values(&sel).into_iter().map(|mut r| r.remove(0)).collect();
+        assert_eq!(vals, vec!["1", "2", "3"], "view rows = underlying SELECT where a>0");
+
+        // SELECT a FROM v WHERE b > 25 -> the host WHERE composes with the view qual:
+        // a>0 AND b>25 keeps (2,30),(3,40) -> a in {2,3}.
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM v WHERE b > 25").await;
+        let vals: Vec<String> = datarow_values(&sel).into_iter().map(|mut r| r.remove(0)).collect();
+        assert_eq!(vals, vec!["2", "3"], "host WHERE composes with the view's qual");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// M11: a view over a two-table join expands + returns joined rows.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m11_view_over_join_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        simple_query(&mut client, &mut buf, "CREATE TABLE t1 (id int, x int)").await;
+        simple_query(&mut client, &mut buf, "CREATE TABLE t2 (id int, y int)").await;
+        for (id, x) in [(1, 100), (2, 200)] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO t1 VALUES ({id}, {x})")).await;
+        }
+        for (id, y) in [(1, 11), (2, 22)] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO t2 VALUES ({id}, {y})")).await;
+        }
+
+        let r = simple_query(
+            &mut client,
+            &mut buf,
+            "CREATE VIEW jv AS SELECT t1.x, t2.y FROM t1, t2 WHERE t1.id = t2.id",
+        )
+        .await;
+        assert_eq!(r[0].body, b"CREATE VIEW\0", "CREATE VIEW over a join");
+
+        let sel = simple_query(&mut client, &mut buf, "SELECT x, y FROM jv").await;
+        let rows = datarow_values(&sel);
+        // The join on id matches (1<->1, 2<->2): (100,11),(200,22).
+        assert!(rows.contains(&vec!["100".to_string(), "11".to_string()]), "row (100,11): {rows:?}");
+        assert!(rows.contains(&vec!["200".to_string(), "22".to_string()]), "row (200,22): {rows:?}");
+        assert_eq!(rows.len(), 2, "exactly the two joined rows: {rows:?}");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// M11: a view defined over another view expands recursively.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m11_nested_view_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        simple_query(&mut client, &mut buf, "CREATE TABLE t (a int)").await;
+        for v in [1, 2, 3, 4, 5] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO t VALUES ({v})")).await;
+        }
+        // v1 keeps a > 1; v2 (on v1) keeps a < 5 -> the composition keeps {2,3,4}.
+        simple_query(&mut client, &mut buf, "CREATE VIEW v1 AS SELECT a FROM t WHERE a > 1").await;
+        let r = simple_query(&mut client, &mut buf, "CREATE VIEW v2 AS SELECT a FROM v1 WHERE a < 5").await;
+        assert_eq!(r[0].body, b"CREATE VIEW\0", "CREATE VIEW over a view");
+
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM v2").await;
+        let vals: Vec<String> = datarow_values(&sel).into_iter().map(|mut r| r.remove(0)).collect();
+        assert_eq!(vals, vec!["2", "3", "4"], "nested view: a>1 AND a<5");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// M11: CREATE OR REPLACE VIEW installs a new definition; DROP VIEW removes it
+    /// (a subsequent SELECT errors).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m11_replace_and_drop_view_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        simple_query(&mut client, &mut buf, "CREATE TABLE t (a int)").await;
+        for v in [1, 2, 3] {
+            simple_query(&mut client, &mut buf, &format!("INSERT INTO t VALUES ({v})")).await;
+        }
+        simple_query(&mut client, &mut buf, "CREATE VIEW v AS SELECT a FROM t WHERE a > 1").await;
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM v").await;
+        let vals: Vec<String> = datarow_values(&sel).into_iter().map(|mut r| r.remove(0)).collect();
+        assert_eq!(vals, vec!["2", "3"], "original view: a>1");
+
+        // CREATE OR REPLACE VIEW with a new qual (a < 3) -> the definition changes.
+        let r = simple_query(&mut client, &mut buf, "CREATE OR REPLACE VIEW v AS SELECT a FROM t WHERE a < 3").await;
+        assert_eq!(r[0].body, b"CREATE VIEW\0", "CREATE OR REPLACE VIEW tag");
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM v").await;
+        let vals: Vec<String> = datarow_values(&sel).into_iter().map(|mut r| r.remove(0)).collect();
+        assert_eq!(vals, vec!["1", "2"], "replaced view: a<3");
+
+        // DROP VIEW -> gone; SELECT through it errors server-side. ErrorResponse
+        // ('E') is not yet delivered to the client (send_message_to_frontend is a
+        // deferred stub, elog.rs; see the m9 note), so the errored SELECT is observed
+        // as producing neither a DataRow ('D') nor a successful CommandComplete ('C').
+        let r = simple_query(&mut client, &mut buf, "DROP VIEW v").await;
+        assert_eq!(r[0].body, b"DROP VIEW\0", "DROP VIEW tag");
+        let r = simple_query(&mut client, &mut buf, "SELECT a FROM v").await;
+        let tys: Vec<u8> = r.iter().map(|m| m.ty).collect();
+        assert!(!r.iter().any(|m| m.ty == b'D'), "dropped-view SELECT -> no rows: {tys:?}");
+        assert!(!r.iter().any(|m| m.ty == b'C'), "dropped-view SELECT -> no CommandComplete: {tys:?}");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
 }

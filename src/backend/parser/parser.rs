@@ -12,8 +12,9 @@ use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
 use crate::nodes::parsenodes::{
     A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, DeleteStmt, IndexElem, IndexStmt,
     InsertStmt, LockingClause, MergeStmt, MergeWhenClause, RawStmt, ResTarget, ReturningClause,
-    SelectStmt, SetOperation, SortByDir, SortByNulls, TransactionStmt, TransactionStmtKind,
-    TypeName, UpdateStmt, ValUnion, VariableSetKind, VariableSetStmt, VariableShowStmt,
+    RuleStmt, SelectStmt, SetOperation, SortByDir, SortByNulls, TransactionStmt,
+    TransactionStmtKind, TypeName, UpdateStmt, ValUnion, VariableSetKind, VariableSetStmt,
+    VariableShowStmt, ViewCheckOption, ViewStmt,
 };
 use crate::nodes::primnodes::{MergeMatchKind, OnCommitAction, OverridingKind, RangeVar};
 use crate::nodes::value::{makeFloat, makeInteger, makeString};
@@ -1246,6 +1247,57 @@ pub fn make_create_schema_stmt(
         authrole,
         schemaElts: elements,
         if_not_exists,
+    }))
+}
+
+/// A bare `String` value node (PG `makeString`), used for view column aliases.
+pub fn make_string_value_node(s: String) -> Node {
+    Node::String_(makeString(s))
+}
+
+/// gram.y `ViewStmt`: build the raw `ViewStmt`. `is_temp` folds `OptTemp` into the
+/// view RangeVar's relpersistence (TEMP -> RELPERSISTENCE_TEMP). The SELECT is
+/// carried as a raw parse tree in `query`; parse analysis happens in `DefineView`.
+pub fn make_view_stmt(
+    mut view: RangeVar,
+    aliases: Vec<Node>,
+    query: Node,
+    replace: bool,
+    with_check_option: ViewCheckOption,
+    is_temp: bool,
+) -> Node {
+    if is_temp {
+        view.relpersistence = crate::catalog::pg_class::RELPERSISTENCE_TEMP;
+    }
+    Node::ViewStmt(Box::new(ViewStmt {
+        view: Some(Box::new(view)),
+        aliases,
+        query: Some(query),
+        replace,
+        options: Vec::new(),
+        withCheckOption: with_check_option,
+    }))
+}
+
+/// gram.y `RuleStmt`: build the raw `RuleStmt`. The action statements are carried
+/// raw; `transformRuleStmt` (parse analysis) runs in `DefineRule`.
+pub fn make_rule_stmt(
+    replace: bool,
+    relation: RangeVar,
+    rulename: String,
+    where_clause: Option<Node>,
+    event: CmdType,
+    instead: bool,
+    actions: Vec<Node>,
+) -> Node {
+    Node::RuleStmt(Box::new(RuleStmt {
+        relation: Some(Box::new(relation)),
+        rulename: Some(rulename),
+        whereClause: where_clause,
+        event,
+        instead,
+        actions,
+        replace,
     }))
 }
 

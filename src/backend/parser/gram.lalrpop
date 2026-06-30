@@ -35,7 +35,8 @@ use crate::backend::parser::parser::{
     make_define_type_stmt, make_define_collation_stmt, make_create_domain_stmt,
     make_create_function_stmt, make_generic_def_elem, make_createdb_stmt, make_dropdb_stmt,
     make_create_conversion_stmt, make_create_tablespace_stmt, make_function_parameter,
-    make_ot_column_def, DropBehaviorTok, ObjType,
+    make_ot_column_def, make_view_stmt, make_rule_stmt, make_string_value_node,
+    DropBehaviorTok, ObjType,
 };
 use crate::nodes::parsenodes::{CursorOptions, FetchDirection, FETCH_ALL};
 use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
@@ -239,6 +240,12 @@ extern {
         "LOCATION"   => Token::Keyword("location"),
         "REPLACE"    => Token::Keyword("replace"),
         "OPTION"     => Token::Keyword("option"),
+        // M11 (step 40): CREATE VIEW / CREATE RULE keywords.
+        "RULE"       => Token::Keyword("rule"),
+        "ALSO"       => Token::Keyword("also"),
+        "INSTEAD"    => Token::Keyword("instead"),
+        "RECURSIVE"  => Token::Keyword("recursive"),
+        "CASCADED"   => Token::Keyword("cascaded"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -314,6 +321,8 @@ Stmt: Option<Node> = {
     <s:CreatedbStmt> => Some(s),
     <s:DropdbStmt> => Some(s),
     <s:CreateTableSpaceStmt> => Some(s),
+    <s:ViewStmt> => Some(s),
+    <s:RuleStmt> => Some(s),
     <s:InsertStmt> => Some(s),
     <s:UpdateStmt> => Some(s),
     <s:DeleteStmt> => Some(s),
@@ -768,7 +777,7 @@ CreateSeqStmt: Node = {
         make_create_seq_stmt(name, opts, false),
     "CREATE" "SEQUENCE" "IF" "NOT" "EXISTS" <name:QualifiedName> <opts:OptSeqOptList> =>
         make_create_seq_stmt(name, opts, true),
-    "CREATE" OptTemp "SEQUENCE" <name:QualifiedName> <opts:OptSeqOptList> =>
+    "CREATE" TempMarker "SEQUENCE" <name:QualifiedName> <opts:OptSeqOptList> =>
         make_create_seq_stmt(name, opts, false),
 };
 
@@ -780,8 +789,10 @@ AlterSeqStmt: Node = {
         make_alter_seq_stmt(name, opts, true),
 };
 
-// gram.y `opt_temp`: TEMP | TEMPORARY (the GLOBAL/LOCAL noise + UNLOGGED grow later).
-OptTemp: () = {
+// gram.y `opt_temp`: TEMP | TEMPORARY (the GLOBAL/LOCAL noise + UNLOGGED grow
+// later). Non-empty to avoid a `CREATE`-prefix reduce/reduce ambiguity with the
+// other CREATE forms; the "no temp" case is a separate grammar arm at each use.
+TempMarker: () = {
     "TEMP" => (),
     "TEMPORARY" => (),
 };
@@ -994,6 +1005,93 @@ CreateConversionStmt: Node = {
 CreateTableSpaceStmt: Node = {
     "CREATE" "TABLESPACE" <n:ColId> "LOCATION" <loc:"SCONST"> =>
         make_create_tablespace_stmt(n, Some(loc)),
+};
+
+// ===========================================================================
+//  CREATE VIEW  (M11, step 40)
+// ===========================================================================
+
+// gram.y `ViewStmt`: CREATE [OR REPLACE] [TEMP] VIEW name [(cols)] [WITH opts]
+// AS SelectStmt [WITH [CASCADED|LOCAL] CHECK OPTION]. The RECURSIVE form
+// (makeRecursiveViewSelect builds a UNION-ALL CTE) grows with M12 set-ops/CTEs.
+// The TEMP marker is a separate arm (see TempMarker) to keep `CREATE` LALR-clean.
+ViewStmt: Node = {
+    "CREATE" "VIEW" <view:QualifiedName> <cols:OptViewColumnList>
+        "AS" <query:SelectStmt> <co:OptCheckOption> =>
+        make_view_stmt(view, cols, query, false, co, false),
+    "CREATE" TempMarker "VIEW" <view:QualifiedName> <cols:OptViewColumnList>
+        "AS" <query:SelectStmt> <co:OptCheckOption> =>
+        make_view_stmt(view, cols, query, false, co, true),
+    "CREATE" "OR" "REPLACE" "VIEW" <view:QualifiedName>
+        <cols:OptViewColumnList> "AS" <query:SelectStmt> <co:OptCheckOption> =>
+        make_view_stmt(view, cols, query, true, co, false),
+    "CREATE" "OR" "REPLACE" TempMarker "VIEW" <view:QualifiedName>
+        <cols:OptViewColumnList> "AS" <query:SelectStmt> <co:OptCheckOption> =>
+        make_view_stmt(view, cols, query, true, co, true),
+};
+
+// gram.y `opt_column_list`: `( name (',' name)* )` of view-column aliases, each a
+// String value node (the ViewStmt.aliases shape).
+OptViewColumnList: Vec<Node> = {
+    "(" <list:ViewColumnList> ")" => list,
+    => Vec::new(),
+};
+
+ViewColumnList: Vec<Node> = {
+    <n:ColId> => vec![make_string_value_node(n)],
+    <mut list:ViewColumnList> "," <n:ColId> => { list.push(make_string_value_node(n)); list },
+};
+
+// gram.y `opt_check_option`: WITH [CASCADED|LOCAL] CHECK OPTION.
+OptCheckOption: crate::nodes::parsenodes::ViewCheckOption = {
+    "WITH" "CHECK" "OPTION" => crate::nodes::parsenodes::ViewCheckOption::CASCADED_CHECK_OPTION,
+    "WITH" "CASCADED" "CHECK" "OPTION" => crate::nodes::parsenodes::ViewCheckOption::CASCADED_CHECK_OPTION,
+    "WITH" "LOCAL" "CHECK" "OPTION" => crate::nodes::parsenodes::ViewCheckOption::LOCAL_CHECK_OPTION,
+    => crate::nodes::parsenodes::ViewCheckOption::NO_CHECK_OPTION,
+};
+
+// ===========================================================================
+//  CREATE RULE  (M11, step 40)
+// ===========================================================================
+
+// gram.y `RuleStmt`: CREATE [OR REPLACE] RULE name AS ON event TO table
+// [WHERE qual] DO [ALSO|INSTEAD] (commands | NOTHING).
+RuleStmt: Node = {
+    "CREATE" <repl:OptOrReplace> "RULE" <name:ColId> "AS" "ON" <ev:RuleEvent>
+        "TO" <rel:QualifiedName> <whr:WhereClause> "DO" <instead:OptInstead>
+        <actions:RuleActionList> =>
+        make_rule_stmt(repl, rel, name, whr, ev, instead, actions),
+};
+
+// gram.y `event`: SELECT | UPDATE | DELETE | INSERT.
+RuleEvent: CmdType = {
+    "SELECT" => CmdType::SELECT,
+    "UPDATE" => CmdType::UPDATE,
+    "DELETE" => CmdType::DELETE,
+    "INSERT" => CmdType::INSERT,
+};
+
+// gram.y `opt_instead`: INSTEAD | ALSO | /*EMPTY*/.
+OptInstead: bool = {
+    "INSTEAD" => true,
+    "ALSO"    => false,
+    => false,
+};
+
+// gram.y `RuleActionList`: NOTHING | RuleActionStmt | '(' RuleActionMulti ')'.
+// The multi-statement parenthesized form grows with the action transform; M11
+// reaches NOTHING and a single statement.
+RuleActionList: Vec<Node> = {
+    "NOTHING" => Vec::new(),
+    <s:RuleActionStmt> => vec![s],
+};
+
+// gram.y `RuleActionStmt`: SelectStmt | InsertStmt | UpdateStmt | DeleteStmt | NotifyStmt.
+RuleActionStmt: Node = {
+    SelectStmt,
+    InsertStmt,
+    UpdateStmt,
+    DeleteStmt,
 };
 
 // ===========================================================================

@@ -44,6 +44,7 @@ use crate::catalog::pg_class::{RelationRelationId, RelationRelation_Rowtype_Id};
 use crate::catalog::pg_operator::{OperatorRelationId, OperatorRelation_Rowtype_Id};
 use crate::catalog::pg_attrdef::{AttrDefaultRelationId, AttrDefaultRelation_Rowtype_Id};
 use crate::catalog::pg_constraint::{ConstraintRelationId, ConstraintRelation_Rowtype_Id};
+use crate::catalog::pg_rewrite::{RewriteRelationId, RewriteRelation_Rowtype_Id};
 use crate::catalog::pg_database::{DatabaseRelationId, DatabaseRelation_Rowtype_Id};
 use crate::catalog::pg_tablespace::TableSpaceRelationId;
 use crate::catalog::pg_collation::CollationRelationId;
@@ -177,6 +178,9 @@ pub static FORMRDESC_CATALOGS: &[BootstrapCatalog] = &[
     catalog!("pg_tablespace", TableSpaceRelationId, TableSpaceRelationId, isshared => false, SCHEMA_PG_TABLESPACE),
     catalog!("pg_collation", CollationRelationId, CollationRelationId, isshared => false, SCHEMA_PG_COLLATION),
     catalog!("pg_conversion", ConversionRelationId, ConversionRelationId, isshared => false, SCHEMA_PG_CONVERSION),
+    // M11 (step 40): pg_rewrite is nailed so DefineQueryRewrite's InsertRule can
+    // write the view _RETURN rule row. Starts empty; filled by CREATE VIEW / RULE.
+    catalog!("pg_rewrite", RewriteRelationId, RewriteRelation_Rowtype_Id, isshared => false, SCHEMA_PG_REWRITE),
 ];
 
 /// Build the compiled-in `TupleDesc` for a nailed bootstrap catalog from its
