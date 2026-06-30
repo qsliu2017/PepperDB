@@ -121,7 +121,7 @@ pub async fn get_object_address(
         ObjectType::TYPE | ObjectType::DOMAIN => {
             get_object_address_type(shared, object, missing_ok).await
         }
-        ObjectType::SCHEMA => get_object_address_schema(object, missing_ok),
+        ObjectType::SCHEMA => get_object_address_schema(shared, object, missing_ok).await,
         other => not_yet_reachable(&format!("get_object_address: {other:?}")),
     }
 }
@@ -162,14 +162,19 @@ async fn get_object_address_type(
     }
 }
 
-/// `get_object_address` for a schema (pg_namespace).
-fn get_object_address_schema(rel: &RangeVar, missing_ok: bool) -> ObjectAddress {
+/// `get_object_address` for a schema (pg_namespace). Scans pg_namespace on-disk so
+/// user-created schemas (CREATE SCHEMA) resolve, not just the seeded built-ins.
+async fn get_object_address_schema(
+    shared: &Arc<SharedState>,
+    rel: &RangeVar,
+    missing_ok: bool,
+) -> ObjectAddress {
     use crate::catalog::pg_namespace::NamespaceRelationId;
     let nspname = rel
         .relname
         .as_deref()
         .unwrap_or_else(|| unreachable!("a schema reference names the schema"));
-    match crate::backend::catalog::namespace::get_namespace_oid(nspname, missing_ok) {
+    match crate::backend::catalog::namespace::namespace_oid_by_name(shared, nspname).await {
         Some(oid) => ObjectAddress { classId: NamespaceRelationId, objectId: oid, objectSubId: 0 },
         None if missing_ok => INVALID_OBJECT_ADDRESS,
         None => {

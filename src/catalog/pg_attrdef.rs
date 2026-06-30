@@ -9,6 +9,12 @@ use std::sync::Arc;
 use crate::utils::rel::RelationData;
 
 pub const AttrDefaultRelationId: Oid = Oid(2604);
+/// pg_attrdef composite rowtype OID. Nails the descriptor at bootstrap.
+pub const AttrDefaultRelation_Rowtype_Id: Oid = Oid(11634);
+/// pg_attrdef_adrelid_adnum_index (unique on adrelid, adnum).
+pub const AttrDefaultIndexId: Oid = Oid(2656);
+/// pg_attrdef_oid_index (pkey on oid).
+pub const AttrDefaultOidIndexId: Oid = Oid(2657);
 
 // pg_node_tree catalog field = varlena (serialized node tree); modeled as text.
 pub type PgNodeTree = text;

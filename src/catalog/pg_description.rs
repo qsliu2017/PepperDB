@@ -4,6 +4,10 @@ use crate::c::text;
 use crate::postgres_ext::Oid;
 
 pub const DescriptionRelationId: Oid = Oid(2609);
+/// pg_description composite rowtype OID. Nails the descriptor at bootstrap.
+pub const DescriptionRelation_Rowtype_Id: Oid = Oid(11636);
+/// pg_description_o_c_o_index (pkey on objoid, classoid, objsubid).
+pub const DescriptionObjIndexId: Oid = Oid(2675);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

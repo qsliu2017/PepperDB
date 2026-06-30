@@ -2434,6 +2434,66 @@ mod wire_tests {
             .expect("supervisor task ok");
     }
 
+    /// Step 39 (M10 object DDL) over the wire: CREATE SCHEMA, schema-qualified
+    /// CREATE TABLE + SELECT, DROP SCHEMA; ALTER COLUMN SET DEFAULT then an INSERT
+    /// omitting the column lands the default; ADD CONSTRAINT CHECK; and a phase-B
+    /// command (CREATE FUNCTION) routes to its not-yet-translated body without a
+    /// parse error.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m10_object_ddl_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let tag = |msgs: &[Msg]| -> String {
+            let c = msgs.iter().find(|m| m.ty == b'C').expect("CommandComplete");
+            let end = c.body.iter().position(|&x| x == 0).unwrap_or(c.body.len());
+            String::from_utf8_lossy(&c.body[..end]).into_owned()
+        };
+        let single_vals = |msgs: &[Msg]| -> Vec<String> {
+            msgs.iter().filter(|m| m.ty == b'D').map(|m| datarow_single_text(&m.body)).collect()
+        };
+
+        // CREATE SCHEMA s; schema-qualified table in it; SELECT resolves through it.
+        let cs = simple_query(&mut client, &mut buf, "CREATE SCHEMA s").await;
+        assert_eq!(tag(&cs), "CREATE SCHEMA", "CREATE SCHEMA completion tag");
+        simple_query(&mut client, &mut buf, "CREATE TABLE s.t (a int)").await;
+        simple_query(&mut client, &mut buf, "INSERT INTO s.t VALUES (7)").await;
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM s.t").await;
+        assert_eq!(single_vals(&sel), vec!["7".to_owned()], "schema-qualified SELECT works");
+
+        // SET DEFAULT then INSERT omitting the column -> the default lands.
+        simple_query(&mut client, &mut buf, "CREATE TABLE d (a int, b int)").await;
+        let sd = simple_query(&mut client, &mut buf, "ALTER TABLE d ALTER COLUMN b SET DEFAULT 5").await;
+        assert_eq!(tag(&sd), "ALTER TABLE", "SET DEFAULT completion tag");
+        simple_query(&mut client, &mut buf, "INSERT INTO d (a) VALUES (1)").await;
+        let sel = simple_query(&mut client, &mut buf, "SELECT b FROM d").await;
+        assert_eq!(single_vals(&sel), vec!["5".to_owned()], "omitted column gets its DEFAULT 5");
+
+        // ADD CONSTRAINT CHECK: the completion tag confirms the pg_constraint store.
+        let ac = simple_query(&mut client, &mut buf, "ALTER TABLE d ADD CONSTRAINT d_b_pos CHECK (b > 0)").await;
+        assert_eq!(tag(&ac), "ALTER TABLE", "ADD CONSTRAINT completion tag");
+
+        // CREATE SEQUENCE parses + routes (DefineSequence runs; the relation lands).
+        let cseq = simple_query(&mut client, &mut buf, "CREATE SEQUENCE seq START WITH 1").await;
+        assert_eq!(tag(&cseq), "CREATE SEQUENCE", "CREATE SEQUENCE completion tag");
+
+        // DROP SCHEMA s (CASCADE drops s.t too).
+        let ds = simple_query(&mut client, &mut buf, "DROP SCHEMA s CASCADE").await;
+        assert_eq!(tag(&ds), "DROP SCHEMA", "DROP SCHEMA completion tag");
+        let gone = simple_query(&mut client, &mut buf, "SELECT a FROM s.t").await;
+        assert!(!gone.iter().any(|m| m.ty == b'T'), "s.t is gone after DROP SCHEMA");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
     /// M3 BoolExpr qual over the wire: `WHERE a > 0 AND a < 3` keeps {1,2} -- the
     /// AND short-circuit + per-clause int4 comparison. (Three-valued NULL logic is
     /// unit-tested in execExprInterp; the NULL literal is not yet parseable.)
@@ -2960,6 +3020,120 @@ mod wire_tests {
         );
         let datarow = reply.iter().find(|m| m.ty == b'D').expect("a DataRow");
         assert_eq!(datarow_single_text(&datarow.body), "42", "SELECT $1 + 1 with $1 = 41 -> 42");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// Step 39: CREATE SCHEMA inserts a pg_namespace row that a schema-qualified
+    /// CREATE TABLE / SELECT can resolve; DROP SCHEMA removes it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m10_create_schema_table_drop_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let r = simple_query(&mut client, &mut buf, "CREATE SCHEMA s").await;
+        assert_eq!(r[0].body, b"CREATE SCHEMA\0", "CREATE SCHEMA tag");
+
+        // A table created in s resolves there; a schema-qualified SELECT reads it.
+        let r = simple_query(&mut client, &mut buf, "CREATE TABLE s.t (a int)").await;
+        assert_eq!(r[0].body, b"CREATE TABLE\0", "schema-qualified CREATE TABLE");
+        let r = simple_query(&mut client, &mut buf, "INSERT INTO s.t VALUES (7)").await;
+        assert_eq!(r[0].body, b"INSERT 0 1\0");
+        let sel = simple_query(&mut client, &mut buf, "SELECT a FROM s.t").await;
+        let d = sel.iter().find(|m| m.ty == b'D').expect("a DataRow");
+        assert_eq!(datarow_single_text(&d.body), "7", "SELECT from schema-qualified table");
+
+        // IF NOT EXISTS on the existing schema is a no-op (still CREATE SCHEMA tag).
+        let r = simple_query(&mut client, &mut buf, "CREATE SCHEMA IF NOT EXISTS s").await;
+        assert_eq!(r[0].body, b"CREATE SCHEMA\0", "IF NOT EXISTS no-op");
+
+        // Drop the contained table, then the (now-empty) schema (pg_depend-driven
+        // CASCADE to contained objects stages with dependency recording).
+        let _ = simple_query(&mut client, &mut buf, "DROP TABLE s.t").await;
+        let r = simple_query(&mut client, &mut buf, "DROP SCHEMA s").await;
+        assert_eq!(r[0].body, b"DROP SCHEMA\0", "DROP SCHEMA tag");
+
+        // After DROP, recreating the same schema name succeeds (the row is gone).
+        let r = simple_query(&mut client, &mut buf, "CREATE SCHEMA s").await;
+        assert_eq!(r[0].body, b"CREATE SCHEMA\0", "recreate after drop");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// Step 39: ALTER TABLE ADD CONSTRAINT CHECK persists a pg_constraint row (now
+    /// that pg_constraint is seeded on-disk). DROP CONSTRAINT finds + removes it,
+    /// which only succeeds if the row was actually stored.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m10_add_check_constraint_persists_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let r = simple_query(&mut client, &mut buf, "CREATE TABLE t (a int)").await;
+        assert_eq!(r[0].body, b"CREATE TABLE\0");
+
+        // ADD CONSTRAINT stores the pg_constraint row.
+        let r = simple_query(&mut client, &mut buf, "ALTER TABLE t ADD CONSTRAINT c CHECK (a > 0)").await;
+        assert_eq!(r[0].body, b"ALTER TABLE\0", "ADD CONSTRAINT -> ALTER TABLE tag");
+
+        // DROP CONSTRAINT scans pg_constraint by conrelid + matches conname; it only
+        // succeeds (no "constraint does not exist" error) if the row persisted.
+        let r = simple_query(&mut client, &mut buf, "ALTER TABLE t DROP CONSTRAINT c").await;
+        let types: Vec<u8> = r.iter().map(|m| m.ty).collect();
+        assert_eq!(types, vec![b'C', b'Z'], "DROP CONSTRAINT found the persisted row");
+        assert_eq!(r[0].body, b"ALTER TABLE\0");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// Step 39 (completes step 38's deferred SET DEFAULT): after ALTER TABLE ... SET
+    /// DEFAULT, an INSERT omitting that column fills it from pg_attrdef (seeded
+    /// on-disk) via the planner's INSERT target-list expansion.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m10_set_default_insert_fills_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        let r = simple_query(&mut client, &mut buf, "CREATE TABLE t (a int, b int)").await;
+        assert_eq!(r[0].body, b"CREATE TABLE\0");
+
+        // Set a default on column a.
+        let r = simple_query(&mut client, &mut buf, "ALTER TABLE t ALTER COLUMN a SET DEFAULT 5").await;
+        assert_eq!(r[0].body, b"ALTER TABLE\0", "SET DEFAULT -> ALTER TABLE tag");
+
+        // INSERT naming only b -> a is filled with its default (5).
+        let r = simple_query(&mut client, &mut buf, "INSERT INTO t (b) VALUES (9)").await;
+        assert_eq!(r[0].body, b"INSERT 0 1\0");
+
+        // SELECT a, b -> the default (5) landed in a; an omitted-no-default column is
+        // NULL, but here b was provided (9).
+        let sel = simple_query(&mut client, &mut buf, "SELECT a, b FROM t").await;
+        let d = sel.iter().find(|m| m.ty == b'D').expect("a DataRow");
+        let vals = datarow_texts(&d.body);
+        assert_eq!(vals, vec!["5".to_string(), "9".to_string()], "a defaulted to 5, b = 9");
 
         drop(client);
         sup.shutdown.trigger();

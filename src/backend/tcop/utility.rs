@@ -137,10 +137,90 @@ pub async fn standard_process_utility(
             process_drop_stmt(shared, stmt).await;
             crate::backend::access::transam::xact::CommandCounterIncrement();
         }
-        // GRANT / COMMENT are stub-parsed; the privilege + comment machinery is step 39.
-        Node::GrantStmt(_) => not_yet_reachable("ProcessUtility: GRANT/REVOKE (step 39)"),
-        Node::CommentStmt(_) => not_yet_reachable("ProcessUtility: COMMENT (step 39)"),
+        // --- DDL: object commands (M10, step 39) ---
+        Node::CreateSeqStmt(_)
+        | Node::AlterSeqStmt(_)
+        | Node::CreateSchemaStmt(_)
+        | Node::GrantStmt(_)
+        | Node::CommentStmt(_)
+        | Node::DefineStmt(_)
+        | Node::CreateDomainStmt(_)
+        | Node::CreateFunctionStmt(_)
+        | Node::CreateConversionStmt(_)
+        | Node::CreatedbStmt(_)
+        | Node::DropdbStmt(_)
+        | Node::CreateTableSpaceStmt(_) => {
+            process_object_ddl(shared, parsetree).await;
+        }
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
+    }
+}
+
+/// The `T_*` arms for the step-39 object-DDL statements (CREATE/ALTER SEQUENCE,
+/// CREATE SCHEMA, GRANT/REVOKE, COMMENT, CREATE TYPE/DOMAIN/FUNCTION/CONVERSION,
+/// CREATE/DROP DATABASE, CREATE TABLESPACE). Each routes to its command function and
+/// (except the no-transaction CREATE/DROP DATABASE) bumps the command counter so the
+/// next command sees its catalog effects. Split out of `standard_process_utility` to
+/// keep that dispatcher small.
+async fn process_object_ddl(shared: &Arc<SharedState>, parsetree: &Node) {
+    use crate::backend::access::transam::xact::CommandCounterIncrement;
+    use crate::nodes::parsenodes::ObjectType;
+    match parsetree {
+        Node::CreateSeqStmt(stmt) => {
+            crate::backend::commands::sequence::define_sequence(shared, stmt).await;
+            CommandCounterIncrement();
+        }
+        Node::AlterSeqStmt(stmt) => {
+            crate::backend::commands::sequence::alter_sequence(shared, stmt).await;
+            CommandCounterIncrement();
+        }
+        Node::CreateSchemaStmt(stmt) => {
+            crate::backend::commands::schemacmds::create_schema_command(shared, stmt).await;
+            CommandCounterIncrement();
+        }
+        Node::GrantStmt(stmt) => {
+            crate::backend::catalog::aclchk::execute_grant_stmt(shared, stmt).await;
+            CommandCounterIncrement();
+        }
+        Node::CommentStmt(stmt) => {
+            crate::backend::commands::comment::comment_object(shared, stmt).await;
+            CommandCounterIncrement();
+        }
+        Node::DefineStmt(stmt) => {
+            match stmt.kind {
+                ObjectType::TYPE => {
+                    crate::backend::commands::typecmds::define_type(shared, stmt).await;
+                }
+                ObjectType::COLLATION => {
+                    crate::backend::commands::collationcmds::define_collation(shared, stmt).await;
+                }
+                other => not_yet_reachable(&format!("ProcessUtility: DefineStmt {other:?}")),
+            }
+            CommandCounterIncrement();
+        }
+        Node::CreateDomainStmt(stmt) => {
+            crate::backend::commands::typecmds::define_domain(shared, stmt).await;
+            CommandCounterIncrement();
+        }
+        Node::CreateFunctionStmt(stmt) => {
+            crate::backend::commands::functioncmds::create_function(shared, stmt).await;
+            CommandCounterIncrement();
+        }
+        Node::CreateConversionStmt(stmt) => {
+            crate::backend::commands::conversioncmds::create_conversion(shared, stmt).await;
+            CommandCounterIncrement();
+        }
+        Node::CreatedbStmt(stmt) => {
+            crate::backend::commands::dbcommands::createdb(shared, stmt).await;
+        }
+        Node::DropdbStmt(stmt) => {
+            crate::backend::commands::dbcommands::dropdb(shared, stmt).await;
+        }
+        Node::CreateTableSpaceStmt(stmt) => {
+            crate::backend::commands::tablespace::create_tablespace(shared, stmt).await;
+            CommandCounterIncrement();
+        }
+        other => not_yet_reachable(&format!("process_object_ddl: {other:?}")),
     }
 }
 
@@ -335,6 +415,22 @@ pub fn create_command_tag(parsetree: &Node) -> CommandTag {
             if stmt.is_grant { CommandTag::Grant } else { CommandTag::Revoke }
         }
         Node::CommentStmt(_) => CommandTag::Comment,
+        // DDL object commands (step 39).
+        Node::CreateSeqStmt(_) => CommandTag::CreateSequence,
+        Node::AlterSeqStmt(_) => CommandTag::AlterSequence,
+        Node::CreateSchemaStmt(_) => CommandTag::CreateSchema,
+        Node::DefineStmt(stmt) => match stmt.kind {
+            crate::nodes::parsenodes::ObjectType::COLLATION => CommandTag::CreateCollation,
+            _ => CommandTag::CreateType,
+        },
+        Node::CreateDomainStmt(_) => CommandTag::CreateDomain,
+        Node::CreateFunctionStmt(stmt) => {
+            if stmt.is_procedure { CommandTag::CreateProcedure } else { CommandTag::CreateFunction }
+        }
+        Node::CreateConversionStmt(_) => CommandTag::CreateConversion,
+        Node::CreatedbStmt(_) => CommandTag::CreateDatabase,
+        Node::DropdbStmt(_) => CommandTag::DropDatabase,
+        Node::CreateTableSpaceStmt(_) => CommandTag::CreateTablespace,
         Node::TransactionStmt(stmt) => match stmt.kind {
             TxKind::BEGIN => CommandTag::Begin,
             TxKind::START => CommandTag::StartTransaction,

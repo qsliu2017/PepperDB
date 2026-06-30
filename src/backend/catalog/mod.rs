@@ -8,6 +8,7 @@
 //! let `CREATE TABLE t(a int)` look up `int4` by name and write the new table's
 //! pg_class/pg_attribute/pg_type rows + build the catalog unique indexes.
 
+pub mod aclchk;
 pub mod catalog;
 pub mod dependency;
 pub mod heap;
@@ -15,7 +16,9 @@ pub mod index;
 pub mod indexing;
 pub mod namespace;
 pub mod objectaddress;
+pub mod pg_constraint;
 pub mod pg_namespace;
+pub mod pg_proc;
 pub mod pg_type;
 
 #[cfg(test)]

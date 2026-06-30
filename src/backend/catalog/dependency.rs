@@ -122,6 +122,9 @@ async fn delete_one_object(shared: &Arc<SharedState>, object: &ObjectAddress) {
         RelationRelationId => {
             crate::backend::commands::tablecmds::heap_drop_with_catalog(shared, object.objectId).await;
         }
+        crate::catalog::pg_namespace::NamespaceRelationId => {
+            crate::backend::commands::schemacmds::remove_schema_by_id(shared, object.objectId).await;
+        }
         other => not_yet_reachable(&format!("deleteOneObject: classId {other:?}")),
     }
 }

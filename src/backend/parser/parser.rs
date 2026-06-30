@@ -928,8 +928,10 @@ fn syntax_error(
 // ===========================================================================
 
 use crate::nodes::parsenodes::{
-    AlterTableCmd, AlterTableStmt, AlterTableType, CommentStmt, Constraint, ConstrType, DropBehavior,
-    DropStmt, GrantStmt, GrantTargetType, ObjectType, RenameStmt,
+    AlterSeqStmt, AlterTableCmd, AlterTableStmt, AlterTableType, CommentStmt, Constraint,
+    ConstrType, CreatedbStmt, CreateConversionStmt, CreateDomainStmt, CreateFunctionStmt,
+    CreateSchemaStmt, CreateSeqStmt, CreateTableSpaceStmt, DefElem, DefineStmt, DropBehavior,
+    DropdbStmt, DropStmt, GrantStmt, GrantTargetType, ObjectType, RenameStmt,
 };
 
 /// gram.y `opt_drop_behavior` token (CASCADE / RESTRICT). Decoupled from
@@ -1136,30 +1138,234 @@ pub fn make_drop_stmt(objtype: ObjType, objects: Vec<Node>, missing_ok: bool, be
     }))
 }
 
-/// gram.y `GrantStmt` (M10 stub-parse): a minimal GrantStmt routed to
-/// not_yet_reachable by ProcessUtility (step 39 builds the privilege machinery).
-pub fn make_grant_stmt(is_grant: bool) -> Node {
+/// gram.y `GrantStmt` (step 39): GRANT/REVOKE priv_list ON TABLE name TO/FROM role.
+/// `privileges`/`grantees` carry the parsed AccessPriv / RoleSpec names; the object
+/// is the named relation (carried as a RangeVar in `objects`).
+pub fn make_grant_stmt(
+    is_grant: bool,
+    privileges: Vec<Node>,
+    objtype: ObjectType,
+    objects: Vec<Node>,
+    grantees: Vec<Node>,
+    grant_option: bool,
+) -> Node {
     Node::GrantStmt(Box::new(GrantStmt {
         is_grant,
         targtype: GrantTargetType::OBJECT,
-        objtype: ObjectType::TABLE,
-        objects: Vec::new(),
-        privileges: Vec::new(),
-        grantees: Vec::new(),
-        grant_option: false,
+        objtype,
+        objects,
+        privileges,
+        grantees,
+        grant_option,
         grantor: None,
         behavior: DropBehavior::RESTRICT,
     }))
 }
 
-/// gram.y `CommentStmt` (M10 stub-parse): a minimal CommentStmt routed to
-/// not_yet_reachable by ProcessUtility (step 39).
-pub fn make_comment_stmt(comment: Option<String>) -> Node {
-    Node::CommentStmt(Box::new(CommentStmt {
-        objtype: ObjectType::TABLE,
-        object: None,
-        comment,
+/// gram.y `privilege` -> AccessPriv (carried as a String_ node naming the privilege;
+/// `None` privname means ALL PRIVILEGES). The reachable step-39 set is name-only.
+pub fn make_access_priv(priv_name: Option<String>) -> Node {
+    Node::String_(crate::nodes::value::makeString(priv_name.unwrap_or_default()))
+}
+
+/// gram.y `RoleSpec` (CSTRING form): a named role/grantee.
+pub fn make_role_spec(name: String) -> Node {
+    Node::RoleSpec(Box::new(crate::nodes::parsenodes::RoleSpec {
+        roletype: crate::nodes::parsenodes::RoleSpecType::CSTRING,
+        rolename: Some(name),
+        location: -1,
     }))
+}
+
+/// gram.y `CommentStmt` (step 39): COMMENT ON <objtype> name IS 'text'. The object is
+/// carried as a RangeVar (relations) in `object`.
+pub fn make_comment_stmt(objtype: ObjectType, object: Option<Node>, comment: Option<String>) -> Node {
+    Node::CommentStmt(Box::new(CommentStmt { objtype, object, comment }))
+}
+
+/// gram.y `OptSeqOptElem` -> a DefElem naming a sequence option (INCREMENT, START,
+/// ...) with its integer value. The value is carried as a Float A_Const (its text)
+/// so it survives the full i64 range; DefineSequence parses it back to i64.
+pub fn make_seq_def_elem_int(name: &str, value: i64) -> Node {
+    let arg = make_float_const(value.to_string());
+    Node::DefElem(Box::new(crate::nodes::makefuncs::makeDefElem(name, Some(arg), -1)))
+}
+
+/// gram.y sequence boolean option (CYCLE / NO CYCLE) -> DefElem("cycle", bool).
+pub fn make_seq_def_elem_bool(name: &str, value: bool) -> Node {
+    Node::DefElem(Box::new(crate::nodes::makefuncs::makeDefElem(
+        name,
+        Some(make_int_const(i32::from(value))),
+        -1,
+    )))
+}
+
+/// gram.y `CreateSeqStmt`: CREATE [TEMP] SEQUENCE [IF NOT EXISTS] name [options].
+pub fn make_create_seq_stmt(name: RangeVar, options: Vec<Node>, if_not_exists: bool) -> Node {
+    Node::CreateSeqStmt(Box::new(CreateSeqStmt {
+        sequence: Some(Box::new(name)),
+        options,
+        ownerId: crate::postgres_ext::InvalidOid,
+        for_identity: false,
+        if_not_exists,
+    }))
+}
+
+/// gram.y `AlterSeqStmt`: ALTER SEQUENCE [IF EXISTS] name options.
+pub fn make_alter_seq_stmt(name: RangeVar, options: Vec<Node>, missing_ok: bool) -> Node {
+    Node::AlterSeqStmt(Box::new(AlterSeqStmt {
+        sequence: Some(Box::new(name)),
+        options,
+        for_identity: false,
+        missing_ok,
+    }))
+}
+
+/// gram.y `CreateSchemaStmt`: CREATE SCHEMA [IF NOT EXISTS] name [AUTHORIZATION role]
+/// [schema_element_list]. `authrole` carries the optional AUTHORIZATION role.
+pub fn make_create_schema_stmt(
+    name: Option<String>,
+    authrole: Option<Node>,
+    elements: Vec<Node>,
+    if_not_exists: bool,
+) -> Node {
+    let authrole = authrole.and_then(|n| match n {
+        Node::RoleSpec(rs) => Some(rs),
+        _ => None,
+    });
+    Node::CreateSchemaStmt(Box::new(CreateSchemaStmt {
+        schemaname: name,
+        authrole,
+        schemaElts: elements,
+        if_not_exists,
+    }))
+}
+
+/// gram.y `DefineStmt` for CREATE TYPE: composite `CREATE TYPE n AS (col type, ...)`
+/// (definition carries ColumnDef list) and `CREATE TYPE n AS ENUM (...)` (definition
+/// carries the label String_ list). `kind` selects TYPE; the analyze pass routes
+/// composite vs enum by the definition shape.
+pub fn make_define_type_stmt(defnames: Vec<String>, definition: Vec<Node>) -> Node {
+    Node::DefineStmt(Box::new(DefineStmt {
+        kind: ObjectType::TYPE,
+        oldstyle: false,
+        defnames: defnames.into_iter().map(make_any_name_part).collect(),
+        args: Vec::new(),
+        definition,
+        if_not_exists: false,
+        replace: false,
+    }))
+}
+
+/// gram.y `DefineStmt` for CREATE COLLATION n (definition).
+pub fn make_define_collation_stmt(defnames: Vec<String>, definition: Vec<Node>) -> Node {
+    Node::DefineStmt(Box::new(DefineStmt {
+        kind: ObjectType::COLLATION,
+        oldstyle: false,
+        defnames: defnames.into_iter().map(make_any_name_part).collect(),
+        args: Vec::new(),
+        definition,
+        if_not_exists: false,
+        replace: false,
+    }))
+}
+
+/// gram.y `CreateDomainStmt`: CREATE DOMAIN n AS type [DEFAULT e] [constraints].
+pub fn make_create_domain_stmt(
+    domainname: Vec<String>,
+    type_name: TypeName,
+    constraints: Vec<Node>,
+) -> Node {
+    Node::CreateDomainStmt(Box::new(CreateDomainStmt {
+        domainname: domainname.into_iter().map(make_any_name_part).collect(),
+        typeName: Some(Box::new(type_name)),
+        collClause: None,
+        constraints,
+    }))
+}
+
+/// gram.y `CreateFunctionStmt`: CREATE [OR REPLACE] FUNCTION/PROCEDURE name(args)
+/// [RETURNS rettype] [options]. The body/language are carried as DefElem options.
+pub fn make_create_function_stmt(
+    is_procedure: bool,
+    replace: bool,
+    funcname: Vec<String>,
+    parameters: Vec<Node>,
+    return_type: Option<TypeName>,
+    options: Vec<Node>,
+) -> Node {
+    Node::CreateFunctionStmt(Box::new(CreateFunctionStmt {
+        is_procedure,
+        replace,
+        funcname: funcname.into_iter().map(make_any_name_part).collect(),
+        parameters,
+        returnType: return_type.map(Box::new),
+        options,
+        sql_body: None,
+    }))
+}
+
+/// gram.y `def_elem`: NAME = value (generic definition element).
+pub fn make_generic_def_elem(name: &str, value: Option<Node>) -> Node {
+    Node::DefElem(Box::new(crate::nodes::makefuncs::makeDefElem(name, value, -1)))
+}
+
+/// gram.y `CreatedbStmt`: CREATE DATABASE name [options].
+pub fn make_createdb_stmt(dbname: String, options: Vec<Node>) -> Node {
+    Node::CreatedbStmt(Box::new(CreatedbStmt { dbname: Some(dbname), options }))
+}
+
+/// gram.y `DropdbStmt`: DROP DATABASE [IF EXISTS] name.
+pub fn make_dropdb_stmt(dbname: String, missing_ok: bool) -> Node {
+    Node::DropdbStmt(Box::new(DropdbStmt {
+        dbname: Some(dbname),
+        missing_ok,
+        options: Vec::new(),
+    }))
+}
+
+/// gram.y `CreateConversionStmt` (minimal stub-parse): routed to its step-39B body.
+pub fn make_create_conversion_stmt(conversion_name: Vec<String>) -> Node {
+    Node::CreateConversionStmt(Box::new(CreateConversionStmt {
+        conversion_name: conversion_name.into_iter().map(make_any_name_part).collect(),
+        for_encoding_name: None,
+        to_encoding_name: None,
+        func_name: Vec::new(),
+        def: false,
+    }))
+}
+
+/// gram.y `CreateTableSpaceStmt` (minimal): CREATE TABLESPACE name LOCATION 'path'.
+pub fn make_create_tablespace_stmt(name: String, location: Option<String>) -> Node {
+    Node::CreateTableSpaceStmt(Box::new(CreateTableSpaceStmt {
+        tablespacename: Some(name),
+        owner: None,
+        location,
+        options: Vec::new(),
+    }))
+}
+
+/// A single name part as a String_ node (PG `makeString` in an any_name list).
+fn make_any_name_part(s: String) -> Node {
+    Node::String_(crate::nodes::value::makeString(s))
+}
+
+/// gram.y `func_arg`/`func_args`: a function parameter (name + type). The reachable
+/// step-39 form is `[argname] argtype` with default IN mode.
+pub fn make_function_parameter(name: Option<String>, arg_type: TypeName) -> Node {
+    Node::FunctionParameter(Box::new(crate::nodes::parsenodes::FunctionParameter {
+        name,
+        argType: Some(Box::new(arg_type)),
+        mode: crate::nodes::parsenodes::FunctionParameterMode::IN,
+        defexpr: None,
+        location: -1,
+    }))
+}
+
+/// gram.y composite-type column element `colname type` -> a ColumnDef (reused for
+/// CREATE TYPE AS composite).
+pub fn make_ot_column_def(name: String, type_name: TypeName) -> Node {
+    make_column_def_elt(name, type_name)
 }
 
 #[cfg(test)]
@@ -1887,5 +2093,95 @@ mod tests {
         let f = one_fetch("MOVE FORWARD c");
         assert_eq!(f.direction, D::FORWARD);
         assert!(f.ismove);
+    }
+
+
+    // --- Step 39: object-DDL statement parsing (conflict-free grammar). ---
+
+    #[test]
+    fn create_sequence_parses_with_options() {
+        let list = parse("CREATE SEQUENCE s INCREMENT BY 2 START WITH 10 MINVALUE 1 MAXVALUE 100 CACHE 1 CYCLE");
+        let Node::CreateSeqStmt(s) = one_stmt(&list) else { panic!("not a CreateSeqStmt") };
+        assert_eq!(s.sequence.as_ref().unwrap().relname.as_deref(), Some("s"));
+        // INCREMENT/START/MIN/MAX/CACHE/CYCLE all parse into DefElems.
+        assert!(s.options.iter().any(|n| matches!(n, Node::DefElem(d) if d.defname.as_deref() == Some("increment"))));
+        assert!(s.options.iter().any(|n| matches!(n, Node::DefElem(d) if d.defname.as_deref() == Some("cycle"))));
+
+        // IF NOT EXISTS form.
+        let list = parse("CREATE SEQUENCE IF NOT EXISTS s2");
+        let Node::CreateSeqStmt(s) = one_stmt(&list) else { panic!("not a CreateSeqStmt") };
+        assert!(s.if_not_exists);
+    }
+
+    #[test]
+    fn alter_sequence_parses() {
+        let list = parse("ALTER SEQUENCE s INCREMENT BY 5");
+        let Node::AlterSeqStmt(s) = one_stmt(&list) else { panic!("not an AlterSeqStmt") };
+        assert_eq!(s.sequence.as_ref().unwrap().relname.as_deref(), Some("s"));
+    }
+
+    #[test]
+    fn create_schema_parses() {
+        let list = parse("CREATE SCHEMA myschema");
+        let Node::CreateSchemaStmt(s) = one_stmt(&list) else { panic!("not a CreateSchemaStmt") };
+        assert_eq!(s.schemaname.as_deref(), Some("myschema"));
+
+        let list = parse("CREATE SCHEMA IF NOT EXISTS s2 AUTHORIZATION bob");
+        let Node::CreateSchemaStmt(s) = one_stmt(&list) else { panic!("not a CreateSchemaStmt") };
+        assert!(s.if_not_exists);
+        assert!(s.authrole.is_some(), "AUTHORIZATION sets the role");
+    }
+
+    #[test]
+    fn create_type_and_domain_parse() {
+        let list = parse("CREATE TYPE ct AS (a int, b text)");
+        let Node::DefineStmt(d) = one_stmt(&list) else { panic!("not a DefineStmt") };
+        assert_eq!(d.kind, crate::nodes::parsenodes::ObjectType::TYPE);
+
+        let list = parse("CREATE TYPE color AS ENUM ('red', 'green', 'blue')");
+        let Node::DefineStmt(_) = one_stmt(&list) else { panic!("not a DefineStmt (enum)") };
+
+        let list = parse("CREATE DOMAIN posint AS int");
+        let Node::CreateDomainStmt(_) = one_stmt(&list) else { panic!("not a CreateDomainStmt") };
+    }
+
+    #[test]
+    fn create_function_parses() {
+        let list = parse("CREATE FUNCTION f(a int) RETURNS int LANGUAGE 'sql' AS 'select 1'");
+        let Node::CreateFunctionStmt(f) = one_stmt(&list) else { panic!("not a CreateFunctionStmt") };
+        assert!(!f.is_procedure, "FUNCTION is not a procedure");
+
+        let list = parse("CREATE OR REPLACE PROCEDURE p() LANGUAGE 'sql' AS 'select 1'");
+        let Node::CreateFunctionStmt(f) = one_stmt(&list) else { panic!("not a CreateFunctionStmt") };
+        assert!(f.is_procedure, "PROCEDURE sets is_procedure");
+        assert!(f.replace, "OR REPLACE sets replace");
+    }
+
+    #[test]
+    fn grant_revoke_parse() {
+        let list = parse("GRANT SELECT ON TABLE t TO bob");
+        let Node::GrantStmt(g) = one_stmt(&list) else { panic!("not a GrantStmt") };
+        assert!(g.is_grant, "GRANT sets is_grant");
+
+        let list = parse("REVOKE SELECT ON TABLE t FROM bob");
+        let Node::GrantStmt(g) = one_stmt(&list) else { panic!("not a GrantStmt") };
+        assert!(!g.is_grant, "REVOKE clears is_grant");
+    }
+
+    #[test]
+    fn comment_parses() {
+        let list = parse("COMMENT ON TABLE t IS 'a table'");
+        let Node::CommentStmt(c) = one_stmt(&list) else { panic!("not a CommentStmt") };
+        assert_eq!(c.comment.as_deref(), Some("a table"));
+    }
+
+    #[test]
+    fn create_database_and_tablespace_parse() {
+        let list = parse("CREATE DATABASE mydb");
+        let Node::CreatedbStmt(d) = one_stmt(&list) else { panic!("not a CreatedbStmt") };
+        assert_eq!(d.dbname.as_deref(), Some("mydb"));
+
+        let list = parse("DROP DATABASE mydb");
+        let Node::DropdbStmt(_) = one_stmt(&list) else { panic!("not a DropdbStmt") };
     }
 }

@@ -30,14 +30,19 @@ use crate::backend::parser::parser::{
     make_alter_table_stmt, make_at_add_column, make_at_drop_column, make_at_column_default,
     make_at_set_not_null, make_at_add_constraint, make_at_drop_constraint, make_check_constraint,
     make_rename_relation, make_rename_column, make_drop_stmt, make_any_name, make_grant_stmt,
-    make_comment_stmt, DropBehaviorTok, ObjType,
+    make_comment_stmt, make_access_priv, make_role_spec, make_seq_def_elem_int,
+    make_seq_def_elem_bool, make_create_seq_stmt, make_alter_seq_stmt, make_create_schema_stmt,
+    make_define_type_stmt, make_define_collation_stmt, make_create_domain_stmt,
+    make_create_function_stmt, make_generic_def_elem, make_createdb_stmt, make_dropdb_stmt,
+    make_create_conversion_stmt, make_create_tablespace_stmt, make_function_parameter,
+    make_ot_column_def, DropBehaviorTok, ObjType,
 };
 use crate::nodes::parsenodes::{CursorOptions, FetchDirection, FETCH_ALL};
 use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
 use crate::nodes::nodes::{CmdType, JoinType, Node};
 use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
 use crate::nodes::primnodes::MergeMatchKind;
-use crate::nodes::parsenodes::{LockingClause, ResTarget, SelectStmt, SortByDir, SortByNulls, TypeName};
+use crate::nodes::parsenodes::{LockingClause, ObjectType, ResTarget, SelectStmt, SortByDir, SortByNulls, TypeName};
 
 grammar;
 
@@ -211,6 +216,29 @@ extern {
         "SEQUENCE"   => Token::Keyword("sequence"),
         "SCHEMA"     => Token::Keyword("schema"),
         "PRIVILEGES" => Token::Keyword("privileges"),
+        // M10 (step 39): object-DDL keywords for SEQUENCE/SCHEMA/TYPE/DOMAIN/
+        // FUNCTION/DATABASE/COLLATION/CONVERSION/TABLESPACE.
+        "INCREMENT"  => Token::Keyword("increment"),
+        "MINVALUE"   => Token::Keyword("minvalue"),
+        "MAXVALUE"   => Token::Keyword("maxvalue"),
+        "CACHE"      => Token::Keyword("cache"),
+        "CYCLE"      => Token::Keyword("cycle"),
+        "OWNED"      => Token::Keyword("owned"),
+        "TEMP"       => Token::Keyword("temp"),
+        "TEMPORARY"  => Token::Keyword("temporary"),
+        "DOMAIN"     => Token::Keyword("domain"),
+        "FUNCTION"   => Token::Keyword("function"),
+        "PROCEDURE"  => Token::Keyword("procedure"),
+        "LANGUAGE"   => Token::Keyword("language"),
+        "RETURNS"    => Token::Keyword("returns"),
+        "ENUM"       => Token::Keyword("enum"),
+        "COLLATION"  => Token::Keyword("collation"),
+        "CONVERSION" => Token::Keyword("conversion"),
+        "DATABASE"   => Token::Keyword("database"),
+        "TABLESPACE" => Token::Keyword("tablespace"),
+        "LOCATION"   => Token::Keyword("location"),
+        "REPLACE"    => Token::Keyword("replace"),
+        "OPTION"     => Token::Keyword("option"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -276,6 +304,16 @@ Stmt: Option<Node> = {
     <s:DropStmt> => Some(s),
     <s:GrantStmt> => Some(s),
     <s:CommentStmt> => Some(s),
+    <s:CreateSeqStmt> => Some(s),
+    <s:AlterSeqStmt> => Some(s),
+    <s:CreateSchemaStmt> => Some(s),
+    <s:DefineStmt> => Some(s),
+    <s:CreateDomainStmt> => Some(s),
+    <s:CreateFunctionStmt> => Some(s),
+    <s:CreateConversionStmt> => Some(s),
+    <s:CreatedbStmt> => Some(s),
+    <s:DropdbStmt> => Some(s),
+    <s:CreateTableSpaceStmt> => Some(s),
     <s:InsertStmt> => Some(s),
     <s:UpdateStmt> => Some(s),
     <s:DeleteStmt> => Some(s),
@@ -644,35 +682,314 @@ AnyName: Node = {
 };
 
 // ===========================================================================
-//  GRANT / COMMENT  (M10 stub-parse: route to step-39 not_yet_reachable)
+//  GRANT / COMMENT  (M10 step 39: real privilege + comment machinery)
 // ===========================================================================
 
-// gram.y `GrantStmt`: stub-parsed into a GrantStmt node that ProcessUtility routes
-// to not_yet_reachable (step 39 builds the privilege machinery). M10 accepts the
-// shape `GRANT|REVOKE ... ON TABLE name TO|FROM role` loosely (names tokenized).
+// gram.y `GrantStmt`: GRANT|REVOKE priv_list ON TABLE name [, ...] TO|FROM role_list
+// [WITH GRANT OPTION]. M10 reaches the table-object form; other object kinds + the
+// schema-wide / default-privileges forms grow at their milestones.
 GrantStmt: Node = {
-    "GRANT" <_p:GrantPrivList> "ON" "TABLE" <_n:QualifiedName> "TO" <_r:ColId> =>
-        make_grant_stmt(true),
-    "REVOKE" <_p:GrantPrivList> "ON" "TABLE" <_n:QualifiedName> "FROM" <_r:ColId> =>
-        make_grant_stmt(false),
+    "GRANT" <p:GrantPrivList> "ON" "TABLE" <objs:QualifiedNameList> "TO" <r:GranteeList>
+        <go:OptGrantGrantOption> =>
+        make_grant_stmt(true, p, ObjectType::TABLE, objs, r, go),
+    "REVOKE" <p:GrantPrivList> "ON" "TABLE" <objs:QualifiedNameList> "FROM" <r:GranteeList> =>
+        make_grant_stmt(false, p, ObjectType::TABLE, objs, r, false),
 };
 
-GrantPrivList: () = {
-    "ALL" => (),
-    "ALL" "PRIVILEGES" => (),
-    <ColId> => (),
+// gram.y `privileges`: ALL [PRIVILEGES] | privilege_list. ALL is one AccessPriv with
+// a NULL privname; a list is one AccessPriv per named privilege.
+GrantPrivList: Vec<Node> = {
+    "ALL" => vec![make_access_priv(None)],
+    "ALL" "PRIVILEGES" => vec![make_access_priv(None)],
+    <list:PrivilegeList> => list,
 };
 
-// gram.y `CommentStmt`: stub-parsed into a CommentStmt node routed to
-// not_yet_reachable (step 39). `COMMENT ON TABLE name IS 'text'|NULL`.
+PrivilegeList: Vec<Node> = {
+    <p:Privilege> => vec![p],
+    <mut list:PrivilegeList> "," <p:Privilege> => { list.push(p); list },
+};
+
+// gram.y `privilege`: the named privileges are keywords (SELECT/INSERT/UPDATE/
+// DELETE), so each is an explicit alternative; any other privilege name arrives as
+// a ColId (PG's `privilege: ... | ColId opt_column_list`).
+Privilege: Node = {
+    "SELECT" => make_access_priv(Some("select".to_string())),
+    "INSERT" => make_access_priv(Some("insert".to_string())),
+    "UPDATE" => make_access_priv(Some("update".to_string())),
+    "DELETE" => make_access_priv(Some("delete".to_string())),
+    <n:ColId> => make_access_priv(Some(n)),
+};
+
+// gram.y `grantee_list`: comma-separated role specs.
+GranteeList: Vec<Node> = {
+    <n:ColId> => vec![make_role_spec(n)],
+    <mut list:GranteeList> "," <n:ColId> => { list.push(make_role_spec(n)); list },
+};
+
+// gram.y `opt_grant_grant_option: WITH GRANT OPTION | /*EMPTY*/`.
+OptGrantGrantOption: bool = {
+    "WITH" "GRANT" "OPTION" => true,
+    => false,
+};
+
+// gram.y `CommentStmt`: COMMENT ON <object> IS 'text'|NULL. M10 reaches TABLE /
+// COLUMN / INDEX / SEQUENCE / SCHEMA (the relation-shaped kinds carried as a
+// RangeVar); the function/type/... forms grow at their milestones.
 CommentStmt: Node = {
-    "COMMENT" "ON" "TABLE" <_n:QualifiedName> "IS" <c:CommentText> =>
-        make_comment_stmt(c),
+    "COMMENT" "ON" "TABLE" <n:QualifiedName> "IS" <c:CommentText> =>
+        make_comment_stmt(ObjectType::TABLE, Some(Node::RangeVar(Box::new(n))), c),
+    "COMMENT" "ON" "INDEX" <n:QualifiedName> "IS" <c:CommentText> =>
+        make_comment_stmt(ObjectType::INDEX, Some(Node::RangeVar(Box::new(n))), c),
+    "COMMENT" "ON" "SEQUENCE" <n:QualifiedName> "IS" <c:CommentText> =>
+        make_comment_stmt(ObjectType::SEQUENCE, Some(Node::RangeVar(Box::new(n))), c),
+    "COMMENT" "ON" "SCHEMA" <n:ColId> "IS" <c:CommentText> =>
+        make_comment_stmt(ObjectType::SCHEMA, Some(make_any_name(vec![n])), c),
+    "COMMENT" "ON" "VIEW" <n:QualifiedName> "IS" <c:CommentText> =>
+        make_comment_stmt(ObjectType::VIEW, Some(Node::RangeVar(Box::new(n))), c),
 };
 
 CommentText: Option<String> = {
     <s:"SCONST"> => Some(s),
     "NULL" => None,
+};
+
+// ===========================================================================
+//  CREATE / ALTER SEQUENCE  (M10, step 39)
+// ===========================================================================
+
+// gram.y `CreateSeqStmt`: CREATE [TEMP] SEQUENCE [IF NOT EXISTS] qualified_name
+// OptSeqOptList. The TEMP qualifier is parsed (relpersistence handling stages).
+CreateSeqStmt: Node = {
+    "CREATE" "SEQUENCE" <name:QualifiedName> <opts:OptSeqOptList> =>
+        make_create_seq_stmt(name, opts, false),
+    "CREATE" "SEQUENCE" "IF" "NOT" "EXISTS" <name:QualifiedName> <opts:OptSeqOptList> =>
+        make_create_seq_stmt(name, opts, true),
+    "CREATE" OptTemp "SEQUENCE" <name:QualifiedName> <opts:OptSeqOptList> =>
+        make_create_seq_stmt(name, opts, false),
+};
+
+// gram.y `AlterSeqStmt`: ALTER SEQUENCE [IF EXISTS] qualified_name SeqOptList.
+AlterSeqStmt: Node = {
+    "ALTER" "SEQUENCE" <name:QualifiedName> <opts:SeqOptList> =>
+        make_alter_seq_stmt(name, opts, false),
+    "ALTER" "SEQUENCE" "IF" "EXISTS" <name:QualifiedName> <opts:SeqOptList> =>
+        make_alter_seq_stmt(name, opts, true),
+};
+
+// gram.y `opt_temp`: TEMP | TEMPORARY (the GLOBAL/LOCAL noise + UNLOGGED grow later).
+OptTemp: () = {
+    "TEMP" => (),
+    "TEMPORARY" => (),
+};
+
+// gram.y `OptSeqOptList: SeqOptList | /*EMPTY*/` and `SeqOptList: SeqOptElem+`.
+OptSeqOptList: Vec<Node> = {
+    SeqOptList,
+    => Vec::new(),
+};
+
+SeqOptList: Vec<Node> = {
+    <e:SeqOptElem> => vec![e],
+    <mut list:SeqOptList> <e:SeqOptElem> => { list.push(e); list },
+};
+
+// gram.y `SeqOptElem` (the M10-reachable options). INCREMENT/START/CACHE/MINVALUE/
+// MAXVALUE carry a signed integer; CYCLE/NO CYCLE is a flag; AS type + OWNED BY are
+// accepted and dropped (their handling stages). NumericOnly is ICONST [+/-].
+SeqOptElem: Node = {
+    "INCREMENT" <i:SeqNumeric> => make_seq_def_elem_int("increment", i),
+    "INCREMENT" "BY" <i:SeqNumeric> => make_seq_def_elem_int("increment", i),
+    "START" <i:SeqNumeric> => make_seq_def_elem_int("start", i),
+    "START" "WITH" <i:SeqNumeric> => make_seq_def_elem_int("start", i),
+    "MINVALUE" <i:SeqNumeric> => make_seq_def_elem_int("minvalue", i),
+    "NO" "MINVALUE" => make_seq_def_elem_bool("no_minvalue", true),
+    "MAXVALUE" <i:SeqNumeric> => make_seq_def_elem_int("maxvalue", i),
+    "NO" "MAXVALUE" => make_seq_def_elem_bool("no_maxvalue", true),
+    "CACHE" <i:SeqNumeric> => make_seq_def_elem_int("cache", i),
+    "CYCLE" => make_seq_def_elem_bool("cycle", true),
+    "NO" "CYCLE" => make_seq_def_elem_bool("cycle", false),
+    "AS" <_t:SimpleTypename> => make_seq_def_elem_bool("as", true),
+    "OWNED" "BY" <_n:AnyName> => make_seq_def_elem_bool("owned_by", true),
+};
+
+// ===========================================================================
+//  CREATE SCHEMA  (M10, step 39)
+// ===========================================================================
+
+// gram.y `CreateSchemaStmt`. M10 reaches `CREATE SCHEMA [IF NOT EXISTS] name
+// [AUTHORIZATION role]`; the nested schema_element_list (CREATE TABLE inside the
+// schema) is parsed-and-staged (an element list routes its members at exec time).
+CreateSchemaStmt: Node = {
+    "CREATE" "SCHEMA" <n:ColId> <auth:OptSchemaAuth> =>
+        make_create_schema_stmt(Some(n), auth, Vec::new(), false),
+    "CREATE" "SCHEMA" "IF" "NOT" "EXISTS" <n:ColId> <auth:OptSchemaAuth> =>
+        make_create_schema_stmt(Some(n), auth, Vec::new(), true),
+    "CREATE" "SCHEMA" "AUTHORIZATION" <r:ColId> =>
+        make_create_schema_stmt(None, Some(make_role_spec(r)), Vec::new(), false),
+};
+
+// gram.y `OptSchemaName` AUTHORIZATION role tail.
+OptSchemaAuth: Option<Node> = {
+    "AUTHORIZATION" <r:ColId> => Some(make_role_spec(r)),
+    => None,
+};
+
+// ===========================================================================
+//  CREATE TYPE / DOMAIN / COLLATION  (M10, step 39: DefineStmt + CreateDomainStmt)
+// ===========================================================================
+
+// gram.y `DefineStmt` for CREATE TYPE: composite `AS (col type, ...)`, enum
+// `AS ENUM ('a', ...)`. The base-type `CREATE TYPE n (INPUT=.., ...)` form stages.
+DefineStmt: Node = {
+    "CREATE" "TYPE" <n:AnyNameParts> "AS" "(" <cols:OtColumnList> ")" =>
+        make_define_type_stmt(n, cols),
+    "CREATE" "TYPE" <n:AnyNameParts> "AS" "ENUM" "(" <labels:EnumLabelList> ")" =>
+        make_define_type_stmt(n, labels),
+    "CREATE" "COLLATION" <n:AnyNameParts> "(" <defs:DefList> ")" =>
+        make_define_collation_stmt(n, defs),
+};
+
+// gram.y `TableFuncElementList` (the composite column list `colname type, ...`).
+OtColumnList: Vec<Node> = {
+    <c:OtColumn> => vec![c],
+    <mut list:OtColumnList> "," <c:OtColumn> => { list.push(c); list },
+};
+
+OtColumn: Node = {
+    <n:ColId> <t:Typename> => make_ot_column_def(n, t),
+};
+
+// gram.y `enum_val_list`: the quoted enum labels.
+EnumLabelList: Vec<Node> = {
+    <s:"SCONST"> => vec![make_string_const(s)],
+    <mut list:EnumLabelList> "," <s:"SCONST"> => { list.push(make_string_const(s)); list },
+};
+
+// gram.y `CreateDomainStmt`: CREATE DOMAIN n [AS] type [DEFAULT e] [constraints].
+// M10 reaches the type + optional DEFAULT (constraints stage to phase B).
+CreateDomainStmt: Node = {
+    "CREATE" "DOMAIN" <n:AnyNameParts> <t:Typename> =>
+        make_create_domain_stmt(n, t, Vec::new()),
+    "CREATE" "DOMAIN" <n:AnyNameParts> "AS" <t:Typename> =>
+        make_create_domain_stmt(n, t, Vec::new()),
+};
+
+// gram.y `any_name` parts as a Vec<String> (1- or 2-part).
+AnyNameParts: Vec<String> = {
+    <n:ColId> => vec![n],
+    <s:ColId> "." <n:ColId> => vec![s, n],
+};
+
+// gram.y `def_list: def_elem (',' def_elem)*` (the parenthesized definition list).
+DefList: Vec<Node> = {
+    <e:DefElemItem> => vec![e],
+    <mut list:DefList> "," <e:DefElemItem> => { list.push(e); list },
+};
+
+// gram.y `def_elem: ColLabel '=' def_arg | ColLabel`.
+DefElemItem: Node = {
+    <n:ColId> "=" <s:"SCONST"> => make_generic_def_elem(&n, Some(make_string_const(s))),
+    <n:ColId> "=" <i:SignedIconst> => make_generic_def_elem(&n, Some(make_int_const(i32::try_from(i).unwrap_or(0)))),
+    <n:ColId> => make_generic_def_elem(&n, None),
+};
+
+// ===========================================================================
+//  CREATE FUNCTION / PROCEDURE  (M10, step 39)
+// ===========================================================================
+
+// gram.y `CreateFunctionStmt`: CREATE [OR REPLACE] FUNCTION|PROCEDURE name(args)
+// [RETURNS rettype] LANGUAGE lang AS 'body' [opts]. The body/language are options.
+CreateFunctionStmt: Node = {
+    "CREATE" <repl:OptOrReplace> "FUNCTION" <n:AnyNameParts> "(" <args:FuncArgsOrEmpty> ")"
+        <ret:OptFuncReturns> <opts:OptCreateFuncOptList> =>
+        make_create_function_stmt(false, repl, n, args, ret, opts),
+    "CREATE" <repl:OptOrReplace> "PROCEDURE" <n:AnyNameParts> "(" <args:FuncArgsOrEmpty> ")"
+        <opts:OptCreateFuncOptList> =>
+        make_create_function_stmt(true, repl, n, args, None, opts),
+};
+
+OptOrReplace: bool = {
+    "OR" "REPLACE" => true,
+    => false,
+};
+
+// gram.y `func_args_with_defaults: '(' func_args_with_defaults_list ')' | '(' ')'`.
+FuncArgsOrEmpty: Vec<Node> = {
+    => Vec::new(),
+    <list:FuncArgList> => list,
+};
+
+FuncArgList: Vec<Node> = {
+    <a:FuncArg> => vec![a],
+    <mut list:FuncArgList> "," <a:FuncArg> => { list.push(a); list },
+};
+
+// gram.y `func_arg`: [arg_class] [param_name] func_type. M10 reaches `[name] type`.
+FuncArg: Node = {
+    <t:Typename> => make_function_parameter(None, t),
+    <n:ColId> <t:Typename> => make_function_parameter(Some(n), t),
+};
+
+// gram.y `RETURNS func_type | /*EMPTY*/`.
+OptFuncReturns: Option<TypeName> = {
+    "RETURNS" <t:Typename> => Some(t),
+    => None,
+};
+
+// gram.y `createfunc_opt_list`: the LANGUAGE / AS body options. Non-empty
+// left-recursive list with an Opt wrapper for emptiness (avoids the empty-vs-single
+// reduction ambiguity).
+OptCreateFuncOptList: Vec<Node> = {
+    CreateFuncOptList,
+    => Vec::new(),
+};
+
+CreateFuncOptList: Vec<Node> = {
+    <e:CreateFuncOptItem> => vec![e],
+    <mut list:CreateFuncOptList> <e:CreateFuncOptItem> => { list.push(e); list },
+};
+
+// gram.y `createfunc_opt_item` (the M10-reachable subset): LANGUAGE name | AS 'body'.
+// PG's LANGUAGE arg is NonReservedWord_or_Sconst; the common language names (`sql`,
+// `plpgsql`) are unreserved keywords, so the quoted form `LANGUAGE 'sql'` is the
+// portable spelling here (a bare unreserved-keyword ColId is a broader grammar
+// change). A plain-identifier language name is also accepted.
+CreateFuncOptItem: Node = {
+    "LANGUAGE" <n:ColId> => make_generic_def_elem("language", Some(make_string_const(n))),
+    "LANGUAGE" <s:"SCONST"> => make_generic_def_elem("language", Some(make_string_const(s))),
+    "AS" <s:"SCONST"> => make_generic_def_elem("as", Some(make_string_const(s))),
+};
+
+// ===========================================================================
+//  CREATE DATABASE / DROP DATABASE / CREATE CONVERSION / CREATE TABLESPACE
+//  (M10, step 39: parse-and-route; bodies in phase B)
+// ===========================================================================
+
+// gram.y `CreatedbStmt`: CREATE DATABASE name [createdb_opt_list].
+CreatedbStmt: Node = {
+    "CREATE" "DATABASE" <n:ColId> <opts:DefListOrEmpty> => make_createdb_stmt(n, opts),
+};
+
+// gram.y `DropdbStmt`: DROP DATABASE [IF EXISTS] name.
+DropdbStmt: Node = {
+    "DROP" "DATABASE" <n:ColId> => make_dropdb_stmt(n, false),
+    "DROP" "DATABASE" "IF" "EXISTS" <n:ColId> => make_dropdb_stmt(n, true),
+};
+
+DefListOrEmpty: Vec<Node> = {
+    <list:DefList> => list,
+    => Vec::new(),
+};
+
+// gram.y `CreateConversionStmt` (minimal stub-parse): routed to its phase-B body.
+CreateConversionStmt: Node = {
+    "CREATE" "CONVERSION" <n:AnyNameParts> => make_create_conversion_stmt(n),
+};
+
+// gram.y `CreateTableSpaceStmt` (minimal): CREATE TABLESPACE name LOCATION 'path'.
+CreateTableSpaceStmt: Node = {
+    "CREATE" "TABLESPACE" <n:ColId> "LOCATION" <loc:"SCONST"> =>
+        make_create_tablespace_stmt(n, Some(loc)),
 };
 
 // ===========================================================================
@@ -1051,6 +1368,15 @@ OptFromIn: () = {
 // i64 without a sign-prefix conflict against the unary-minus expression path).
 SignedIconst: i64 = {
     <i:"ICONST"> => i64::from(i),
+};
+
+// gram.y `NumericOnly` (sequence-option subset): a signed integer. Reached only
+// after a sequence-option keyword (INCREMENT/START/...), where a leading `-`/`+` is
+// unambiguous (no expression tier here), so it needs no UMINUS conflict guard.
+SeqNumeric: i64 = {
+    <i:"ICONST"> => i64::from(i),
+    "+" <i:"ICONST"> => i64::from(i),
+    "-" <i:"ICONST"> => -i64::from(i),
 };
 
 // ===========================================================================

@@ -5,6 +5,9 @@ use crate::postgres_ext::Oid;
 use crate::utils::acl::AclItem;
 
 pub const NamespaceRelationId: Oid = Oid(2615);
+/// pg_namespace composite rowtype OID (genbki-assigned). Used to nail the
+/// descriptor at bootstrap (formrdesc); not load-bearing beyond the rowtype id.
+pub const NamespaceRelation_Rowtype_Id: Oid = Oid(11632);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

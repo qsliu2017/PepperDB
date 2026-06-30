@@ -14,6 +14,10 @@ use crate::nodes::nodes::Node;
 use crate::postgres_ext::Oid;
 
 pub const ConstraintRelationId: Oid = Oid(2606);
+/// pg_constraint composite rowtype OID. Nails the descriptor at bootstrap.
+pub const ConstraintRelation_Rowtype_Id: Oid = Oid(11635);
+/// pg_constraint_oid_index (pkey on oid).
+pub const ConstraintOidIndexId: Oid = Oid(2667);
 
 // pg_node_tree catalog field = varlena (serialized node tree); modeled as text.
 pub type PgNodeTree = text;

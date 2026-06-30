@@ -1444,7 +1444,35 @@ fn check_insert_targets(
         }
         (icolumns, attnos)
     } else {
-        not_yet_reachable("checkInsertTargets: explicit INSERT column list");
+        // Explicit column list: resolve each named column to its attno in the target
+        // descriptor. (The duplicate-column check + INSERT permission marking grow
+        // with the permission machinery; M10 maps names to attnos.)
+        let mut icolumns = Vec::with_capacity(cols.len());
+        let mut attnos = Vec::with_capacity(cols.len());
+        for col in cols {
+            let Node::ResTarget(rt) = col else {
+                not_yet_reachable("checkInsertTargets: INSERT column is not a ResTarget");
+            };
+            let colname = rt.name.as_deref().unwrap_or_else(|| {
+                not_yet_reachable("checkInsertTargets: INSERT column without a name")
+            });
+            let attno = (0..tupdesc.natts as usize)
+                .find_map(|i| {
+                    let attr = tupdesc.attr(i);
+                    (!attr.attisdropped && attr_name(attr) == colname)
+                        .then_some((i + 1) as crate::access::attnum::AttrNumber)
+                })
+                .unwrap_or_else(|| {
+                    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_COLUMN)
+                            .errmsg(format!("column \"{colname}\" of relation does not exist"));
+                    });
+                    unreachable!("ereport(ERROR) diverges");
+                });
+            icolumns.push(col.clone());
+            attnos.push(attno);
+        }
+        (icolumns, attnos)
     }
 }
 

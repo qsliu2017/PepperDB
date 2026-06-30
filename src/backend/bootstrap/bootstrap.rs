@@ -42,7 +42,12 @@ use crate::catalog::pg_attribute::{AttributeRelationId, AttributeRelation_Rowtyp
 use crate::catalog::pg_cast::{CastRelationId, CastRelation_Rowtype_Id};
 use crate::catalog::pg_class::{RelationRelationId, RelationRelation_Rowtype_Id};
 use crate::catalog::pg_operator::{OperatorRelationId, OperatorRelation_Rowtype_Id};
+use crate::catalog::pg_attrdef::{AttrDefaultRelationId, AttrDefaultRelation_Rowtype_Id};
+use crate::catalog::pg_constraint::{ConstraintRelationId, ConstraintRelation_Rowtype_Id};
+use crate::catalog::pg_description::{DescriptionRelationId, DescriptionRelation_Rowtype_Id};
+use crate::catalog::pg_namespace::{NamespaceRelationId, NamespaceRelation_Rowtype_Id};
 use crate::catalog::pg_proc::{ProcedureRelationId, ProcedureRelation_Rowtype_Id};
+use crate::catalog::pg_sequence::{SequenceRelationId, SequenceRelation_Rowtype_Id};
 use crate::catalog::pg_type::{TypeRelationId, TypeRelation_Rowtype_Id};
 use crate::postgres_ext::{InvalidOid, Oid};
 
@@ -174,6 +179,46 @@ pub static FORMRDESC_CATALOGS: &[BootstrapCatalog] = &[
         reltype: AggregateRelation_Rowtype_Id,
         isshared: false,
         schema: SCHEMA_PG_AGGREGATE,
+    },
+    // M10 (step 39): the object-DDL catalogs. pg_namespace is seeded (its standard
+    // rows); pg_sequence/pg_attrdef/pg_constraint/pg_description start empty and are
+    // filled by the runtime DDL (CREATE SEQUENCE, SET DEFAULT, ADD CONSTRAINT,
+    // COMMENT). Nailing gives `relation_id_get_relation` their descriptor for those
+    // inserts before they have pg_class self-rows.
+    BootstrapCatalog {
+        relname: "pg_namespace",
+        relid: NamespaceRelationId,
+        reltype: NamespaceRelation_Rowtype_Id,
+        isshared: false,
+        schema: SCHEMA_PG_NAMESPACE,
+    },
+    BootstrapCatalog {
+        relname: "pg_sequence",
+        relid: SequenceRelationId,
+        reltype: SequenceRelation_Rowtype_Id,
+        isshared: false,
+        schema: SCHEMA_PG_SEQUENCE,
+    },
+    BootstrapCatalog {
+        relname: "pg_attrdef",
+        relid: AttrDefaultRelationId,
+        reltype: AttrDefaultRelation_Rowtype_Id,
+        isshared: false,
+        schema: SCHEMA_PG_ATTRDEF,
+    },
+    BootstrapCatalog {
+        relname: "pg_constraint",
+        relid: ConstraintRelationId,
+        reltype: ConstraintRelation_Rowtype_Id,
+        isshared: false,
+        schema: SCHEMA_PG_CONSTRAINT,
+    },
+    BootstrapCatalog {
+        relname: "pg_description",
+        relid: DescriptionRelationId,
+        reltype: DescriptionRelation_Rowtype_Id,
+        isshared: false,
+        schema: SCHEMA_PG_DESCRIPTION,
     },
 ];
 
@@ -533,6 +578,11 @@ pub async fn bootstrap_catalogs(
     //     nodeAgg's AGGFNOID lookup resolves count/sum/min/max transfns.
     seed_pg_proc_m5_agg(shared).await;
     seed_pg_aggregate_m5(shared).await;
+    // 5d. M10 (step 39): build the object-DDL catalogs' indexes and seed pg_namespace
+    //     with the standard schemas (pg_catalog/public/pg_toast/information_schema).
+    //     The other four (pg_sequence/pg_attrdef/pg_constraint/pg_description) start
+    //     empty; the runtime DDL inserts into them.
+    seed_object_ddl_catalogs(shared).await;
 
     // 6. Warm the operator/function-resolution syscaches for the seeded M3 set.
     //    The parser's operator resolution (make_op -> oper -> OpernameGetOprid) runs
@@ -1004,6 +1054,92 @@ async fn seed_pg_aggregate_m5(shared: &std::sync::Arc<crate::shared_state::Share
         heap_freetuple(tuple);
     }
     relation_close(pg_aggregate);
+}
+
+/// M10 (step 39): bring up the object-DDL catalogs. Build the oid (pkey) index for
+/// each so `catalog_tuple_insert` populates it, then seed pg_namespace's standard
+/// schema rows (pg_catalog/public/pg_toast/information_schema) so `CREATE SCHEMA`
+/// inserts alongside them and schema-name resolution heap-scans real rows. The other
+/// four catalogs (pg_sequence/pg_attrdef/pg_constraint/pg_description) start empty;
+/// the runtime DDL inserts into them. Their storage was created by the FORMRDESC
+/// loop above.
+async fn seed_object_ddl_catalogs(shared: &std::sync::Arc<crate::shared_state::SharedState>) {
+    use crate::backend::access::common::heaptuple::{heap_form_tuple, heap_freetuple};
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::catalog::index::{index_create, make_index_info};
+    use crate::backend::catalog::indexing::catalog_tuple_insert;
+    use crate::backend::utils::cache::relcache::{relation_close, relation_id_get_relation};
+    use crate::catalog::pg_attrdef::AttrDefaultOidIndexId;
+    use crate::catalog::pg_constraint::ConstraintOidIndexId;
+    use crate::catalog::pg_namespace::{
+        self as ns, NamespaceOidIndexId, PG_CATALOG_NAMESPACE,
+    };
+    use crate::catalog::pg_sequence::SequenceRelidIndexId;
+    use crate::postgres::{Datum, NameGetDatum, ObjectIdGetDatum};
+
+    // Build each catalog's oid/pkey index (so inserts maintain it). pg_sequence's
+    // pkey is on seqrelid (an oid); the rest are on oid. pg_description's pkey is a
+    // 3-column index -- not built here (its rows are looked up by heap scan; the
+    // multi-col index needs an oid+oid+int4 opclass set not yet seeded). The oid
+    // indexes use the seeded oid_ops btree opclass (1981).
+    let build_oid_index = async |relid: Oid, index_id: Oid, index_name: &str, col: &str, attno: i16| {
+        let Some(rel) = relation_id_get_relation(relid) else { return };
+        let info = make_index_info(&[attno], true);
+        index_create(
+            shared, &rel, index_name, index_id, index_id, &info, &[col.to_owned()],
+            Oid(403), crate::common::relpath::DEFAULTTABLESPACE_OID,
+            &[Oid(0)], &[Oid(1981)], &[0], false,
+        )
+        .await;
+        relation_close(rel);
+    };
+
+    build_oid_index(
+        NamespaceRelationId, NamespaceOidIndexId, "pg_namespace_oid_index", "oid",
+        ns::Anum_pg_namespace_oid as i16,
+    )
+    .await;
+    build_oid_index(
+        SequenceRelationId, SequenceRelidIndexId, "pg_sequence_seqrelid_index", "seqrelid",
+        crate::catalog::pg_sequence::Anum_pg_sequence_seqrelid as i16,
+    )
+    .await;
+    build_oid_index(
+        AttrDefaultRelationId, AttrDefaultOidIndexId, "pg_attrdef_oid_index", "oid",
+        crate::catalog::pg_attrdef::Anum_pg_attrdef_oid as i16,
+    )
+    .await;
+    build_oid_index(
+        ConstraintRelationId, ConstraintOidIndexId, "pg_constraint_oid_index", "oid",
+        crate::catalog::pg_constraint::Anum_pg_constraint_oid as i16,
+    )
+    .await;
+
+    // Seed pg_namespace with the standard schema rows from SEED_PG_NAMESPACE (the
+    // .dat-driven oid/nspname/nspowner; nspacl is NULL).
+    let Some(pg_namespace) = relation_id_get_relation(NamespaceRelationId) else { return };
+    let desc = pg_namespace.rd_att.clone().unwrap_or_else(|| unreachable!("pg_namespace desc"));
+    let natts = desc.natts as usize;
+    for row in SEED_PG_NAMESPACE {
+        let oid: u32 = row.iter().find(|(c, _)| *c == "oid").map_or(0, |(_, v)| v.parse().unwrap_or(0));
+        let name = row.iter().find(|(c, _)| *c == "nspname").map_or("", |(_, v)| v);
+        let nsp_name = name_data(name); // kept alive to back NameGetDatum
+
+        let mut values = vec![Datum(0); natts];
+        let mut isnull = vec![false; natts];
+        values[(ns::Anum_pg_namespace_oid - 1) as usize] = ObjectIdGetDatum(Oid(oid));
+        values[(ns::Anum_pg_namespace_nspname - 1) as usize] = NameGetDatum(&nsp_name);
+        // BKI_DEFAULT(POSTGRES): the bootstrap superuser (oid 10).
+        values[(ns::Anum_pg_namespace_nspowner - 1) as usize] = ObjectIdGetDatum(Oid(10));
+        // nspacl is NULL (no initial ACL).
+        isnull[(ns::Anum_pg_namespace_nspacl - 1) as usize] = true;
+
+        let mut tuple = heap_form_tuple(&desc, &values, &isnull);
+        catalog_tuple_insert(shared, &pg_namespace, &mut tuple).await;
+        heap_freetuple(tuple);
+    }
+    relation_close(pg_namespace);
+    let _ = PG_CATALOG_NAMESPACE;
 }
 
 /// PG `boot_get_type_io_data`: 8 out-params folded into a named struct. Returns

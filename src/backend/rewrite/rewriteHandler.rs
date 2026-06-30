@@ -54,11 +54,16 @@ fn rewrite_query(
         not_yet_reachable("RewriteQuery: WITH clause");
     }
 
-    // INSERT/UPDATE/DELETE/MERGE: adjust the targetlist, fire I/U/D rules, handle
-    // view auto-update, and recurse into product queries. None of this is
-    // reachable for an M1 SELECT; the whole block grows in later milestones.
+    // INSERT/UPDATE/DELETE/MERGE: PG also fires I/U/D rules and handles view
+    // auto-update here. Those (and the data-modifying-WITH recursion) grow with the
+    // rules/views milestone (M11). The INSERT DEFAULT expansion (PG's
+    // rewriteTargetListIns / build_column_default) is done in the planner's
+    // `preprocess_targetlist` (expand_targetlist INSERT path) -- it needs the
+    // result-relation descriptor, which the planner has -- so a plain data-modifying
+    // statement is not run through this pass (postgres.rs routes it straight to the
+    // planner). A rule-bearing relation would route here once rules land.
     if event != CmdType::SELECT && event != CmdType::UTILITY {
-        not_yet_reachable("RewriteQuery: INSERT/UPDATE/DELETE/MERGE rewriting");
+        not_yet_reachable("RewriteQuery: INSERT/UPDATE/DELETE/MERGE rule firing (M11)");
     }
 
     // SELECT and UTILITY are not rewritten by this pass. With no INSTEAD rule

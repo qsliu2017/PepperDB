@@ -85,15 +85,18 @@ pub async fn DefineRelation(
     // RangeVarGetAndCheckCreationNamespace (M2 subset): a schema qualifier
     // resolves in that schema; otherwise the default creation namespace is public.
     // (Permission/lock/temp-namespace handling is staged.)
-    let namespace_id = relation.schemaname.as_deref().map_or(PG_PUBLIC_NAMESPACE, |schema| {
-        lookup_explicit_namespace(schema, false).unwrap_or_else(|| {
-            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
-                e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_SCHEMA)
-                    .errmsg(format!("schema \"{schema}\" does not exist"));
-            });
-            unreachable!("ereport(ERROR) diverges");
-        })
-    });
+    let namespace_id = match relation.schemaname.as_deref() {
+        None => PG_PUBLIC_NAMESPACE,
+        Some(schema) => crate::backend::catalog::namespace::namespace_oid_by_name(shared, schema)
+            .await
+            .unwrap_or_else(|| {
+                crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                    e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_SCHEMA)
+                        .errmsg(format!("schema \"{schema}\" does not exist"));
+                });
+                unreachable!("ereport(ERROR) diverges");
+            }),
+    };
 
     // Identify the owning user (PG: default to GetUserId()).
     let owner_id = if owner_id == InvalidOid {
@@ -391,6 +394,15 @@ pub async fn heap_drop_with_catalog(shared: &Arc<SharedState>, relid: Oid) {
         shared,
         ConstraintRelationId,
         crate::catalog::pg_constraint::Anum_pg_constraint_conrelid,
+        relid,
+    )
+    .await;
+
+    // pg_sequence row keyed by seqrelid (sequences only; a no-op for tables).
+    delete_catalog_rows_by_oid(
+        shared,
+        crate::catalog::pg_sequence::SequenceRelationId,
+        crate::catalog::pg_sequence::Anum_pg_sequence_seqrelid,
         relid,
     )
     .await;
@@ -814,8 +826,6 @@ async fn store_check_constraint(
     relid: Oid,
     con: &crate::nodes::parsenodes::Constraint,
 ) {
-    use crate::catalog::pg_constraint::{self as pc, ConstraintRelationId};
-
     let conname = con.conname.clone().unwrap_or_else(|| format!("{}_check", relid.0));
     let raw = con
         .raw_expr
@@ -823,48 +833,16 @@ async fn store_check_constraint(
         .unwrap_or_else(|| unreachable!("a CHECK constraint carries an expression"));
     let consrc = crate::backend::utils::adt::ruleutils::deparse_expression(raw);
 
-    // pg_constraint is not seeded on-disk at this milestone (STAGED, rules.md s4):
-    // the constraint row store + the validation scan grow when it is seeded. The
-    // deparse path above is exercised; without the catalog there is nowhere to store.
-    let Some(pg_constraint) = relation_id_get_relation(ConstraintRelationId) else {
-        return;
-    };
-    let desc = pg_constraint.rd_att.clone().unwrap_or_else(|| unreachable!("pg_constraint desc"));
-    let natts = desc.natts as usize;
-    let mut values = vec![Datum(0); natts];
-    let mut isnull = vec![true; natts]; // most columns NULL; set the ones we fill
-    let new_oid = get_new_oid(shared, ConstraintRelationId);
-    let conname_data = mut_name(&conname);
-    let set = |v: &mut [Datum], n: &mut [bool], anum: i32, d: Datum| {
-        v[(anum - 1) as usize] = d;
-        n[(anum - 1) as usize] = false;
-    };
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_oid, crate::postgres::ObjectIdGetDatum(new_oid));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_conname, NameGetDatum_owned(&conname_data));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_connamespace, crate::postgres::ObjectIdGetDatum(crate::catalog::pg_namespace::PG_PUBLIC_NAMESPACE));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_contype, crate::postgres::CharGetDatum(b'c' as i8));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_condeferrable, crate::postgres::BoolGetDatum(false));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_condeferred, crate::postgres::BoolGetDatum(false));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_convalidated, crate::postgres::BoolGetDatum(true));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_conrelid, crate::postgres::ObjectIdGetDatum(relid));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_contypid, crate::postgres::ObjectIdGetDatum(InvalidOid));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_conindid, crate::postgres::ObjectIdGetDatum(InvalidOid));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_conparentid, crate::postgres::ObjectIdGetDatum(InvalidOid));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_confrelid, crate::postgres::ObjectIdGetDatum(InvalidOid));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_confupdtype, crate::postgres::CharGetDatum(b' ' as i8));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_confdeltype, crate::postgres::CharGetDatum(b' ' as i8));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_confmatchtype, crate::postgres::CharGetDatum(b' ' as i8));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_conislocal, crate::postgres::BoolGetDatum(true));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_coninhcount, crate::postgres::Int16GetDatum(0));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_connoinherit, crate::postgres::BoolGetDatum(false));
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_conenforced, crate::postgres::BoolGetDatum(true));
-    // conbin: the deparsed check expression (M10: text).
-    set(&mut values, &mut isnull, pc::Anum_pg_constraint_conbin, text_datum(&consrc));
-
-    let mut tup = heap_form_tuple(&desc, &values, &isnull);
-    crate::backend::catalog::indexing::catalog_tuple_insert(shared, &pg_constraint, &mut tup).await;
-    heap_freetuple(tup);
-    relation_close(pg_constraint);
+    // Insert the pg_constraint row (now that pg_constraint is seeded on-disk). The
+    // validation scan (verify existing rows satisfy the constraint) stages.
+    crate::backend::catalog::pg_constraint::create_constraint_entry(
+        shared,
+        &conname,
+        crate::catalog::pg_namespace::PG_PUBLIC_NAMESPACE,
+        relid,
+        &consrc,
+    )
+    .await;
 }
 
 /// The attribute flag an `ATExec*` updates on a pg_attribute row.

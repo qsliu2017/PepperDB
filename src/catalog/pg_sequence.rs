@@ -3,6 +3,10 @@
 use crate::postgres_ext::Oid;
 
 pub const SequenceRelationId: Oid = Oid(2224);
+/// pg_sequence composite rowtype OID. Nails the descriptor at bootstrap.
+pub const SequenceRelation_Rowtype_Id: Oid = Oid(11633);
+/// pg_sequence_seqrelid_index (pkey on seqrelid).
+pub const SequenceRelidIndexId: Oid = Oid(5002);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

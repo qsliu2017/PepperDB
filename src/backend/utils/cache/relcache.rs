@@ -399,7 +399,91 @@ async fn relation_build_tuple_desc(
     systable_endscan(shared, &mut scan);
     relation_close(pg_attribute);
 
+    // RelationBuildTupleDesc also reads pg_attrdef for the relation's column defaults
+    // (the `atthasdef` columns), filling TupleConstr.defval. The planner's INSERT
+    // target-list expansion reads these to fill omitted columns (SET DEFAULT). M10
+    // stores the deparsed default text in pg_attrdef.adbin.
+    let has_def = desc.attrs.iter().take(natts as usize).any(|a| {
+        // atthasdef is not a CompactAttribute field; read it from the fixed part.
+        a.attnum >= 1 && atthasdef_of(&desc, a.attnum)
+    });
+    if has_def {
+        let defval = scan_attrdefs(shared, relid).await;
+        if !defval.is_empty() {
+            let constr = desc.constr.get_or_insert_with(|| {
+                Box::new(crate::access::tupdesc::TupleConstr {
+                    defval: Vec::new(),
+                    check: Vec::new(),
+                    missing: None,
+                    has_not_null: false,
+                    has_generated_stored: false,
+                    has_generated_virtual: false,
+                })
+            });
+            constr.defval = defval;
+        }
+    }
+
     Arc::new(desc)
+}
+
+/// Whether the descriptor's attribute `attnum` (1-based) has `atthasdef` set.
+fn atthasdef_of(desc: &crate::access::tupdesc::TupleDescData, attnum: i16) -> bool {
+    desc.attrs.get((attnum - 1) as usize).is_some_and(|a| a.atthasdef)
+}
+
+/// Scan pg_attrdef for `relid`, returning its `(adnum, adbin)` column defaults (the
+/// adbin stored as the deparsed default text). Empty if pg_attrdef is unseeded or has
+/// no rows for the relation.
+async fn scan_attrdefs(
+    shared: &Arc<SharedState>,
+    relid: Oid,
+) -> Vec<crate::access::tupdesc::AttrDefault> {
+    use crate::access::skey::ScanKeyData;
+    use crate::backend::access::common::heaptuple::heap_getattr;
+    use crate::catalog::pg_attrdef::{
+        self as ad, AttrDefaultRelationId,
+    };
+
+    let Some(catalog) = relation_id_get_relation(AttrDefaultRelationId) else {
+        return Vec::new();
+    };
+    let desc = catalog.rd_att.clone().unwrap_or_else(|| unreachable!("pg_attrdef desc"));
+    let key = [ScanKeyData {
+        flags: 0,
+        attno: ad::Anum_pg_attrdef_adrelid as i16,
+        strategy: crate::access::stratnum::BT_EQUAL_STRATEGY_NUMBER,
+        subtype: crate::postgres_ext::InvalidOid,
+        collation: crate::postgres_ext::InvalidOid,
+        func: zero_fmgr_info(),
+        argument: ObjectIdGetDatum(relid),
+    }];
+    let snap = systable_scan_snapshot(shared, &catalog, None);
+    let mut scan = systable_beginscan(
+        shared,
+        &catalog,
+        crate::postgres_ext::InvalidOid,
+        false,
+        &snap,
+        &key,
+    );
+    let mut out = Vec::new();
+    while let Some(tref) = Box::pin(systable_getnext(shared, &mut scan)).await {
+        // SAFETY: adnum is a valid int2 column; adbin a text column.
+        let (adnum_d, n1) = unsafe { heap_getattr(tref, ad::Anum_pg_attrdef_adnum, &desc) };
+        let (adbin_d, n2) = unsafe { heap_getattr(tref, ad::Anum_pg_attrdef_adbin, &desc) };
+        if n1 || n2 {
+            continue;
+        }
+        let adnum = crate::postgres::DatumGetInt16(adnum_d);
+        // SAFETY: adbin is a non-NULL text varlena Datum (a pointer to the text).
+        let adbin_text = unsafe { &*(adbin_d.0 as *const crate::c::text) };
+        let adbin = crate::backend::utils::adt::varlena::text_to_cstring(adbin_text);
+        out.push(crate::access::tupdesc::AttrDefault { adnum, adbin });
+    }
+    systable_endscan(shared, &mut scan);
+    relation_close(catalog);
+    out
 }
 
 // ---------------------------------------------------------------------------

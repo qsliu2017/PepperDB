@@ -100,9 +100,10 @@ pub async fn typename_nsp_get_typid(
     .await
 }
 
-/// `get_namespace_oid` (M2 subset): resolve a schema name to its OID. M2 knows the
-/// built-in schemas directly; an unknown name returns `None` (PG scans
-/// pg_namespace, seeded by initdb).
+/// `get_namespace_oid` (M2 subset): resolve a built-in schema name to its OID by the
+/// well-known OIDs. The on-disk pg_namespace scan (which also finds user-created
+/// schemas) is [`namespace_oid_by_name`] (async); this sync form is kept for the
+/// callers that only need the seeded built-ins (no buffer-pool access).
 #[must_use]
 pub fn get_namespace_oid(nspname: &str, _missing_ok: bool) -> Option<Oid> {
     match nspname {
@@ -111,6 +112,62 @@ pub fn get_namespace_oid(nspname: &str, _missing_ok: bool) -> Option<Oid> {
         "pg_toast" => Some(crate::catalog::pg_namespace::PG_TOAST_NAMESPACE),
         _ => None,
     }
+}
+
+/// `get_namespace_oid` (on-disk form): resolve a schema name to its OID by scanning
+/// pg_namespace (so user-created schemas resolve too). Falls back to the well-known
+/// built-ins if the scan finds nothing (the cold-start pre-initdb path).
+pub async fn namespace_oid_by_name(shared: &Arc<SharedState>, nspname: &str) -> Option<Oid> {
+    use crate::catalog::pg_namespace::{
+        Anum_pg_namespace_nspname, Anum_pg_namespace_oid, NamespaceRelationId,
+    };
+    if let Some(catalog) = relation_id_get_relation(NamespaceRelationId) {
+        relation_close(catalog);
+        if let Some(oid) = scan_namespace_by_name(
+            shared,
+            NamespaceRelationId,
+            Anum_pg_namespace_nspname,
+            Anum_pg_namespace_oid,
+            nspname,
+        )
+        .await
+        {
+            return Some(oid);
+        }
+    }
+    get_namespace_oid(nspname, true)
+}
+
+/// Heap-scan `catalog_relid` for a tuple whose `name_attno` (a `name` column) equals
+/// `name`, returning its `oid_attno` value (no namespace key -- pg_namespace's name
+/// is globally unique).
+async fn scan_namespace_by_name(
+    shared: &Arc<SharedState>,
+    catalog_relid: Oid,
+    name_attno: i32,
+    oid_attno: i32,
+    name: &str,
+) -> Option<Oid> {
+    let catalog = relation_id_get_relation(catalog_relid)?;
+    let desc = catalog.rd_att.clone()
+        .unwrap_or_else(|| unreachable!("catalog has a descriptor"));
+    let snap = systable_scan_snapshot(shared, &catalog, None);
+    let mut scan = systable_beginscan(shared, &catalog, InvalidOid, false, &snap, &[]);
+    let mut result = None;
+    while let Some(tref) = systable_getnext(shared, &mut scan).await {
+        if !tuple_name_eq(tref, &desc, name_attno, name) {
+            continue;
+        }
+        // SAFETY: oid_attno is a valid by-value oid column.
+        let (oid_d, isnull) = unsafe { heap_getattr(tref, oid_attno, &desc) };
+        if !isnull {
+            result = Some(DatumGetObjectId(oid_d));
+            break;
+        }
+    }
+    systable_endscan(shared, &mut scan);
+    relation_close(catalog);
+    result
 }
 
 /// `LookupExplicitNamespace`: resolve a schema qualifier to its OID.
@@ -129,7 +186,9 @@ pub async fn range_var_get_relid(
 ) -> Option<Oid> {
     match schemaname {
         Some(schema) => {
-            let nsp = lookup_explicit_namespace(schema, true)?;
+            // Resolve the schema on-disk so user-created schemas (CREATE SCHEMA)
+            // qualify a relation reference, not just the seeded built-ins.
+            let nsp = namespace_oid_by_name(shared, schema).await?;
             relname_nsp_get_relid(shared, relname, nsp).await
         }
         None => relname_get_relid(shared, relname).await,

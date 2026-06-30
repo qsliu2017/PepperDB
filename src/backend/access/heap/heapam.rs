@@ -64,7 +64,7 @@ use crate::backend::access::transam::xloginsert::{
 };
 use crate::common::relpath::ForkNumber;
 use crate::shared_state::SharedState;
-use crate::catalog::pg_class::{RELKIND_MATVIEW, RELKIND_RELATION};
+use crate::catalog::pg_class::{RELKIND_MATVIEW, RELKIND_RELATION, RELKIND_SEQUENCE};
 use crate::storage::block::{BlockNumber, INVALID_BLOCK_NUMBER};
 use crate::storage::buf::Buffer;
 use crate::storage::bufmgr::InvalidBuffer;
@@ -114,8 +114,8 @@ fn heap_prepare_insert<'t>(
     // grow guard.
     let relkind = relation.form().relkind;
     crate::assert!(
-        relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW,
-        "M2 heap_insert supports only RELKIND_RELATION/MATVIEW"
+        relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW || relkind == RELKIND_SEQUENCE,
+        "heap_insert supports only RELKIND_RELATION/MATVIEW/SEQUENCE"
     );
     tup
 }

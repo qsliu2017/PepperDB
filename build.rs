@@ -1161,7 +1161,11 @@ fn read_pg_type_props(path: &Path) -> std::collections::HashMap<String, TypeProp
         let (Some(name), Some(oid)) = (r.get("typname"), r.get("oid")) else { continue };
         let oid: u32 = oid.parse().unwrap_or(0);
         let typlen = parse_typlen(r.get("typlen").map_or("0", String::as_str));
-        let typbyval = r.get("typbyval").is_some_and(|s| s == "t");
+        // genbki's typbyval is 't'/'f' or the symbolic FLOAT8PASSBYVAL (int8/float8/
+        // etc.), which resolves to true on 64-bit platforms (USE_FLOAT8_BYVAL).
+        let typbyval = r
+            .get("typbyval")
+            .is_some_and(|s| s == "t" || s == "FLOAT8PASSBYVAL");
         let typalign = r.get("typalign").and_then(|s| s.bytes().next()).unwrap_or(b'i') as i8;
         let typstorage = r.get("typstorage").and_then(|s| s.bytes().next()).unwrap_or(b'p') as i8;
         let typcategory = r.get("typcategory").and_then(|s| s.bytes().next()).unwrap_or(0);
@@ -1331,6 +1335,14 @@ fn gen_bootstrap_schemas(
         // M5 (step 25B): pg_aggregate is nailed so the AGGFNOID syscache can read its
         // descriptor before pg_aggregate has a pg_class self-row -- same rationale.
         ("pg_aggregate", "pg_aggregate.h"),
+        // M10 (step 39): the object-DDL catalogs are nailed so their descriptors exist
+        // for the runtime DDL inserts (CREATE SCHEMA/SEQUENCE, SET DEFAULT, ADD
+        // CONSTRAINT, COMMENT) before they have pg_class self-rows.
+        ("pg_namespace", "pg_namespace.h"),
+        ("pg_sequence", "pg_sequence.h"),
+        ("pg_attrdef", "pg_attrdef.h"),
+        ("pg_constraint", "pg_constraint.h"),
+        ("pg_description", "pg_description.h"),
     ];
 
     for (cat, hdr) in catalogs {
