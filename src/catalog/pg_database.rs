@@ -5,8 +5,8 @@ use crate::postgres_ext::Oid;
 use crate::utils::acl::AclItem;
 
 // BKI_SHARED_RELATION BKI_ROWTYPE_OID(1248,DatabaseRelation_Rowtype_Id) BKI_SCHEMA_MACRO
-pub const DatabaseRelationId: Oid = Oid(1262);
-pub const DatabaseRelation_Rowtype_Id: Oid = Oid(1248);
+pub const DatabaseRelationId: Oid = Oid::new(1262);
+pub const DatabaseRelation_Rowtype_Id: Oid = Oid::new(1248);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -40,9 +40,9 @@ pub type Form_pg_database = *mut FormData_pg_database; // TODO(ptr)
 // MAKE_SYSCACHE(DATABASEOID, pg_database_oid_index, 4)
 
 // DECLARE_OID_DEFINING_MACRO(Template0DbOid, 4)
-pub const Template0DbOid: Oid = Oid(4);
+pub const Template0DbOid: Oid = Oid::new(4);
 // DECLARE_OID_DEFINING_MACRO(PostgresDbOid, 5)
-pub const PostgresDbOid: Oid = Oid(5);
+pub const PostgresDbOid: Oid = Oid::new(5);
 
 pub const DATCONNLIMIT_UNLIMITED: i32 = -1;
 pub const DATCONNLIMIT_INVALID_DB: i32 = -2;

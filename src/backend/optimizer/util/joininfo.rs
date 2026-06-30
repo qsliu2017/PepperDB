@@ -163,7 +163,7 @@ mod tests {
     fn join_rinfo(required: Relids, serial: i32) -> RestrictInfo {
         RestrictInfo {
             clause: Node::Const(Box::new(crate::nodes::primnodes::Const {
-                consttype: crate::postgres_ext::Oid(16),
+                consttype: crate::postgres_ext::Oid::new(16),
                 consttypmod: -1,
                 constcollid: InvalidOid,
                 constlen: 1,

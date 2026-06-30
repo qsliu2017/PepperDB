@@ -3,7 +3,7 @@
 use crate::c::text;
 use crate::postgres_ext::Oid;
 
-pub const ForeignTableRelationId: Oid = Oid(3118);
+pub const ForeignTableRelationId: Oid = Oid::new(3118);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

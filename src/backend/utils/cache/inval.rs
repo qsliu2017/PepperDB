@@ -1179,7 +1179,7 @@ pub fn cache_invalidate_relcache_by_relid(relid: Oid) {
         crate::postgres::ObjectIdGetDatum(relid),
     );
     let Some(tup) = tup else {
-        panic!("cache lookup failed for relation {}", relid.0);
+        panic!("cache lookup failed for relation {}", relid.get());
     };
     cache_invalidate_relcache_by_tuple(tup);
     crate::utils::syscache::ReleaseSysCache(tup);
@@ -1384,41 +1384,41 @@ fn serialize_shared_inval_msg(msg: &SharedInvalidationMessage, out: &mut Vec<u8>
     match *msg {
         SharedInvalidationMessage::Catcache(m) => {
             slot[0] = m.id as u8; // cache id (>= 0) is the id field
-            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
+            slot[4..8].copy_from_slice(&m.db_id.get().to_ne_bytes());
             slot[8..12].copy_from_slice(&m.hash_value.to_ne_bytes());
         }
         SharedInvalidationMessage::Catalog(m) => {
             slot[0] = SHAREDINVALCATALOG_ID as u8;
-            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
-            slot[8..12].copy_from_slice(&m.cat_id.0.to_ne_bytes());
+            slot[4..8].copy_from_slice(&m.db_id.get().to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.cat_id.get().to_ne_bytes());
         }
         SharedInvalidationMessage::Relcache(m) => {
             slot[0] = SHAREDINVALRELCACHE_ID as u8;
-            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
-            slot[8..12].copy_from_slice(&m.rel_id.0.to_ne_bytes());
+            slot[4..8].copy_from_slice(&m.db_id.get().to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.rel_id.get().to_ne_bytes());
         }
         SharedInvalidationMessage::Smgr(m) => {
             // PG packs the procno into backend_hi (int8) + backend_lo (uint16).
             slot[0] = SHAREDINVALSMGR_ID as u8;
             slot[1] = (m.backend >> 16) as i8 as u8;
             slot[2..4].copy_from_slice(&((m.backend & 0xffff) as u16).to_ne_bytes());
-            slot[4..8].copy_from_slice(&m.rlocator.spcOid.0.to_ne_bytes());
-            slot[8..12].copy_from_slice(&m.rlocator.dbOid.0.to_ne_bytes());
-            slot[12..16].copy_from_slice(&m.rlocator.relNumber.0.to_ne_bytes());
+            slot[4..8].copy_from_slice(&m.rlocator.spcOid.get().to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.rlocator.dbOid.get().to_ne_bytes());
+            slot[12..16].copy_from_slice(&m.rlocator.relNumber.get().to_ne_bytes());
         }
         SharedInvalidationMessage::Relmap(m) => {
             slot[0] = SHAREDINVALRELMAP_ID as u8;
-            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
+            slot[4..8].copy_from_slice(&m.db_id.get().to_ne_bytes());
         }
         SharedInvalidationMessage::Snapshot(m) => {
             slot[0] = SHAREDINVALSNAPSHOT_ID as u8;
-            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
-            slot[8..12].copy_from_slice(&m.rel_id.0.to_ne_bytes());
+            slot[4..8].copy_from_slice(&m.db_id.get().to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.rel_id.get().to_ne_bytes());
         }
         SharedInvalidationMessage::RelSync(m) => {
             slot[0] = SHAREDINVALRELSYNC_ID as u8;
-            slot[4..8].copy_from_slice(&m.db_id.0.to_ne_bytes());
-            slot[8..12].copy_from_slice(&m.relid.0.to_ne_bytes());
+            slot[4..8].copy_from_slice(&m.db_id.get().to_ne_bytes());
+            slot[8..12].copy_from_slice(&m.relid.get().to_ne_bytes());
         }
     }
 }

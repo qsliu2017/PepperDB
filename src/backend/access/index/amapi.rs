@@ -14,14 +14,6 @@ use crate::access::amapi::IndexAmKind;
 use crate::postgres_ext::Oid;
 use crate::utils::fmgroids as f;
 
-/// Builtin access-method OIDs (pg_am).
-const BTREE_AM_OID: Oid = Oid(403);
-const HASH_AM_OID: Oid = Oid(405);
-const GIST_AM_OID: Oid = Oid(783);
-const GIN_AM_OID: Oid = Oid(2742);
-const SPGIST_AM_OID: Oid = Oid(4000);
-const BRIN_AM_OID: Oid = Oid(3580);
-
 /// `GetIndexAmRoutine`: resolve an AM handler function OID to its [`IndexAmKind`].
 /// The C version calls the handler and returns the filled `IndexAmRoutine`; here
 /// the kind is the static-dispatch handle (the per-kind callbacks live as the
@@ -35,7 +27,7 @@ pub fn get_index_am_routine(amhandler: Oid) -> IndexAmKind {
         crate::utils::elog::ERROR,
         format!(
             "index access method handler function {} did not return an IndexAmRoutine struct",
-            amhandler.0
+            amhandler.get()
         )
     );
     unreachable!("elog!(ERROR) raises")
@@ -50,7 +42,7 @@ pub fn get_index_am_routine_by_am_id(amoid: Oid, noerror: bool) -> Option<IndexA
     if kind.is_none() && !noerror {
         crate::elog!(
             crate::utils::elog::ERROR,
-            format!("cache lookup failed for access method {amoid}", amoid = amoid.0)
+            format!("cache lookup failed for access method {amoid}", amoid = amoid.get())
         );
     }
     kind
@@ -77,13 +69,13 @@ fn handler_to_kind(amhandler: Oid) -> Option<IndexAmKind> {
 
 /// Map a builtin access-method OID to its kind (the handler is implied).
 fn am_oid_to_kind(amoid: Oid) -> Option<IndexAmKind> {
-    match amoid.0 {
-        x if x == BTREE_AM_OID.0 => Some(IndexAmKind::Btree),
-        x if x == HASH_AM_OID.0 => Some(IndexAmKind::Hash),
-        x if x == GIST_AM_OID.0 => Some(IndexAmKind::Gist),
-        x if x == GIN_AM_OID.0 => Some(IndexAmKind::Gin),
-        x if x == SPGIST_AM_OID.0 => Some(IndexAmKind::SpGist),
-        x if x == BRIN_AM_OID.0 => Some(IndexAmKind::Brin),
+    match amoid {
+        Oid::BTREE_AM_OID => Some(IndexAmKind::Btree),
+        Oid::HASH_AM_OID => Some(IndexAmKind::Hash),
+        Oid::GIST_AM_OID => Some(IndexAmKind::Gist),
+        Oid::GIN_AM_OID => Some(IndexAmKind::Gin),
+        Oid::SPGIST_AM_OID => Some(IndexAmKind::SpGist),
+        Oid::BRIN_AM_OID => Some(IndexAmKind::Brin),
         _ => None,
     }
 }

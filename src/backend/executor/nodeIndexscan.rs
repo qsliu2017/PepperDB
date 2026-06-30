@@ -333,14 +333,13 @@ fn strip_relabel(node: Option<&Node>) -> Option<&Node> {
 /// `get_op_opfamily_properties` against the index opfamily). M6: the int4 btree
 /// operators; other operators stage with the planner's index-path selection.
 fn op_btree_strategy(opno: crate::postgres_ext::Oid) -> StrategyNumber {
-    use crate::postgres_ext::Oid;
-    match opno {
-        Oid(96) => BT_EQUAL_STRATEGY_NUMBER,         // int4 =
-        Oid(97) => BT_LESS_STRATEGY_NUMBER,          // int4 <
-        Oid(521) => BT_GREATER_STRATEGY_NUMBER,      // int4 >
-        Oid(523) => BT_LESS_EQUAL_STRATEGY_NUMBER,   // int4 <=
-        Oid(525) => BT_GREATER_EQUAL_STRATEGY_NUMBER, // int4 >=
-        other => unimplemented!("op_btree_strategy: operator {other:?} not a known int4 btree op (M6)"),
+    match opno.get() {
+        96 => BT_EQUAL_STRATEGY_NUMBER,         // int4 =
+        97 => BT_LESS_STRATEGY_NUMBER,          // int4 <
+        521 => BT_GREATER_STRATEGY_NUMBER,      // int4 >
+        523 => BT_LESS_EQUAL_STRATEGY_NUMBER,   // int4 <=
+        525 => BT_GREATER_EQUAL_STRATEGY_NUMBER, // int4 >=
+        other => unimplemented!("op_btree_strategy: operator {other} not a known int4 btree op (M6)"),
     }
 }
 

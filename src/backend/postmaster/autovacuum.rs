@@ -343,7 +343,7 @@ fn request_autovac_worker(dbid: Oid) {
     } else {
         crate::elog!(
             crate::utils::elog::DEBUG1,
-            format!("autovacuum worker requested for db {} (no spawner installed)", dbid.0)
+            format!("autovacuum worker requested for db {} (no spawner installed)", dbid.get())
         );
     }
 }
@@ -1396,7 +1396,7 @@ fn table_recheck_autovac(relid: Oid, effective_multixact_freeze_max_age: i32) ->
 
     let class_tup = SearchSysCacheCopy1(
         SysCacheIdentifier::RELOID,
-        crate::postgres::Datum(relid.0 as usize),
+        crate::postgres::Datum(relid.get() as usize),
     )?;
     // SAFETY: a valid syscache tuple; read its fixed part before it is freed.
     let class_form = GETSTRUCT(unsafe { &*class_tup }).cast::<FormData_pg_class>();
@@ -1717,7 +1717,7 @@ mod tests {
 
         // A next-due entry far in the future is clamped to MAX_AUTOVAC_SLEEPTIME.
         st.database_list.push_front(AvlDbase {
-            datid: Oid(1),
+            datid: Oid::new(1),
             next_worker: GetCurrentTimestamp() + 10_000 * USECS_PER_SEC,
         });
         let nap = launcher_determine_sleep(&shared, &mut st, true, true).await;
@@ -1726,7 +1726,7 @@ mod tests {
         // A due entry in the past is clamped UP to the minimum sleep time.
         st.database_list.clear();
         st.database_list.push_front(AvlDbase {
-            datid: Oid(1),
+            datid: Oid::new(1),
             next_worker: GetCurrentTimestamp() - USECS_PER_SEC,
         });
         let nap = launcher_determine_sleep(&shared, &mut st, true, true).await;
@@ -1785,7 +1785,7 @@ mod tests {
         let idx = {
             let mut inner = shmem.lock();
             let idx = inner.free_workers.pop().expect("a free slot");
-            inner.workers[idx].wi_dboid = Oid(12345);
+            inner.workers[idx].wi_dboid = Oid::new(12345);
             inner.workers[idx].wi_launchtime = GetCurrentTimestamp();
             inner.starting_worker = Some(idx);
             idx
@@ -1805,7 +1805,7 @@ mod tests {
             assert!(inner.starting_worker.is_none());
             assert_eq!(inner.running_workers, vec![idx]);
             assert_eq!(inner.workers[idx].wi_proc, 7);
-            assert_eq!(inner.workers[idx].wi_dboid, Oid(12345));
+            assert_eq!(inner.workers[idx].wi_dboid, Oid::new(12345));
         }
 
         // Worker exit: free_worker_info returns the slot and flags a rebalance.
@@ -1836,8 +1836,8 @@ mod tests {
         // Record a work item.
         let ok = auto_vacuum_request_work(
             AutoVacuumWorkItemType::AVW_BRINSummarizeRange,
-            Oid(99),
-            Oid(100),
+            Oid::new(99),
+            Oid::new(100),
             0,
         );
         assert!(ok, "a fresh shmem has free work-item slots");

@@ -54,7 +54,7 @@ pub async fn create_schema_command(shared: &Arc<SharedState>, stmt: &CreateSchem
     }
 
     // The owner: the bootstrap superuser (role-name -> OID resolution stages).
-    let owner_id = Oid(10);
+    let owner_id = Oid::new(10);
 
     let new_oid = crate::backend::catalog::catalog::get_new_object_id(shared);
     let pg_namespace = relation_id_get_relation(NamespaceRelationId)

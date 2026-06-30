@@ -50,7 +50,7 @@ impl SmgrRelation {
     /// smgropen() core: construct a fresh handle (no I/O). Caching is layered on
     /// top via [`smgr_cache_open`].
     pub fn open(rlocator: RelFileLocator, backend: ProcNumber) -> Self {
-        debug_assert!(rlocator.relNumber.0 != 0, "relNumber must be valid");
+        debug_assert!(rlocator.relNumber.is_valid(), "relNumber must be valid");
         let mut reln = Self {
             rlocator: RelFileLocatorBackend { locator: rlocator, backend },
             targblock: INVALID_BLOCK_NUMBER,
@@ -318,7 +318,7 @@ mod tests {
     use crate::storage::bufpage::Page;
 
     fn rloc(rel: u32) -> RelFileLocator {
-        RelFileLocator { spcOid: Oid(1663), dbOid: Oid(50000 + rel), relNumber: Oid(16000 + rel) }
+        RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(50000 + rel), relNumber: Oid::new(16000 + rel) }
     }
 
     async fn shared_with_tmpdir(tag: &str) -> (Arc<SharedState>, std::path::PathBuf) {

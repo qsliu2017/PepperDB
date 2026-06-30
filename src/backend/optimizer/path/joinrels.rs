@@ -332,8 +332,8 @@ mod tests {
     use crate::backend::optimizer::util::relnode::make_node_reloptinfo;
     use crate::backend::optimizer::plan::initsplan::tests::test_planner_info;
 
-    const INT4: Oid = Oid(23);
-    const INT4_EQ: Oid = Oid(96); // "=" (int4,int4): merge + hash joinable
+    const INT4: Oid = Oid::new(23);
+    const INT4_EQ: Oid = Oid::new(96); // "=" (int4,int4): merge + hash joinable
 
     fn make_var(varno: i32, varattno: i16) -> Node {
         Node::Var(Box::new(Var {
@@ -387,7 +387,7 @@ mod tests {
         let clause = Node::OpExpr(Box::new(OpExpr {
             opno: INT4_EQ,
             opfuncid: InvalidOid,
-            opresulttype: Oid(16),
+            opresulttype: Oid::new(16),
             opretset: false,
             opcollid: InvalidOid,
             inputcollid: InvalidOid,
@@ -487,12 +487,12 @@ mod tests {
         // int4 "=" is both merge- and hash-joinable; "<" is neither.
         assert!(crate::utils::lsyscache::op_mergejoinable(INT4_EQ, INT4));
         assert!(crate::utils::lsyscache::op_hashjoinable(INT4_EQ, INT4));
-        let int4_lt = Oid(97);
+        let int4_lt = Oid::new(97);
         assert!(!crate::utils::lsyscache::op_mergejoinable(int4_lt, INT4));
         assert!(!crate::utils::lsyscache::op_hashjoinable(int4_lt, INT4));
         assert_eq!(
             crate::utils::lsyscache::get_mergejoin_opfamilies(INT4_EQ),
-            vec![Oid(1976)]
+            vec![Oid::new(1976)]
         );
     }
 

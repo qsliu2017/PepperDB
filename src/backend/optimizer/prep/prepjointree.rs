@@ -313,7 +313,7 @@ mod tests {
         let mk_rel = || {
             let mut r = make_result_rte();
             r.rtekind = RTEKind::RELATION;
-            r.relid = crate::postgres_ext::Oid(1000);
+            r.relid = crate::postgres_ext::Oid::new(1000);
             Node::RangeTblEntry(Box::new(r))
         };
         root.parse.rtable = vec![mk_rel(), mk_rel()];

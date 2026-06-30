@@ -101,9 +101,9 @@ use crate::utils::errcodes::{
 
 // pg_type OIDs used only for format_type_be error text (format_type_be ignores
 // the OID for now). Standard PG values.
-const DATEOID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(1082);
-const TIMEOID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(1083);
-const TIMETZOID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(1266);
+const DATEOID: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(1082);
+const TIMEOID: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(1083);
+const TIMETZOID: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(1266);
 
 const EARLY: &str = "-infinity";
 const LATE: &str = "infinity";

@@ -189,8 +189,8 @@ pub fn set_predicatelocktargettag_relation(
     dboid: Oid,
     reloid: Oid,
 ) {
-    locktag.locktag_field1 = dboid.0;
-    locktag.locktag_field2 = reloid.0;
+    locktag.locktag_field1 = dboid.get();
+    locktag.locktag_field2 = reloid.get();
     locktag.locktag_field3 = crate::storage::block::INVALID_BLOCK_NUMBER;
     locktag.locktag_field4 = u32::from(crate::storage::off::INVALID_OFFSET_NUMBER);
 }
@@ -201,8 +201,8 @@ pub fn set_predicatelocktargettag_page(
     reloid: Oid,
     blocknum: BlockNumber,
 ) {
-    locktag.locktag_field1 = dboid.0;
-    locktag.locktag_field2 = reloid.0;
+    locktag.locktag_field1 = dboid.get();
+    locktag.locktag_field2 = reloid.get();
     locktag.locktag_field3 = blocknum;
     locktag.locktag_field4 = u32::from(crate::storage::off::INVALID_OFFSET_NUMBER);
 }
@@ -214,17 +214,17 @@ pub fn set_predicatelocktargettag_tuple(
     blocknum: BlockNumber,
     offnum: OffsetNumber,
 ) {
-    locktag.locktag_field1 = dboid.0;
-    locktag.locktag_field2 = reloid.0;
+    locktag.locktag_field1 = dboid.get();
+    locktag.locktag_field2 = reloid.get();
     locktag.locktag_field3 = blocknum;
     locktag.locktag_field4 = u32::from(offnum);
 }
 
 pub fn get_predicatelocktargettag_db(locktag: &PredicateLockTargetTag) -> Oid {
-    Oid(locktag.locktag_field1)
+    Oid::new(locktag.locktag_field1)
 }
 pub fn get_predicatelocktargettag_relation(locktag: &PredicateLockTargetTag) -> Oid {
-    Oid(locktag.locktag_field2)
+    Oid::new(locktag.locktag_field2)
 }
 pub fn get_predicatelocktargettag_page(locktag: &PredicateLockTargetTag) -> BlockNumber {
     locktag.locktag_field3

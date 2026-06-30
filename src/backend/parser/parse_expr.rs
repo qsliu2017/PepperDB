@@ -102,7 +102,7 @@ fn transform_type_cast(pstate: &mut ParseState, tc: crate::nodes::parsenodes::Ty
 fn cannot_cast(input_type: crate::postgres_ext::Oid, target_type: crate::postgres_ext::Oid) -> ! {
     crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(crate::utils::errcodes::ERRCODE_CANNOT_COERCE)
-            .errmsg(format!("cannot cast type {} to {}", input_type.0, target_type.0));
+            .errmsg(format!("cannot cast type {} to {}", input_type.get(), target_type.get()));
     });
     unreachable!("ereport(ERROR) diverges");
 }

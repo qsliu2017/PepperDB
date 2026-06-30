@@ -65,9 +65,9 @@ const TRACK_FUNC_PL: u8 = 1;
 const TRACK_FUNC_ALL: u8 = 2;
 
 // pg_language.h OIDs for the prolang switch in fmgr_info_cxt_security.
-const INTERNAL_LANGUAGE_ID: Oid = Oid(12);
-const C_LANGUAGE_ID: Oid = Oid(13);
-const SQL_LANGUAGE_ID: Oid = Oid(14);
+const INTERNAL_LANGUAGE_ID: Oid = Oid::new(12);
+const C_LANGUAGE_ID: Oid = Oid::new(13);
+const SQL_LANGUAGE_ID: Oid = Oid::new(14);
 
 // ---------------------------------------------------------------------------
 // Lookup routines for the builtin-function table. Search by Oid or by name;
@@ -82,7 +82,7 @@ fn fmgr_isbuiltin(id: Oid) -> Option<&'static FmgrBuiltin> {
     }
     // A miss in range is likely a nonexistent function; None triggers an ERROR
     // later, matching C.
-    let index = fmgr_builtin_oid_index[id.0 as usize];
+    let index = fmgr_builtin_oid_index[id.get() as usize];
     if index == InvalidOidBuiltinMapping {
         return None;
     }
@@ -359,7 +359,7 @@ fn function_call_invoke_checked(fcinfo: &mut FunctionCallInfoBaseData, fn_oid: O
         .unwrap_or_else(|| panic!("FunctionCallN reached without an installed fn_addr"));
     let result = func(fcinfo);
     if fcinfo.isnull {
-        elog!(ERROR, format!("function {} returned NULL", fn_oid.0));
+        elog!(ERROR, format!("function {} returned NULL", fn_oid.get()));
     }
     Some(result)
 }
@@ -476,7 +476,7 @@ pub fn InputFunctionCall(
     let result = func(&mut fcinfo);
     // Should get a null result iff str is NULL; here str is always non-null.
     if fcinfo.isnull {
-        elog!(ERROR, format!("input function {} returned NULL", flinfo.oid.0));
+        elog!(ERROR, format!("input function {} returned NULL", flinfo.oid.get()));
     }
     Some(result)
 }
@@ -766,9 +766,9 @@ mod tests {
         assert_eq!(got.func_name, sample.func_name);
 
         // Out of range: above the last builtin OID -> None.
-        assert!(fmgr_isbuiltin(Oid(fmgr_last_builtin_oid.0 + 1)).is_none());
+        assert!(fmgr_isbuiltin(Oid::new(fmgr_last_builtin_oid.get() + 1)).is_none());
         // In range but unassigned (OID 0 is never a builtin) -> None.
-        assert!(fmgr_isbuiltin(Oid(0)).is_none());
+        assert!(fmgr_isbuiltin(Oid::new(0)).is_none());
     }
 
     /// `fmgr_lookup_by_name` finds the same routine `fmgr_isbuiltin` does, and

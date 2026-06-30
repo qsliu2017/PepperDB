@@ -4,11 +4,11 @@ use crate::catalog::dependency::DependencyType;
 use crate::catalog::objectaddress::ObjectAddress;
 use crate::postgres_ext::Oid;
 
-pub const CastRelationId: Oid = Oid(2605);
+pub const CastRelationId: Oid = Oid::new(2605);
 /// pg_cast's composite (row) type OID. genbki auto-assigns catalog rowtypes; the
 /// value is only stored as the nailed descriptor's `tdtypeid` (not load-bearing for
 /// M4 cast resolution, like pg_operator's).
-pub const CastRelation_Rowtype_Id: Oid = Oid(11629);
+pub const CastRelation_Rowtype_Id: Oid = Oid::new(11629);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -24,9 +24,9 @@ pub struct FormData_pg_cast {
 pub type Form_pg_cast = *mut FormData_pg_cast; // TODO(ptr)
 
 // DECLARE_UNIQUE_INDEX_PKEY(pg_cast_oid_index, 2660, CastOidIndexId, ...)
-pub const CastOidIndexId: Oid = Oid(2660);
+pub const CastOidIndexId: Oid = Oid::new(2660);
 // DECLARE_UNIQUE_INDEX(pg_cast_source_target_index, 2661, CastSourceTargetIndexId, ...)
-pub const CastSourceTargetIndexId: Oid = Oid(2661);
+pub const CastSourceTargetIndexId: Oid = Oid::new(2661);
 // MAKE_SYSCACHE(CASTSOURCETARGET, pg_cast_source_target_index, 256)
 
 /// Allowable values for pg_cast.castcontext (stored as char; ASCII codes).

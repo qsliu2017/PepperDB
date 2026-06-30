@@ -243,15 +243,15 @@ fn init_backend_proc_fields(proc: &mut PGPROC, procno: ProcNumber, pid: i32, reg
     };
     let slots = groups * crate::storage::proc::FP_LOCK_SLOTS_PER_GROUP as usize;
     proc.fp_lock_bits = vec![0u64; groups];
-    proc.fp_rel_id = vec![crate::postgres_ext::Oid(0); slots];
+    proc.fp_rel_id = vec![crate::postgres_ext::Oid::new(0); slots];
     proc.xid = INVALID_TRANSACTION_ID;
     proc.xmin = INVALID_TRANSACTION_ID;
     proc.pid = pid;
     proc.vxid.proc_number = procno;
     proc.vxid.lxid = LocalTransactionId(0);
-    proc.database_id = crate::postgres_ext::Oid(0);
-    proc.role_id = crate::postgres_ext::Oid(0);
-    proc.temp_namespace_id = crate::postgres_ext::Oid(0);
+    proc.database_id = crate::postgres_ext::Oid::new(0);
+    proc.role_id = crate::postgres_ext::Oid::new(0);
+    proc.temp_namespace_id = crate::postgres_ext::Oid::new(0);
     proc.is_regular_backend = regular;
     proc.delay_chkpt_flags = crate::storage::proc::DelayChkptFlags::empty();
     // NB -- autovac launcher intentionally does NOT set IS_AUTOVACUUM (proc.c:487).

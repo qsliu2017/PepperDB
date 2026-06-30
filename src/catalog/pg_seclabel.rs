@@ -3,7 +3,7 @@
 use crate::c::text;
 use crate::postgres_ext::Oid;
 
-pub const SecLabelRelationId: Oid = Oid(3596);
+pub const SecLabelRelationId: Oid = Oid::new(3596);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

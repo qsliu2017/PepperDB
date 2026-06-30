@@ -157,18 +157,18 @@ fn init_merge_key(clause: &Node) -> MergeKey {
 /// Resolve a 3-way ASC comparator for a merge-key type via the type's btree LT
 /// ordering operator (the seeded int2/int4/int8/oid/text/date/numeric set).
 fn comparator_for_type(keytype: Oid) -> SortComparator {
-    let lt_op = match keytype.0 {
-        21 => 95,    // int2 -> int2lt
-        23 => 97,    // int4 -> int4lt
-        20 => 412,   // int8 -> int8lt
-        26 => 609,   // oid  -> oidlt
-        25 => 664,   // text -> text_lt
-        1082 => 1095, // date -> date_lt
-        1700 => 1754, // numeric -> numeric_lt
+    let lt_op = match keytype {
+        Oid::INT2OID => 95,     // int2lt
+        Oid::INT4OID => 97,     // int4lt
+        Oid::INT8OID => 412,    // int8lt
+        Oid::OIDOID => 609,     // oidlt
+        Oid::TEXTOID => 664,    // text_lt
+        Oid::DATEOID => 1095,   // date_lt
+        Oid::NUMERICOID => 1754, // numeric_lt
         other => unimplemented!("ExecInitMergeJoin: no merge comparator for type {other}"),
     };
     let mut ssup = blank_ssup();
-    PrepareSortSupportFromOrderingOp(Oid(lt_op), &mut ssup);
+    PrepareSortSupportFromOrderingOp(Oid::new(lt_op), &mut ssup);
     ssup.comparator
         .unwrap_or_else(|| unreachable!("ordering op resolved a comparator"))
 }
@@ -418,7 +418,7 @@ mod tests {
             skip_mark_restore: false,
             // mergeclause: a.x = b.y (OUTER_VAR.1 = INNER_VAR.1).
             mergeclauses: vec![eq_joinqual(1, 1)],
-            merge_families: vec![Oid(1976)],
+            merge_families: vec![Oid::new(1976)],
             merge_collations: vec![InvalidOid],
             merge_reversals: vec![false],
             merge_nulls_first: vec![false],

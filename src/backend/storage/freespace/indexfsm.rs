@@ -81,7 +81,7 @@ mod tests {
     use crate::storage::relfilelocator::RelFileLocator;
 
     fn rloc(rel: u32) -> RelFileLocator {
-        RelFileLocator { spcOid: Oid(1663), dbOid: Oid(71000 + rel), relNumber: Oid(19000 + rel) }
+        RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(71000 + rel), relNumber: Oid::new(19000 + rel) }
     }
 
     async fn setup(tag: &str, rel: u32) -> (Arc<SharedState>, std::path::PathBuf, SmgrRelation) {

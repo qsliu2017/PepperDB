@@ -3,7 +3,7 @@
 use crate::c::{NameData, bytea, varlena};
 use crate::postgres_ext::Oid;
 
-pub const TriggerRelationId: Oid = Oid(2620);
+pub const TriggerRelationId: Oid = Oid::new(2620);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

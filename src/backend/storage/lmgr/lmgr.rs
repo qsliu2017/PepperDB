@@ -120,7 +120,7 @@ fn set_locktag_relation_oid(relid: Oid) -> LOCKTAG {
     } else {
         my_database_id()
     };
-    LOCKTAG::set_relation(dbid.0, relid.0)
+    LOCKTAG::set_relation(dbid.get(), relid.get())
 }
 
 /// The lockRelId (dbId, relId) carried inside a Relation.
@@ -130,7 +130,7 @@ fn rel_lock_id(relation: &RelationData) -> LockRelId {
 
 fn rel_locktag(relation: &RelationData) -> LOCKTAG {
     let id = rel_lock_id(relation);
-    LOCKTAG::set_relation(id.dbId.0, id.relId.0)
+    LOCKTAG::set_relation(id.dbId.get(), id.relId.get())
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ pub async fn ConditionalLockRelationOid(relid: Oid, lockmode: LOCKMODE) -> bool 
 
 /// PG `LockRelationId`: lock given a LockRelId.
 pub async fn LockRelationId(relid: &LockRelId, lockmode: LOCKMODE) {
-    let tag = LOCKTAG::set_relation(relid.dbId.0, relid.relId.0);
+    let tag = LOCKTAG::set_relation(relid.dbId.get(), relid.relId.get());
     let (res, locallock) =
         LockAcquireExtended(&tag, lockmode, false, false, true, false).await;
     accept_inval_after_acquire(res, locallock);
@@ -167,7 +167,7 @@ pub async fn LockRelationId(relid: &LockRelId, lockmode: LOCKMODE) {
 
 /// PG `UnlockRelationId`: preferred over UnlockRelationOid for speed.
 pub fn UnlockRelationId(relid: &LockRelId, lockmode: LOCKMODE) {
-    let tag = LOCKTAG::set_relation(relid.dbId.0, relid.relId.0);
+    let tag = LOCKTAG::set_relation(relid.dbId.get(), relid.relId.get());
     LockRelease(&tag, lockmode, false);
 }
 
@@ -251,13 +251,13 @@ pub fn LockHasWaitersRelation(relation: &RelationData, lockmode: LOCKMODE) -> bo
 /// PG `LockRelationIdForSession`: a session-level lock on a relation (persists
 /// across transaction boundaries).
 pub async fn LockRelationIdForSession(relid: &LockRelId, lockmode: LOCKMODE) {
-    let tag = LOCKTAG::set_relation(relid.dbId.0, relid.relId.0);
+    let tag = LOCKTAG::set_relation(relid.dbId.get(), relid.relId.get());
     let _ = LockAcquire(&tag, lockmode, true, false).await;
 }
 
 /// PG `UnlockRelationIdForSession`.
 pub fn UnlockRelationIdForSession(relid: &LockRelId, lockmode: LOCKMODE) {
-    let tag = LOCKTAG::set_relation(relid.dbId.0, relid.relId.0);
+    let tag = LOCKTAG::set_relation(relid.dbId.get(), relid.relId.get());
     LockRelease(&tag, lockmode, true);
 }
 
@@ -272,7 +272,7 @@ pub fn LockRelationForExtension(
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = ()> + Send {
     let id = rel_lock_id(relation);
-    let tag = LOCKTAG::set_relation_extend(id.dbId.0, id.relId.0);
+    let tag = LOCKTAG::set_relation_extend(id.dbId.get(), id.relId.get());
     async move {
         let _ = LockAcquire(&tag, lockmode, false, false).await;
     }
@@ -284,28 +284,28 @@ pub fn ConditionalLockRelationForExtension(
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = bool> + Send {
     let id = rel_lock_id(relation);
-    let tag = LOCKTAG::set_relation_extend(id.dbId.0, id.relId.0);
+    let tag = LOCKTAG::set_relation_extend(id.dbId.get(), id.relId.get());
     async move { LockAcquire(&tag, lockmode, false, true).await != LockAcquireResult::NotAvail }
 }
 
 /// PG `RelationExtensionLockWaiterCount`.
 pub fn RelationExtensionLockWaiterCount(relation: &RelationData) -> i32 {
     let id = rel_lock_id(relation);
-    let tag = LOCKTAG::set_relation_extend(id.dbId.0, id.relId.0);
+    let tag = LOCKTAG::set_relation_extend(id.dbId.get(), id.relId.get());
     LockWaiterCount(&tag)
 }
 
 /// PG `UnlockRelationForExtension`.
 pub fn UnlockRelationForExtension(relation: &RelationData, lockmode: LOCKMODE) {
     let id = rel_lock_id(relation);
-    let tag = LOCKTAG::set_relation_extend(id.dbId.0, id.relId.0);
+    let tag = LOCKTAG::set_relation_extend(id.dbId.get(), id.relId.get());
     LockRelease(&tag, lockmode, false);
 }
 
 /// PG `LockDatabaseFrozenIds`: one backend per database may run
 /// vac_update_datfrozenxid().
 pub async fn LockDatabaseFrozenIds(lockmode: LOCKMODE) {
-    let tag = LOCKTAG::set_database_frozen_ids(my_database_id().0);
+    let tag = LOCKTAG::set_database_frozen_ids(my_database_id().get());
     let _ = LockAcquire(&tag, lockmode, false, false).await;
 }
 
@@ -316,7 +316,7 @@ pub fn LockPage(
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = ()> + Send {
     let id = rel_lock_id(relation);
-    let tag = LOCKTAG::set_page(id.dbId.0, id.relId.0, blkno);
+    let tag = LOCKTAG::set_page(id.dbId.get(), id.relId.get(), blkno);
     async move {
         let _ = LockAcquire(&tag, lockmode, false, false).await;
     }
@@ -329,14 +329,14 @@ pub fn ConditionalLockPage(
     lockmode: LOCKMODE,
 ) -> impl std::future::Future<Output = bool> + Send {
     let id = rel_lock_id(relation);
-    let tag = LOCKTAG::set_page(id.dbId.0, id.relId.0, blkno);
+    let tag = LOCKTAG::set_page(id.dbId.get(), id.relId.get(), blkno);
     async move { LockAcquire(&tag, lockmode, false, true).await != LockAcquireResult::NotAvail }
 }
 
 /// PG `UnlockPage`.
 pub fn UnlockPage(relation: &RelationData, blkno: BlockNumber, lockmode: LOCKMODE) {
     let id = rel_lock_id(relation);
-    let tag = LOCKTAG::set_page(id.dbId.0, id.relId.0, blkno);
+    let tag = LOCKTAG::set_page(id.dbId.get(), id.relId.get(), blkno);
     LockRelease(&tag, lockmode, false);
 }
 
@@ -348,8 +348,8 @@ pub fn LockTuple(
 ) -> impl std::future::Future<Output = ()> + Send {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_tuple(
-        id.dbId.0,
-        id.relId.0,
+        id.dbId.get(),
+        id.relId.get(),
         tid.block_number(),
         tid.offset_number(),
     );
@@ -367,8 +367,8 @@ pub fn ConditionalLockTuple(
 ) -> impl std::future::Future<Output = bool> + Send {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_tuple(
-        id.dbId.0,
-        id.relId.0,
+        id.dbId.get(),
+        id.relId.get(),
         tid.block_number(),
         tid.offset_number(),
     );
@@ -384,8 +384,8 @@ pub fn ConditionalLockTuple(
 pub fn UnlockTuple(relation: &RelationData, tid: &ItemPointerData, lockmode: LOCKMODE) {
     let id = rel_lock_id(relation);
     let tag = LOCKTAG::set_tuple(
-        id.dbId.0,
-        id.relId.0,
+        id.dbId.get(),
+        id.relId.get(),
         tid.block_number(),
         tid.offset_number(),
     );
@@ -685,7 +685,7 @@ fn pgstat_progress_update_param_done(v: i64) {
 
 /// PG `LockDatabaseObject`: lock a general object of the current database.
 pub async fn LockDatabaseObject(classid: Oid, objid: Oid, objsubid: u16, lockmode: LOCKMODE) {
-    let tag = LOCKTAG::set_object(my_database_id().0, classid.0, objid.0, objsubid);
+    let tag = LOCKTAG::set_object(my_database_id().get(), classid.get(), objid.get(), objsubid);
     let _ = LockAcquire(&tag, lockmode, false, false).await;
     AcceptInvalidationMessages();
 }
@@ -697,7 +697,7 @@ pub async fn ConditionalLockDatabaseObject(
     objsubid: u16,
     lockmode: LOCKMODE,
 ) -> bool {
-    let tag = LOCKTAG::set_object(my_database_id().0, classid.0, objid.0, objsubid);
+    let tag = LOCKTAG::set_object(my_database_id().get(), classid.get(), objid.get(), objsubid);
     let (res, locallock) = LockAcquireExtended(&tag, lockmode, false, true, true, false).await;
     if res == LockAcquireResult::NotAvail {
         return false;
@@ -708,13 +708,13 @@ pub async fn ConditionalLockDatabaseObject(
 
 /// PG `UnlockDatabaseObject`.
 pub fn UnlockDatabaseObject(classid: Oid, objid: Oid, objsubid: u16, lockmode: LOCKMODE) {
-    let tag = LOCKTAG::set_object(my_database_id().0, classid.0, objid.0, objsubid);
+    let tag = LOCKTAG::set_object(my_database_id().get(), classid.get(), objid.get(), objsubid);
     LockRelease(&tag, lockmode, false);
 }
 
 /// PG `LockSharedObject`: lock a shared-across-databases object.
 pub async fn LockSharedObject(classid: Oid, objid: Oid, objsubid: u16, lockmode: LOCKMODE) {
-    let tag = LOCKTAG::set_object(InvalidOid.0, classid.0, objid.0, objsubid);
+    let tag = LOCKTAG::set_object(InvalidOid.get(), classid.get(), objid.get(), objsubid);
     let _ = LockAcquire(&tag, lockmode, false, false).await;
     AcceptInvalidationMessages();
 }
@@ -726,7 +726,7 @@ pub async fn ConditionalLockSharedObject(
     objsubid: u16,
     lockmode: LOCKMODE,
 ) -> bool {
-    let tag = LOCKTAG::set_object(InvalidOid.0, classid.0, objid.0, objsubid);
+    let tag = LOCKTAG::set_object(InvalidOid.get(), classid.get(), objid.get(), objsubid);
     let (res, locallock) = LockAcquireExtended(&tag, lockmode, false, true, true, false).await;
     if res == LockAcquireResult::NotAvail {
         return false;
@@ -737,7 +737,7 @@ pub async fn ConditionalLockSharedObject(
 
 /// PG `UnlockSharedObject`.
 pub fn UnlockSharedObject(classid: Oid, objid: Oid, objsubid: u16, lockmode: LOCKMODE) {
-    let tag = LOCKTAG::set_object(InvalidOid.0, classid.0, objid.0, objsubid);
+    let tag = LOCKTAG::set_object(InvalidOid.get(), classid.get(), objid.get(), objsubid);
     LockRelease(&tag, lockmode, false);
 }
 
@@ -748,13 +748,13 @@ pub async fn LockSharedObjectForSession(
     objsubid: u16,
     lockmode: LOCKMODE,
 ) {
-    let tag = LOCKTAG::set_object(InvalidOid.0, classid.0, objid.0, objsubid);
+    let tag = LOCKTAG::set_object(InvalidOid.get(), classid.get(), objid.get(), objsubid);
     let _ = LockAcquire(&tag, lockmode, true, false).await;
 }
 
 /// PG `UnlockSharedObjectForSession`.
 pub fn UnlockSharedObjectForSession(classid: Oid, objid: Oid, objsubid: u16, lockmode: LOCKMODE) {
-    let tag = LOCKTAG::set_object(InvalidOid.0, classid.0, objid.0, objsubid);
+    let tag = LOCKTAG::set_object(InvalidOid.get(), classid.get(), objid.get(), objsubid);
     LockRelease(&tag, lockmode, true);
 }
 
@@ -766,7 +766,7 @@ pub async fn LockApplyTransactionForSession(
     objid: u16,
     lockmode: LOCKMODE,
 ) {
-    let tag = LOCKTAG::set_apply_transaction(my_database_id().0, suboid.0, xid.0, objid);
+    let tag = LOCKTAG::set_apply_transaction(my_database_id().get(), suboid.get(), xid.0, objid);
     let _ = LockAcquire(&tag, lockmode, true, false).await;
 }
 
@@ -777,7 +777,7 @@ pub fn UnlockApplyTransactionForSession(
     objid: u16,
     lockmode: LOCKMODE,
 ) {
-    let tag = LOCKTAG::set_apply_transaction(my_database_id().0, suboid.0, xid.0, objid);
+    let tag = LOCKTAG::set_apply_transaction(my_database_id().get(), suboid.get(), xid.0, objid);
     LockRelease(&tag, lockmode, true);
 }
 

@@ -243,9 +243,9 @@ pub(crate) mod join_test_support {
     use crate::postgres::Int32GetDatum;
     use crate::postgres_ext::{InvalidOid, Oid};
 
-    pub const INT4OID: Oid = Oid(23);
-    pub const INT4_EQ: Oid = Oid(96);
-    pub const INT4EQ_FN: Oid = Oid(65);
+    pub const INT4OID: Oid = Oid::new(23);
+    pub const INT4_EQ: Oid = Oid::new(96);
+    pub const INT4EQ_FN: Oid = Oid::new(65);
 
     /// An n-column int4 rowtype (cols named c1..cn).
     pub fn int_desc(ncols: usize) -> TupleDesc {
@@ -285,7 +285,7 @@ pub(crate) mod join_test_support {
     pub fn eq_joinqual(outer_att: i16, inner_att: i16) -> Node {
         let Node::OpExpr(mut op) = make_opclause(
             INT4_EQ,
-            crate::postgres_ext::Oid(16), // bool
+            crate::postgres_ext::Oid::new(16), // bool
             false,
             Some(join_var(true, outer_att)),
             Some(join_var(false, inner_att)),

@@ -3,7 +3,7 @@
 use crate::postgres_ext::Oid;
 use crate::utils::acl::AclItem;
 
-pub const LargeObjectMetadataRelationId: Oid = Oid(2995);
+pub const LargeObjectMetadataRelationId: Oid = Oid::new(2995);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

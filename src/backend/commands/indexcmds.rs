@@ -27,7 +27,7 @@ use crate::shared_state::SharedState;
 use crate::utils::rel::RelationData;
 
 /// The btree access method OID (`pg_am`: btree). M6 has a single index AM.
-const BTREE_AM_OID: Oid = Oid(403);
+const BTREE_AM_OID: Oid = Oid::new(403);
 
 /// Public alias of [`BTREE_AM_OID`] for the planner's IndexOptInfo `relam`.
 pub const BTREE_AM_OID_PUB: Oid = BTREE_AM_OID;
@@ -49,12 +49,12 @@ pub fn get_default_op_class(type_id: Oid, am_id: Oid) -> Oid {
     if am_id != BTREE_AM_OID {
         not_yet_reachable("GetDefaultOpClass: non-btree access method");
     }
-    match type_id.0 {
-        23 => Oid(1978), // int4  -> int4_ops
-        21 => Oid(1979), // int2  -> int2_ops
-        20 => Oid(3124), // int8  -> int8_ops
-        26 => Oid(1981), // oid   -> oid_ops
-        25 => Oid(3126), // text  -> text_ops
+    match type_id.get() {
+        23 => Oid::new(1978), // int4  -> int4_ops
+        21 => Oid::new(1979), // int2  -> int2_ops
+        20 => Oid::new(3124), // int8  -> int8_ops
+        26 => Oid::new(1981), // oid   -> oid_ops
+        25 => Oid::new(3126), // text  -> text_ops
         _ => InvalidOid,
     }
 }

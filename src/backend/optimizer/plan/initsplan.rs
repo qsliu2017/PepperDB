@@ -1106,7 +1106,7 @@ pub(crate) mod tests {
             alias: None,
             eref: Some(Box::new(alias(name, ncols))),
             rtekind: RTEKind::RELATION,
-            relid: Oid(1000),
+            relid: Oid::new(1000),
             inh: false,
             relkind: b'r' as i8,
             rellockmode: 1,
@@ -1143,7 +1143,7 @@ pub(crate) mod tests {
         Node::Var(Box::new(Var {
             varno,
             varattno,
-            vartype: Oid(23),
+            vartype: Oid::new(23),
             vartypmod: -1,
             varcollid: InvalidOid,
             varnullingrels: None,
@@ -1158,9 +1158,9 @@ pub(crate) mod tests {
     /// `a.x = b.y` as an OpExpr (opno 96 = int4eq in PG's bootstrap catalog).
     fn eq_clause(lvarno: i32, rvarno: i32) -> Node {
         Node::OpExpr(Box::new(OpExpr {
-            opno: Oid(96),
+            opno: Oid::new(96),
             opfuncid: InvalidOid,
-            opresulttype: Oid(16),
+            opresulttype: Oid::new(16),
             opretset: false,
             opcollid: InvalidOid,
             inputcollid: InvalidOid,
@@ -1312,7 +1312,7 @@ pub(crate) mod tests {
         let clause = Node::OpExpr(Box::new(OpExpr {
             opno: InvalidOid,
             opfuncid: InvalidOid,
-            opresulttype: Oid(16),
+            opresulttype: Oid::new(16),
             opretset: false,
             opcollid: InvalidOid,
             inputcollid: InvalidOid,
@@ -1336,7 +1336,7 @@ pub(crate) mod tests {
         let clause = Node::OpExpr(Box::new(OpExpr {
             opno: InvalidOid,
             opfuncid: InvalidOid,
-            opresulttype: Oid(16),
+            opresulttype: Oid::new(16),
             opretset: false,
             opcollid: InvalidOid,
             inputcollid: InvalidOid,
@@ -1371,7 +1371,7 @@ pub(crate) mod tests {
             quals: Some(Node::OpExpr(Box::new(OpExpr {
                 opno: InvalidOid, // non-mergejoinable -> ordinary join clause
                 opfuncid: InvalidOid,
-                opresulttype: Oid(16),
+                opresulttype: Oid::new(16),
                 opretset: false,
                 opcollid: InvalidOid,
                 inputcollid: InvalidOid,

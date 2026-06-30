@@ -535,7 +535,7 @@ mod tests {
     use crate::storage::procnumber::ProcNumber;
 
     fn temp_rloc(rel: u32) -> RelFileLocator {
-        RelFileLocator { spcOid: Oid(1663), dbOid: Oid(60000 + rel), relNumber: Oid(17000 + rel) }
+        RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(60000 + rel), relNumber: Oid::new(17000 + rel) }
     }
 
     async fn shared_with_tmpdir(tag: &str) -> (Arc<SharedState>, std::path::PathBuf) {

@@ -3,7 +3,7 @@
 use crate::c::varlena;
 use crate::postgres_ext::Oid;
 
-pub const PublicationRelRelationId: Oid = Oid(6106);
+pub const PublicationRelRelationId: Oid = Oid::new(6106);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

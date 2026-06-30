@@ -2,7 +2,7 @@
 
 use crate::postgres_ext::Oid;
 
-pub const DependRelationId: Oid = Oid(2608);
+pub const DependRelationId: Oid = Oid::new(2608);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

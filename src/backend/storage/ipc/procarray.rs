@@ -887,7 +887,7 @@ impl ProcArray {
                     h.shared_oldest_nonremovable =
                         transaction_id_older(h.shared_oldest_nonremovable, xmin);
 
-                    let proc_db = g.proc(pgprocno).map_or(Oid(0), |p| p.database_id);
+                    let proc_db = g.proc(pgprocno).map_or(Oid::new(0), |p| p.database_id);
                     if proc_db == my_database_id
                         || my_database_id == crate::postgres_ext::InvalidOid
                         || status_flags.contains(
@@ -1319,7 +1319,7 @@ impl ProcArray {
                 }
                 if xid.precedes(oldest_database_running_xid) {
                     let pgprocno = a.pgprocnos[index];
-                    if g.proc(pgprocno).map_or(Oid(0), |p| p.database_id) == my_database_id {
+                    if g.proc(pgprocno).map_or(Oid::new(0), |p| p.database_id) == my_database_id {
                         oldest_database_running_xid = xid;
                     }
                 }

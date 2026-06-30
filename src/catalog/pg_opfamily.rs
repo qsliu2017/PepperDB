@@ -3,7 +3,7 @@
 use crate::c::NameData;
 use crate::postgres_ext::Oid;
 
-pub const OperatorFamilyRelationId: Oid = Oid(2753);
+pub const OperatorFamilyRelationId: Oid = Oid::new(2753);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

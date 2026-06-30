@@ -24,7 +24,7 @@ where
     Fut: std::future::Future<Output = T>,
 {
     let sess = Arc::new(Session::new(BackendType::BACKEND));
-    sess.set_database_id(crate::postgres_ext::Oid(db));
+    sess.set_database_id(crate::postgres_ext::Oid::new(db));
     session_scope(sess, my_proc_scope(local_lock_scope(async move {
         crate::backend::storage::lmgr::proc::InitProcess();
         let r = body().await;

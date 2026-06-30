@@ -3,7 +3,7 @@
 use crate::c::{text, varlena};
 use crate::postgres_ext::Oid;
 
-pub const ParameterAclRelationId: Oid = Oid(6243); // BKI_SHARED_RELATION
+pub const ParameterAclRelationId: Oid = Oid::new(6243); // BKI_SHARED_RELATION
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

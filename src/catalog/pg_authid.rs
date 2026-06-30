@@ -5,11 +5,11 @@ use crate::datatype::timestamp::TimestampTz;
 use crate::postgres_ext::Oid;
 
 // BKI_SHARED_RELATION BKI_ROWTYPE_OID(2842,AuthIdRelation_Rowtype_Id) BKI_SCHEMA_MACRO
-pub const AuthIdRelationId: Oid = Oid(1260);
-pub const AuthIdRelation_Rowtype_Id: Oid = Oid(2842);
+pub const AuthIdRelationId: Oid = Oid::new(1260);
+pub const AuthIdRelation_Rowtype_Id: Oid = Oid::new(2842);
 
 // oid_symbol from pg_authid.dat: the bootstrap superuser role.
-pub const BOOTSTRAP_SUPERUSERID: Oid = Oid(10);
+pub const BOOTSTRAP_SUPERUSERID: Oid = Oid::new(10);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

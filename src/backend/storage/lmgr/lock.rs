@@ -212,7 +212,7 @@ fn fast_path_slots_per_backend() -> u32 {
 
 /// PG `FAST_PATH_REL_GROUP`.
 fn fast_path_rel_group(relid: Oid) -> u32 {
-    ((u64::from(relid.0).wrapping_mul(49157)) & (u64::from(fast_path_groups()) - 1)) as u32
+    ((u64::from(relid.get()).wrapping_mul(49157)) & (u64::from(fast_path_groups()) - 1)) as u32
 }
 
 /// PG `FAST_PATH_SLOT(group, index)`.
@@ -254,7 +254,7 @@ fn eligible_for_relation_fast_path(locktag: &LOCKTAG, mode: LOCKMODE) -> bool {
     let mydb = my_database_id();
     locktag.locktag_lockmethodid == DEFAULT_LOCKMETHOD as u8
         && locktag.locktag_type == LockTagType::Relation as u8
-        && Oid(locktag.locktag_field1) == mydb
+        && Oid::new(locktag.locktag_field1) == mydb
         && mydb != InvalidOid
         && mode < LockMode::ShareUpdateExclusiveLock as LOCKMODE
 }
@@ -263,7 +263,7 @@ fn eligible_for_relation_fast_path(locktag: &LOCKTAG, mode: LOCKMODE) -> bool {
 fn conflicts_with_relation_fast_path(locktag: &LOCKTAG, mode: LOCKMODE) -> bool {
     locktag.locktag_lockmethodid == DEFAULT_LOCKMETHOD as u8
         && locktag.locktag_type == LockTagType::Relation as u8
-        && Oid(locktag.locktag_field1) != InvalidOid
+        && Oid::new(locktag.locktag_field1) != InvalidOid
         && mode > LockMode::ShareUpdateExclusiveLock as LOCKMODE
 }
 
@@ -1106,13 +1106,13 @@ fn fast_path_transfer_relation_locks(
         return true;
     };
     let _ = lock_method_table;
-    let relid = Oid(locktag.locktag_field2);
+    let relid = Oid::new(locktag.locktag_field2);
     let group = fast_path_rel_group(relid);
 
     for i in 0..g.all_proc_count {
         let procno = i as ProcNumber;
         with_fp_locked(procno, |proc| {
-            if proc.database_id != Oid(locktag.locktag_field1)
+            if proc.database_id != Oid::new(locktag.locktag_field1)
                 || proc.fp_lock_bits.get(group as usize).copied().unwrap_or(0) == 0
             {
                 return;
@@ -1255,7 +1255,7 @@ pub async fn LockAcquireExtended(
 
     // Attempt the fast path, if eligible and the local-use group has room.
     if eligible_for_relation_fast_path(locktag, lockmode) {
-        let group = fast_path_rel_group(Oid(locktag.locktag_field2));
+        let group = fast_path_rel_group(Oid::new(locktag.locktag_field2));
         let has_room = with_local(|l| {
             l.fast_path_use.get(group as usize).copied().unwrap_or(0)
                 < FP_LOCK_SLOTS_PER_GROUP
@@ -1274,7 +1274,7 @@ pub async fn LockAcquireExtended(
                     fast_path_grant_relation_lock(
                         proc,
                         &mut l.fast_path_use,
-                        Oid(locktag.locktag_field2),
+                        Oid::new(locktag.locktag_field2),
                         lockmode,
                     )
                 })
@@ -1594,7 +1594,7 @@ pub fn LockRelease(locktag: &LOCKTAG, lockmode: LOCKMODE, session_lock: bool) ->
 
     // Try the fast path.
     if eligible_for_relation_fast_path(locktag, lockmode) {
-        let group = fast_path_rel_group(Oid(locktag.locktag_field2));
+        let group = fast_path_rel_group(Oid::new(locktag.locktag_field2));
         let in_use = with_local(|l| l.fast_path_use.get(group as usize).copied().unwrap_or(0) > 0);
         if in_use {
             let released = with_fp_locked(procno, |proc| {
@@ -1602,7 +1602,7 @@ pub fn LockRelease(locktag: &LOCKTAG, lockmode: LOCKMODE, session_lock: bool) ->
                     fast_path_un_grant_relation_lock(
                         proc,
                         &mut l.fast_path_use,
-                        Oid(locktag.locktag_field2),
+                        Oid::new(locktag.locktag_field2),
                         lockmode,
                     )
                 })
@@ -1770,7 +1770,7 @@ pub fn LockReleaseAll(lockmethodid: LOCKMETHODID, all_locks: bool) {
             with_local(|l| remove_local_lock(l, h.tag));
             continue;
         }
-        let relid = Oid(h.tag.lock.locktag_field2);
+        let relid = Oid::new(h.tag.lock.locktag_field2);
         let lockmode = h.tag.mode;
         if h.is_fast_path {
             // Try fast-path release.
@@ -1943,7 +1943,7 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
     // Fast-path scan if the lock could conflict with fast-path locks.
     if conflicts_with_relation_fast_path(locktag, lockmode)
         && let Some(g) = ProcGlobal::get() {
-            let relid = Oid(locktag.locktag_field2);
+            let relid = Oid::new(locktag.locktag_field2);
             let group = fast_path_rel_group(relid);
             for i in 0..g.all_proc_count {
                 let procno = i as ProcNumber;
@@ -1951,7 +1951,7 @@ pub fn GetLockConflicts(locktag: &LOCKTAG, lockmode: LOCKMODE) -> Vec<VirtualTra
                     continue;
                 }
                 with_fp_locked(procno, |proc| {
-                    if proc.database_id != Oid(locktag.locktag_field1)
+                    if proc.database_id != Oid::new(locktag.locktag_field1)
                         || proc.fp_lock_bits.get(group as usize).copied().unwrap_or(0) == 0
                     {
                         return;
@@ -2040,8 +2040,8 @@ pub fn GetRunningTransactionLocks() -> Vec<xl_standby_lock> {
             let xid = unsafe { g?.proc(key.proc).map(|p| p.xid)? };
             (xid != crate::access::transam::INVALID_TRANSACTION_ID).then_some(xl_standby_lock {
                 xid,
-                db_oid: Oid(key.lock.locktag_field1),
-                rel_oid: Oid(key.lock.locktag_field2),
+                db_oid: Oid::new(key.lock.locktag_field1),
+                rel_oid: Oid::new(key.lock.locktag_field2),
             })
         })
         .collect();

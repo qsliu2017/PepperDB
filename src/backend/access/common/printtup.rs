@@ -211,7 +211,7 @@ pub fn send_row_description_message(typeinfo: &TupleDesc, formats: &[i16]) {
         buf.send_string(attname); // column name (null-terminated)
         buf.send_int32(0); // resorigtbl (table OID)
         buf.send_int16(0); // resorigcol (column attnum)
-        buf.send_int32(att.atttypid.0); // type OID
+        buf.send_int32(att.atttypid.get()); // type OID
         buf.send_int16(att.attlen as u16); // type length
         buf.send_int32(att.atttypmod as u32); // type modifier
         buf.send_int16(format as u16); // format code

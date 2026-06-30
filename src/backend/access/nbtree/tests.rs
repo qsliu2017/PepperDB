@@ -39,8 +39,8 @@ use crate::shared_state::SharedState;
 use crate::storage::relfilelocator::RelFileLocator;
 use crate::utils::rel::{LockInfoData, LockRelId, RelationData};
 
-const INT4OID: Oid = Oid(23);
-const INT4_BTREE_OPS_OID: Oid = Oid(1978);
+const INT4OID: Oid = Oid::new(23);
+const INT4_BTREE_OPS_OID: Oid = Oid::new(1978);
 
 static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -79,7 +79,7 @@ where
 }
 
 fn rloc(rel: u32) -> RelFileLocator {
-    RelFileLocator { spcOid: Oid(1663), dbOid: Oid(90000), relNumber: Oid(80000 + rel) }
+    RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(90000), relNumber: Oid::new(80000 + rel) }
 }
 
 /// A single-column int4 tuple descriptor named `a`.
@@ -114,7 +114,7 @@ fn make_relation(
     form.relkind = relkind;
     form.relpersistence = RELPERSISTENCE_PERMANENT;
     form.relnatts = tupdesc.natts as i16;
-    form.relam = Oid(403); // BTREE_AM_OID for an index; harmless for heap test rels
+    form.relam = Oid::new(403); // BTREE_AM_OID for an index; harmless for heap test rels
     let form_ptr = Some(form);
 
     let mut rel = RelationData::blank();
@@ -198,7 +198,7 @@ fn index_info(nkeys: i32) -> IndexInfo {
         summarizing: false,
         without_overlaps: false,
         parallel_workers: 0,
-        am: Oid(403),
+        am: Oid::new(403),
         am_cache: Default::default(),
         context: Default::default(),
     };

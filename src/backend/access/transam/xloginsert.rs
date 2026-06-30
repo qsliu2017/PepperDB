@@ -81,9 +81,9 @@ impl RegisteredBlock {
             in_use: false,
             flags: RegBuf::empty(),
             rlocator: RelFileLocator {
-                spcOid: crate::postgres_ext::Oid(0),
-                dbOid: crate::postgres_ext::Oid(0),
-                relNumber: crate::postgres_ext::Oid(0),
+                spcOid: crate::postgres_ext::Oid::new(0),
+                dbOid: crate::postgres_ext::Oid::new(0),
+                relNumber: crate::postgres_ext::Oid::new(0),
             },
             forkno: ForkNumber::MAIN_FORKNUM,
             block: 0,
@@ -386,9 +386,9 @@ fn assemble(
         }
         if !samerel {
             // RelFileLocator: spcOid, dbOid, relNumber (3 x u32), on-disk order.
-            hdr.extend_from_slice(&regbuf.rlocator.spcOid.0.to_ne_bytes());
-            hdr.extend_from_slice(&regbuf.rlocator.dbOid.0.to_ne_bytes());
-            hdr.extend_from_slice(&regbuf.rlocator.relNumber.0.to_ne_bytes());
+            hdr.extend_from_slice(&regbuf.rlocator.spcOid.get().to_ne_bytes());
+            hdr.extend_from_slice(&regbuf.rlocator.dbOid.get().to_ne_bytes());
+            hdr.extend_from_slice(&regbuf.rlocator.relNumber.get().to_ne_bytes());
         }
         hdr.extend_from_slice(&regbuf.block.to_ne_bytes());
 
@@ -701,7 +701,7 @@ mod tests {
     #[tokio::test]
     async fn log_newpage_emits_fpi() {
         let (xlog, dir) = fresh_xlog().await;
-        let rloc = RelFileLocator { spcOid: Oid(1663), dbOid: Oid(5), relNumber: Oid(16384) };
+        let rloc = RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(5), relNumber: Oid::new(16384) };
         let mut page = Page::zeroed();
         // Make it a standard page with a hole: set pd_lower=40, pd_upper=8000.
         page.as_mut_bytes()[12..14].copy_from_slice(&40u16.to_ne_bytes());
@@ -718,7 +718,7 @@ mod tests {
     #[tokio::test]
     async fn log_newpages_batches() {
         let (xlog, dir) = fresh_xlog().await;
-        let rloc = RelFileLocator { spcOid: Oid(1663), dbOid: Oid(5), relNumber: Oid(16385) };
+        let rloc = RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(5), relNumber: Oid::new(16385) };
         // More pages than one batch (XLR_MAX_BLOCK_ID) to force multiple records.
         let n = XLR_MAX_BLOCK_ID as usize + 5;
         let owned: Vec<Page> = (0..n).map(|_| Page::zeroed()).collect();

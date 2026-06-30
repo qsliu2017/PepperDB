@@ -168,7 +168,7 @@ pub fn make_op(
         release_sys_cache(tup);
         crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
             e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_FUNCTION)
-                .errmsg(format!("operator is only a shell (opno {})", opno.0));
+                .errmsg(format!("operator is only a shell (opno {})", opno.get()));
         });
         unreachable!("ereport(ERROR) diverges");
     }
@@ -204,7 +204,7 @@ fn op_error(pstate: &ParseState, opname: &str, ltype: Oid, rtype: Oid, location:
     crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_FUNCTION).errmsg(format!(
             "operator does not exist: {opname} (left {}, right {})",
-            ltype.0, rtype.0
+            ltype.get(), rtype.get()
         ));
     });
     unreachable!("ereport(ERROR) diverges");

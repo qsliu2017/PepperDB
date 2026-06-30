@@ -3,7 +3,7 @@
 use crate::c::varlena;
 use crate::postgres_ext::Oid;
 
-pub const PartitionedRelationId: Oid = Oid(3350);
+pub const PartitionedRelationId: Oid = Oid::new(3350);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

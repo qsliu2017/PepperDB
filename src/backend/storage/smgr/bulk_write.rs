@@ -169,7 +169,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn bulk_write_no_wal_path() {
         let (s, dir) = shared_with_tmpdir("nowal");
-        let rloc = RelFileLocator { spcOid: Oid(1663), dbOid: Oid(70001), relNumber: Oid(18000) };
+        let rloc = RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(70001), relNumber: Oid::new(18000) };
         let mut reln = SmgrRelation::open(rloc, crate::storage::procnumber::INVALID_PROC_NUMBER);
         let fork = ForkNumber::MAIN_FORKNUM;
         reln.create(&s, fork, false).await;
@@ -208,7 +208,7 @@ mod tests {
         .await
         .unwrap();
 
-        let rloc = RelFileLocator { spcOid: Oid(1663), dbOid: Oid(70002), relNumber: Oid(18001) };
+        let rloc = RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(70002), relNumber: Oid::new(18001) };
         let mut reln = SmgrRelation::open(rloc, crate::storage::procnumber::INVALID_PROC_NUMBER);
         let fork = ForkNumber::MAIN_FORKNUM;
         reln.create(&s, fork, false).await;

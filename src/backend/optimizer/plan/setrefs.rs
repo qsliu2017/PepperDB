@@ -712,7 +712,7 @@ mod join_tests {
     use crate::nodes::primnodes::{Var, VarReturningType};
     use crate::postgres_ext::{InvalidOid, Oid};
 
-    const INT4: Oid = Oid(23);
+    const INT4: Oid = Oid::new(23);
 
     fn var(varno: i32, varattno: i16) -> Node {
         Node::Var(Box::new(Var {
@@ -775,9 +775,9 @@ mod join_tests {
     fn set_join_references_rewrites_outer_inner_var() {
         use crate::nodes::primnodes::OpExpr;
         let joinqual = Node::OpExpr(Box::new(OpExpr {
-            opno: Oid(96),
+            opno: Oid::new(96),
             opfuncid: InvalidOid,
-            opresulttype: Oid(16),
+            opresulttype: Oid::new(16),
             opretset: false,
             opcollid: InvalidOid,
             inputcollid: InvalidOid,

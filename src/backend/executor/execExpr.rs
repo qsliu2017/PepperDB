@@ -225,7 +225,7 @@ fn exec_init_coerce_via_io(c: &crate::nodes::primnodes::CoerceViaIO, state: &mut
 fn empty_flinfo() -> FmgrInfo {
     FmgrInfo {
         fn_addr: None,
-        oid: Oid(0),
+        oid: Oid::new(0),
         nargs: 0,
         strict: false,
         retset: false,
@@ -278,7 +278,7 @@ fn null_const_node(typeid: Oid) -> Node {
     Node::Const(Box::new(crate::nodes::makefuncs::makeNullConst(
         typeid,
         -1,
-        Oid(0),
+        Oid::new(0),
     )))
 }
 
@@ -314,7 +314,7 @@ fn exec_init_minmax(m: &crate::nodes::primnodes::MinMaxExpr, state: &mut ExprSta
         flinfo: None,
         context: None,
         resultinfo: None,
-        fncollation: Oid(0),
+        fncollation: Oid::new(0),
         isnull: false,
         nargs: 0,
         args: vec![NullableDatum { value: Datum(0), isnull: true }; 2],
@@ -347,20 +347,16 @@ fn exec_init_minmax(m: &crate::nodes::primnodes::MinMaxExpr, state: &mut ExprSta
 /// numeric tower + date/timestamp; the general lookup (TYPECACHE_CMP_PROC over the
 /// default btree opclass) grows with the type cache.
 fn type_cmp_proc(typeid: Oid) -> Oid {
-    use crate::catalog::genbki::{
-        DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID, INT8OID, NUMERICOID, TIMESTAMPOID,
-    };
-    use crate::utils::fmgroids as f;
     match typeid {
-        t if t == INT4OID => f::F_BTINT4CMP,
-        t if t == INT2OID => f::F_BTINT2CMP,
-        t if t == INT8OID => f::F_BTINT8CMP,
-        t if t == FLOAT4OID => f::F_BTFLOAT4CMP,
-        t if t == FLOAT8OID => f::F_BTFLOAT8CMP,
-        t if t == NUMERICOID => f::F_NUMERIC_CMP,
-        t if t == DATEOID => f::F_DATE_CMP,
-        t if t == TIMESTAMPOID => f::F_TIMESTAMP_CMP,
-        _ => not_yet_reachable(&format!("MinMax: no comparison function for type {}", typeid.0)),
+        Oid::INT4OID => Oid::F_BTINT4CMP,
+        Oid::INT2OID => Oid::F_BTINT2CMP,
+        Oid::INT8OID => Oid::F_BTINT8CMP,
+        Oid::FLOAT4OID => Oid::F_BTFLOAT4CMP,
+        Oid::FLOAT8OID => Oid::F_BTFLOAT8CMP,
+        Oid::NUMERICOID => Oid::F_NUMERIC_CMP,
+        Oid::DATEOID => Oid::F_DATE_CMP,
+        Oid::TIMESTAMPOID => Oid::F_TIMESTAMP_CMP,
+        _ => not_yet_reachable(&format!("MinMax: no comparison function for type {}", typeid.get())),
     }
 }
 
@@ -375,7 +371,7 @@ fn exec_init_func(node: &Node, args: &[Node], funcid: Oid, inputcollid: Oid) -> 
 
     let mut flinfo = FmgrInfo {
         fn_addr: None,
-        oid: Oid(0),
+        oid: Oid::new(0),
         nargs: 0,
         strict: false,
         retset: false,
@@ -397,7 +393,7 @@ fn exec_init_func(node: &Node, args: &[Node], funcid: Oid, inputcollid: Oid) -> 
         flinfo: None,
         context: None,
         resultinfo: None,
-        fncollation: Oid(0),
+        fncollation: Oid::new(0),
         isnull: false,
         nargs: 0,
         args: vec![NullableDatum { value: Datum(0), isnull: true }; nargs],

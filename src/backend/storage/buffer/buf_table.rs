@@ -158,7 +158,7 @@ mod tests {
     use crate::storage::relfilelocator::RelFileLocator;
 
     fn tag(block: u32) -> BufferTag {
-        let loc = RelFileLocator { spcOid: Oid(1), dbOid: Oid(2), relNumber: Oid(3) };
+        let loc = RelFileLocator { spcOid: Oid::new(1), dbOid: Oid::new(2), relNumber: Oid::new(3) };
         BufferTag::init(&loc, ForkNumber::MAIN_FORKNUM, block)
     }
 

@@ -625,7 +625,7 @@ async fn warm_grouping_caches(shared: &Arc<SharedState>, pstate: &ParseState, st
     let mut types: Vec<Oid> = vec![INT4OID];
     for nsitem in &pstate.p_namespace {
         for col in &nsitem.nscolumns {
-            if col.vartype != Oid(0) && !types.contains(&col.vartype) {
+            if col.vartype != Oid::new(0) && !types.contains(&col.vartype) {
                 types.push(col.vartype);
             }
         }
@@ -746,7 +746,7 @@ async fn warm_expr_caches(
     let mut types: Vec<Oid> = vec![INT4OID, BOOLOID];
     for nsitem in &pstate.p_namespace {
         for col in &nsitem.nscolumns {
-            if col.vartype != Oid(0) && !types.contains(&col.vartype) {
+            if col.vartype != Oid::new(0) && !types.contains(&col.vartype) {
                 types.push(col.vartype);
             }
         }
@@ -1765,7 +1765,7 @@ mod relation_tests {
     use crate::shared_state::{SharedState, SharedStateConfig};
 
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    const DB_OID: Oid = Oid(90000);
+    const DB_OID: Oid = Oid::new(90000);
 
     fn new_shared() -> Arc<SharedState> {
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1854,10 +1854,10 @@ mod relation_tests {
             "t",
             PG_PUBLIC_NAMESPACE,
             crate::common::relpath::DEFAULTTABLESPACE_OID,
-            Oid(0),
-            Oid(0),
-            Oid(10),
-            Oid(2),
+            Oid::new(0),
+            Oid::new(0),
+            Oid::new(10),
+            Oid::new(2),
             tupdesc,
             RELKIND_RELATION,
             RELPERSISTENCE_PERMANENT,
@@ -2010,7 +2010,7 @@ mod relation_tests {
             let q = analyze(&shared, "SELECT a + 1 FROM t").await;
             let Node::TargetEntry(te) = &q.targetList[0] else { panic!("not a TargetEntry") };
             let Node::OpExpr(op) = te.expr.as_ref().unwrap() else { panic!("a + 1 not an OpExpr") };
-            assert_eq!(op.opno, Oid(551), "the int4 + operator");
+            assert_eq!(op.opno, Oid::new(551), "the int4 + operator");
             assert_eq!(op.opfuncid, F_INT4PL, "opfuncid is int4pl");
             assert_eq!(op.opresulttype, INT4OID, "result type int4");
             assert!(!op.opretset);
@@ -2192,7 +2192,7 @@ mod relation_tests {
             let q = analyze(&shared, "SELECT a FROM t WHERE a > 0").await;
             let Node::FromExpr(jt) = q.jointree.as_ref().expect("jointree") else { panic!("not FromExpr") };
             let Some(Node::OpExpr(op)) = jt.quals.as_ref() else { panic!("WHERE qual is not an OpExpr") };
-            assert_eq!(op.opno, Oid(521), "the int4 > operator");
+            assert_eq!(op.opno, Oid::new(521), "the int4 > operator");
             assert_eq!(op.opfuncid, F_INT4GT, "opfuncid is int4gt");
             assert_eq!(op.opresulttype, BOOLOID, "comparison result type is bool");
         }))
@@ -2288,7 +2288,7 @@ mod relation_tests {
             let tup = tup.expect("OPERNAMENSP('+',int4,int4,pg_catalog) must resolve");
             // SAFETY: a held OPERNAMENSP hit -> a pg_operator row.
             let form = unsafe { &*GETSTRUCT(&*tup).cast::<FormData_pg_operator>() };
-            assert_eq!(form.oid, Oid(551), "+(int4,int4) is operator 551");
+            assert_eq!(form.oid, Oid::new(551), "+(int4,int4) is operator 551");
             assert_eq!(form.oprcode, F_INT4PL, "oprcode is int4pl");
             assert_eq!(form.oprresult, INT4OID);
             release_sys_cache(tup);
@@ -2355,8 +2355,8 @@ mod relation_tests {
             assert!(q.groupClause.is_empty(), "no GROUP BY");
             let Node::TargetEntry(te) = &q.targetList[0] else { panic!("not a TargetEntry") };
             let Node::Aggref(agg) = te.expr.as_ref().unwrap() else { panic!("not an Aggref") };
-            assert_eq!(agg.aggfnoid, Oid(2803), "count() aggregate OID");
-            assert_eq!(agg.aggtype, Oid(20), "count returns int8");
+            assert_eq!(agg.aggfnoid, Oid::new(2803), "count() aggregate OID");
+            assert_eq!(agg.aggtype, Oid::new(20), "count returns int8");
             assert!(agg.aggstar, "count(*) sets aggstar");
 
             let stmt = plan(&shared, *q);
@@ -2383,7 +2383,7 @@ mod relation_tests {
             assert!(q.hasAggs);
             assert_eq!(q.groupClause.len(), 1, "one GROUP BY column");
             let Node::SortGroupClause(sgc) = &q.groupClause[0] else { panic!("not a SortGroupClause") };
-            assert_eq!(sgc.eqop, Oid(96), "int4 equality operator (int4eq)");
+            assert_eq!(sgc.eqop, Oid::new(96), "int4 equality operator (int4eq)");
             assert_ne!(sgc.tleSortGroupRef, 0, "the group column has a sortgroupref");
 
             let stmt = plan(&shared, *q);
@@ -2391,7 +2391,7 @@ mod relation_tests {
             assert!(matches!(a.aggstrategy, AggStrategy::SORTED), "GROUP BY -> AGG_SORTED");
             assert_eq!(a.num_cols, 1);
             assert_eq!(a.grp_col_idx.len(), 1, "one grouping column index");
-            assert_eq!(a.grp_operators[0], Oid(96));
+            assert_eq!(a.grp_operators[0], Oid::new(96));
             // The Agg's child is a Sort on the group key, over the SeqScan.
             let Some(Node::Sort(s)) = a.plan.lefttree.as_ref() else { panic!("Agg child is not a Sort") };
             assert_eq!(s.num_cols, 1, "Sort on the single group key");
@@ -2413,12 +2413,12 @@ mod relation_tests {
             assert_eq!(q.sortClause.len(), 1);
             let Node::SortGroupClause(sgc) = &q.sortClause[0] else { panic!("not a SortGroupClause") };
             assert!(sgc.reverse_sort, "DESC sets reverse_sort");
-            assert_eq!(sgc.sortop, Oid(521), "int4 `>` operator for DESC");
+            assert_eq!(sgc.sortop, Oid::new(521), "int4 `>` operator for DESC");
 
             let stmt = plan(&shared, *q);
             let Node::Sort(s) = &stmt.plan_tree else { panic!("plan is not a Sort") };
             assert_eq!(s.num_cols, 1);
-            assert_eq!(s.sort_operators[0], Oid(521));
+            assert_eq!(s.sort_operators[0], Oid::new(521));
             assert!(s.nulls_first[0], "DESC default is NULLS FIRST");
         }))
         .await;
@@ -2444,7 +2444,7 @@ mod relation_tests {
             let q = analyze(&shared, "SELECT a FROM t ORDER BY a LIMIT 2").await;
             assert!(q.limitCount.is_some(), "LIMIT count set");
             let Some(Node::Const(c)) = q.limitCount.as_ref() else { panic!("LIMIT not a Const") };
-            assert_eq!(c.consttype, Oid(20), "LIMIT count coerced to int8");
+            assert_eq!(c.consttype, Oid::new(20), "LIMIT count coerced to int8");
             assert_eq!(crate::postgres::DatumGetInt64(c.constvalue), 2);
             let stmt = plan(&shared, *q);
             let Node::Limit(l) = &stmt.plan_tree else { panic!("plan is not a Limit") };

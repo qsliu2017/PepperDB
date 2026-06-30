@@ -127,13 +127,13 @@ fn oid_invalid_syntax(s: &str) -> ! {
 /// PG `oidin`: converts "num" to oid.
 pub fn oidin(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     let s = pg_getarg_cstring(fcinfo, 0);
-    ObjectIdGetDatum(Oid(parse_oid(&s)))
+    ObjectIdGetDatum(Oid::new(parse_oid(&s)))
 }
 
 /// PG `oidout`: converts oid to "num".
 pub fn oidout(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     let o = pg_getarg_oid(fcinfo, 0);
-    pg_return_cstring(&o.0.to_string())
+    pg_return_cstring(&o.get().to_string())
 }
 
 /// PG `oidrecv`: converts external binary format to oid.
@@ -151,7 +151,7 @@ pub fn oidvectorin(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     let s = pg_getarg_cstring(fcinfo, 0);
     let mut oids: Vec<Oid> = Vec::new();
     for tok in s.split_ascii_whitespace() {
-        oids.push(Oid(parse_oid(tok)));
+        oids.push(Oid::new(parse_oid(tok)));
     }
     PointerGetDatum(crate::utils::builtins::buildoidvector(&oids).cast::<u8>())
 }
@@ -172,7 +172,7 @@ pub fn oidvectorout(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
         let vptr = std::ptr::addr_of!((*p).values).cast::<Oid>();
         let mut parts: Vec<String> = Vec::with_capacity(nnums);
         for i in 0..nnums {
-            parts.push((*vptr.add(i)).0.to_string());
+            parts.push((*vptr.add(i)).get().to_string());
         }
         parts.join(" ")
     };
@@ -311,9 +311,9 @@ mod tests {
     fn oid_in_unsigned_wraparound_and_errors() {
         // "-1" wraps to UINT32_MAX (strtoul semantics).
         let mut f = fc(&[cstr_datum("-1")]);
-        assert_eq!(DatumGetObjectId(oidin(&mut f)).0, u32::MAX);
+        assert_eq!(DatumGetObjectId(oidin(&mut f)).get(), u32::MAX);
         let mut f = fc(&[cstr_datum("-2")]);
-        assert_eq!(DatumGetObjectId(oidin(&mut f)).0, u32::MAX - 1);
+        assert_eq!(DatumGetObjectId(oidin(&mut f)).get(), u32::MAX - 1);
 
         // overflow past 2^32-1 raises.
         assert!(catch_unwind(|| {
@@ -334,18 +334,18 @@ mod tests {
 
     #[test]
     fn oid_comparisons() {
-        let mut f = fc(&[ObjectIdGetDatum(Oid(10)), ObjectIdGetDatum(Oid(10))]);
+        let mut f = fc(&[ObjectIdGetDatum(Oid::new(10)), ObjectIdGetDatum(Oid::new(10))]);
         assert!(DatumGetBool(oideq(&mut f)));
-        let mut f = fc(&[ObjectIdGetDatum(Oid(10)), ObjectIdGetDatum(Oid(20))]);
+        let mut f = fc(&[ObjectIdGetDatum(Oid::new(10)), ObjectIdGetDatum(Oid::new(20))]);
         assert!(DatumGetBool(oidlt(&mut f)));
         assert!(DatumGetBool(oidne(&mut f)));
         // unsigned: a large oid is > a small one (no sign confusion).
-        let mut f = fc(&[ObjectIdGetDatum(Oid(u32::MAX)), ObjectIdGetDatum(Oid(1))]);
+        let mut f = fc(&[ObjectIdGetDatum(Oid::new(u32::MAX)), ObjectIdGetDatum(Oid::new(1))]);
         assert!(DatumGetBool(oidgt(&mut f)));
-        let mut f = fc(&[ObjectIdGetDatum(Oid(5)), ObjectIdGetDatum(Oid(9))]);
-        assert_eq!(DatumGetObjectId(oidlarger(&mut f)).0, 9);
-        let mut f = fc(&[ObjectIdGetDatum(Oid(5)), ObjectIdGetDatum(Oid(9))]);
-        assert_eq!(DatumGetObjectId(oidsmaller(&mut f)).0, 5);
+        let mut f = fc(&[ObjectIdGetDatum(Oid::new(5)), ObjectIdGetDatum(Oid::new(9))]);
+        assert_eq!(DatumGetObjectId(oidlarger(&mut f)).get(), 9);
+        let mut f = fc(&[ObjectIdGetDatum(Oid::new(5)), ObjectIdGetDatum(Oid::new(9))]);
+        assert_eq!(DatumGetObjectId(oidsmaller(&mut f)).get(), 5);
     }
 
     #[test]
@@ -372,7 +372,7 @@ mod tests {
             .find(|b| b.func_name == "oidout")
             .expect("oidout present");
         let func = entry.func.expect("oidout bound");
-        let mut f = fc(&[ObjectIdGetDatum(Oid(42))]);
+        let mut f = fc(&[ObjectIdGetDatum(Oid::new(42))]);
         assert_eq!(out_to_string(func(&mut f)), "42");
     }
 }

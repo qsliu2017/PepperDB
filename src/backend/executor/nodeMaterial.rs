@@ -251,7 +251,7 @@ mod tests {
     use crate::postgres::Int32GetDatum;
     use std::sync::Arc;
 
-    const INT4OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(23);
+    const INT4OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(23);
     const INVALID: crate::postgres_ext::Oid = crate::postgres_ext::InvalidOid;
 
     fn int4_desc() -> TupleDesc {

@@ -13,8 +13,8 @@ use crate::nodes::parsenodes::{Query, QuerySource};
 use crate::nodes::pathnodes::{EquivalenceClass, JoinDomain, PlannerGlobal, PlannerInfo};
 use crate::nodes::primnodes::OverridingKind;
 
-const INT4OID: Oid = Oid(23);
-const BTREE_INT4_OPF: Oid = Oid(1976);
+const INT4OID: Oid = Oid::new(23);
+const BTREE_INT4_OPF: Oid = Oid::new(1976);
 
 /// Build a fresh empty EquivalenceClass with a single distinguishing relid set.
 /// `key` makes the EC value-distinct (so two ECs with different keys compare

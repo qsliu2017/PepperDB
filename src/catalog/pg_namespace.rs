@@ -4,10 +4,10 @@ use crate::c::NameData;
 use crate::postgres_ext::Oid;
 use crate::utils::acl::AclItem;
 
-pub const NamespaceRelationId: Oid = Oid(2615);
+pub const NamespaceRelationId: Oid = Oid::new(2615);
 /// pg_namespace composite rowtype OID (genbki-assigned). Used to nail the
 /// descriptor at bootstrap (formrdesc); not load-bearing beyond the rowtype id.
-pub const NamespaceRelation_Rowtype_Id: Oid = Oid(11632);
+pub const NamespaceRelation_Rowtype_Id: Oid = Oid::new(11632);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -28,16 +28,16 @@ pub type Form_pg_namespace = *mut FormData_pg_namespace; // TODO(ptr)
 // MAKE_SYSCACHE(NAMESPACEOID, pg_namespace_oid_index, 16)
 
 /// pg_namespace_nspname_index: unique index on nspname.
-pub const NamespaceNameIndexId: Oid = Oid(2684);
+pub const NamespaceNameIndexId: Oid = Oid::new(2684);
 /// pg_namespace_oid_index: unique index on oid (the pkey).
-pub const NamespaceOidIndexId: Oid = Oid(2685);
+pub const NamespaceOidIndexId: Oid = Oid::new(2685);
 
 // Well-known namespace OIDs (BKI seed OIDs from pg_namespace.dat).
 /// pg_catalog: the system catalog schema.
-pub const PG_CATALOG_NAMESPACE: Oid = Oid(11);
+pub const PG_CATALOG_NAMESPACE: Oid = Oid::new(11);
 /// pg_toast: the reserved TOAST schema.
-pub const PG_TOAST_NAMESPACE: Oid = Oid(99);
+pub const PG_TOAST_NAMESPACE: Oid = Oid::new(99);
 /// public: the standard public schema.
-pub const PG_PUBLIC_NAMESPACE: Oid = Oid(2200);
+pub const PG_PUBLIC_NAMESPACE: Oid = Oid::new(2200);
 
 pub use crate::backend::catalog::pg_namespace::namespace_create as NamespaceCreate;

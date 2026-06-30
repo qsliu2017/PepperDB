@@ -63,7 +63,7 @@ where
 }
 
 fn rloc(rel: u32) -> RelFileLocator {
-    RelFileLocator { spcOid: Oid(1663), dbOid: Oid(90000), relNumber: Oid(80000 + rel) }
+    RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(90000), relNumber: Oid::new(80000 + rel) }
 }
 
 /// Build a minimal heap `RelationData` (boxed, leaked) backed by `locator`. The
@@ -82,7 +82,7 @@ fn make_relation(
     form.relkind = RELKIND_RELATION;
     form.relpersistence = RELPERSISTENCE_PERMANENT;
     form.relnatts = tupdesc.natts as i16;
-    form.relam = Oid(2); // HEAP_TABLE_AM_OID (any nonzero handler -> Heap kind)
+    form.relam = Oid::new(2); // HEAP_TABLE_AM_OID (any nonzero handler -> Heap kind)
     let form_ptr = Some(form);
 
     // A fresh RelationData with the heap-relevant fields set; the rest are blank
@@ -97,7 +97,7 @@ fn make_relation(
     rel.rd_lockInfo = LockInfoData {
         lockRelId: LockRelId { relId: locator.relNumber, dbId: locator.dbOid },
     };
-    rel.rd_amhandler = Oid(2);
+    rel.rd_amhandler = Oid::new(2);
     Arc::new(rel)
 }
 
@@ -106,7 +106,7 @@ fn make_relation(
 /// depend on the syscache (step 14).
 fn two_int4_desc() -> crate::access::tupdesc::TupleDesc {
     use crate::access::tupdesc::TupleDescData;
-    const INT4OID: Oid = Oid(23);
+    const INT4OID: Oid = Oid::new(23);
     let mut d = TupleDescData::create_template(2);
     d.init_builtin_entry(1, "a", INT4OID, -1, 0);
     d.init_builtin_entry(2, "b", INT4OID, -1, 0);

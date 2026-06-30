@@ -20,8 +20,8 @@ use crate::shared_state::{SharedState, SharedStateConfig};
 
 static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-const INT4OID: Oid = Oid(23);
-const DB_OID: Oid = Oid(90000);
+const INT4OID: Oid = Oid::new(23);
+const DB_OID: Oid = Oid::new(90000);
 
 fn new_shared() -> Arc<SharedState> {
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -173,17 +173,17 @@ async fn create_table_writes_catalog_rows_and_resolves_by_name() {
             "t",
             PG_PUBLIC_NAMESPACE,
             crate::common::relpath::DEFAULTTABLESPACE_OID,
-            Oid(0),     // assign a fresh OID
-            Oid(0),     // assign a fresh rowtype OID
-            Oid(10),    // owner
-            Oid(2),     // heap AM
+            Oid::new(0),     // assign a fresh OID
+            Oid::new(0),     // assign a fresh rowtype OID
+            Oid::new(10),    // owner
+            Oid::new(2),     // heap AM
             tupdesc,
             RELKIND_RELATION,
             RELPERSISTENCE_PERMANENT,
             false,
         )
         .await;
-        assert!(relid.0 != 0, "heap_create_with_catalog returns the new OID");
+        assert!(relid.is_valid(), "heap_create_with_catalog returns the new OID");
 
         crate::backend::access::transam::xact::CommandCounterIncrement();
         refresh_active_snapshot(&shared);
@@ -284,7 +284,7 @@ async fn make_oid_index_relation(shared: &Arc<SharedState>, heap_relid: Oid) -> 
     let iloc = crate::storage::relfilelocator::RelFileLocator {
         spcOid: crate::common::relpath::DEFAULTTABLESPACE_OID,
         dbOid: DB_OID,
-        relNumber: Oid(70000),
+        relNumber: Oid::new(70000),
     };
     let mut smgr = crate::storage::smgr::SmgrRelation::open(
         iloc,
@@ -317,7 +317,7 @@ async fn make_oid_index_relation(shared: &Arc<SharedState>, heap_relid: Oid) -> 
         let idx = Arc::get_mut(&mut index).expect("freshly built index is unshared");
         attach_rd_index(idx);
         relation_init_index_access_info(idx);
-        index_init_opclass_support(idx, &[Oid(1981)], &[Oid(0)], &[0]);
+        index_init_opclass_support(idx, &[Oid::new(1981)], &[Oid::new(0)], &[0]);
     }
 
     index_build(shared, &heap, &index, &info).await;
@@ -352,7 +352,7 @@ fn build_index_relation(
     form.relkind = RELKIND_INDEX;
     form.relpersistence = RELPERSISTENCE_PERMANENT;
     form.relnatts = 1;
-    form.relam = Oid(403);
+    form.relam = Oid::new(403);
     let form_ptr = Some(form);
 
     let mut rel = RelationData::blank();
@@ -361,7 +361,7 @@ fn build_index_relation(
     rel.rd_refcnt.store(1, Ordering::Relaxed);
     rel.rd_rel = form_ptr;
     rel.rd_att = Some(tupdesc);
-    rel.rd_amhandler = Oid(403);
+    rel.rd_amhandler = Oid::new(403);
     rel.rd_locator = locator;
     rel.rd_lockInfo = LockInfoData {
         lockRelId: LockRelId { relId: locator.relNumber, dbId: locator.dbOid },

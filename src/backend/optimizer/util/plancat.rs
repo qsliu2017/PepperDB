@@ -171,10 +171,10 @@ fn build_index_opt_infos(
 /// The btree opfamily OID for a builtin type (the `btree/integer_ops` etc. families
 /// SEED_PG_OPCLASS encodes). M6 builtin set; InvalidOid otherwise.
 fn btree_opfamily_for_type(type_id: Oid) -> Oid {
-    match type_id.0 {
-        20 | 21 | 23 => Oid(1976), // int2/int4/int8 -> integer_ops btree family
-        26 => Oid(1989),           // oid -> oid_ops btree family
-        25 => Oid(1994),           // text -> text_ops btree family
+    match type_id.get() {
+        20 | 21 | 23 => Oid::new(1976), // int2/int4/int8 -> integer_ops btree family
+        26 => Oid::new(1989),           // oid -> oid_ops btree family
+        25 => Oid::new(1994),           // text -> text_ops btree family
         _ => InvalidOid,
     }
 }

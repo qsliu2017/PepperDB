@@ -13,7 +13,7 @@ use crate::utils::array::ArrayType;
 use crate::utils::snapshot::Snapshot;
 
 /// placeholder for id in a PUBLIC acl item
-pub const ACL_ID_PUBLIC: Oid = Oid(0);
+pub const ACL_ID_PUBLIC: Oid = Oid::new(0);
 
 /// AclItem - one ACL entry. ON-DISK: array element of the `aclitem` type, so
 /// layout is fixed (12 bytes: two Oid + one AclMode/u64).

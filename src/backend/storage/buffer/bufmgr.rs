@@ -555,7 +555,7 @@ mod tests {
     use crate::storage::procnumber::INVALID_PROC_NUMBER;
 
     fn rloc(rel: u32) -> RelFileLocator {
-        RelFileLocator { spcOid: Oid(1663), dbOid: Oid(50000 + rel), relNumber: Oid(16000 + rel) }
+        RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(50000 + rel), relNumber: Oid::new(16000 + rel) }
     }
 
     async fn shared_with_tmpdir(tag: &str, nbuffers: usize) -> (Arc<SharedState>, std::path::PathBuf) {

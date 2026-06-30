@@ -27,7 +27,7 @@ where
     Fut: std::future::Future<Output = T>,
 {
     let sess = Arc::new(Session::new(BackendType::BACKEND));
-    sess.set_database_id(crate::postgres_ext::Oid(db));
+    sess.set_database_id(crate::postgres_ext::Oid::new(db));
     session_scope(
         sess,
         my_proc_scope(local_lock_scope(speculative_token_scope(async move {
@@ -49,7 +49,7 @@ where
 async fn lock_shared_object_grant_and_unlock() {
     let _s = shared();
     backend(0, || async {
-        let (classid, objid) = (crate::postgres_ext::Oid(2000), crate::postgres_ext::Oid(3000));
+        let (classid, objid) = (crate::postgres_ext::Oid::new(2000), crate::postgres_ext::Oid::new(3000));
         let tag = crate::storage::lock::LOCKTAG::set_object(0, 2000, 3000, 0);
         LockSharedObjectForSession(classid, objid, 0, LockMode::ExclusiveLock as i32).await;
         assert!(crate::backend::storage::lmgr::lock::LockHeldByMe(
@@ -74,8 +74,8 @@ async fn lock_shared_object_grant_and_unlock() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn conditional_lock_shared_object_false_on_conflict() {
     let _s = shared();
-    let classid = crate::postgres_ext::Oid(2001);
-    let objid = crate::postgres_ext::Oid(3001);
+    let classid = crate::postgres_ext::Oid::new(2001);
+    let objid = crate::postgres_ext::Oid::new(3001);
 
     backend(0, || async move {
         // Hold Exclusive on the object (session wrapper -> no inval).

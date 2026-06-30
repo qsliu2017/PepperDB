@@ -4,7 +4,7 @@ use crate::c::NameData;
 use crate::postgres_ext::Oid;
 use crate::utils::acl::AclItem;
 
-pub const LanguageRelationId: Oid = Oid(2612);
+pub const LanguageRelationId: Oid = Oid::new(2612);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

@@ -5,8 +5,8 @@ use crate::postgres_ext::Oid;
 use crate::utils::acl::AclItem;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(83,RelationRelation_Rowtype_Id) BKI_SCHEMA_MACRO
-pub const RelationRelationId: Oid = Oid(1259);
-pub const RelationRelation_Rowtype_Id: Oid = Oid(83);
+pub const RelationRelationId: Oid = Oid::new(1259);
+pub const RelationRelation_Rowtype_Id: Oid = Oid::new(83);
 
 // pg_node_tree catalog field = varlena (serialized node tree); modeled as text for now.
 pub type PgNodeTree = text;
@@ -64,9 +64,9 @@ pub type Form_pg_class = *mut FormData_pg_class; // TODO(ptr)
 // MAKE_SYSCACHE(RELNAMENSP, pg_class_relname_nsp_index, 128)
 
 /// pg_class_oid_index: the unique index on pg_class.oid.
-pub const ClassOidIndexId: Oid = Oid(2662);
+pub const ClassOidIndexId: Oid = Oid::new(2662);
 /// pg_class_relname_nsp_index: the unique index on (relname, relnamespace).
-pub const ClassNameNspIndexId: Oid = Oid(2663);
+pub const ClassNameNspIndexId: Oid = Oid::new(2663);
 
 pub const RELKIND_RELATION: i8 = b'r' as i8;
 pub const RELKIND_INDEX: i8 = b'i' as i8;

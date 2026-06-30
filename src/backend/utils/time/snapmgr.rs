@@ -719,14 +719,14 @@ fn build_export_text(
     let pid = crate::session::try_current()
         .map_or(0, |s| s.proc_pid());
     let dbid = crate::session::try_current()
-        .map_or(Oid(0), |s| s.database_id());
+        .map_or(Oid::new(0), |s| s.database_id());
     let iso = crate::access::xact::XactIsoLevel();
     let ro = i32::from(crate::access::xact::XactReadOnly());
 
     let mut s = String::new();
     writeln!(s, "vxid:{procnum}/{lxid}").unwrap();
     writeln!(s, "pid:{pid}").unwrap();
-    writeln!(s, "dbid:{}", dbid.0).unwrap();
+    writeln!(s, "dbid:{}", dbid.get()).unwrap();
     writeln!(s, "iso:{iso}").unwrap();
     writeln!(s, "ro:{ro}").unwrap();
     writeln!(s, "xmin:{}", snapshot.xmin.0).unwrap();
@@ -834,7 +834,7 @@ pub async fn ImportSnapshot(shared: &Arc<SharedState>, idstr: &str) {
 
     // C: VirtualTransactionIdIsValid(src_vxid) && OidIsValid(src_dbid) checks.
     assert!(
-        src_vxid.is_valid() && src_dbid != Oid(0),
+        src_vxid.is_valid() && src_dbid != Oid::new(0),
         "invalid snapshot data"
     );
 
@@ -844,7 +844,7 @@ pub async fn ImportSnapshot(shared: &Arc<SharedState>, idstr: &str) {
 
     if src_dbid
         != crate::session::try_current()
-            .map_or(Oid(0), |s| s.database_id())
+            .map_or(Oid::new(0), |s| s.database_id())
     {
         panic!("cannot import a snapshot from a different database");
     }
@@ -882,7 +882,7 @@ fn parse_import(
         local_transaction_id: crate::c::LocalTransactionId(lx.parse().unwrap()),
     };
     let _pid: i32 = next("pid:").parse().unwrap();
-    let src_dbid = Oid(next("dbid:").parse().unwrap());
+    let src_dbid = Oid::new(next("dbid:").parse().unwrap());
     let _iso: i32 = next("iso:").parse().unwrap();
     let _ro: i32 = next("ro:").parse().unwrap();
 

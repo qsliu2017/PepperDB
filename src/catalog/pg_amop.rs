@@ -2,7 +2,7 @@
 
 use crate::postgres_ext::Oid;
 
-pub const AccessMethodOperatorRelationId: Oid = Oid(2602);
+pub const AccessMethodOperatorRelationId: Oid = Oid::new(2602);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

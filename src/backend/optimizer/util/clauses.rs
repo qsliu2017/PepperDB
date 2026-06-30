@@ -164,8 +164,8 @@ mod tests {
             location: -1,
         }));
         let op = Node::OpExpr(Box::new(OpExpr {
-            opno: Oid(551),
-            opfuncid: Oid(177),
+            opno: Oid::new(551),
+            opfuncid: Oid::new(177),
             opresulttype: INT4OID,
             opretset: false,
             opcollid: InvalidOid,

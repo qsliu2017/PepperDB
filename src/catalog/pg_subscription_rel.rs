@@ -3,7 +3,7 @@
 use crate::access::xlogdefs::XLogRecPtr;
 use crate::postgres_ext::Oid;
 
-pub const SubscriptionRelRelationId: Oid = Oid(6102);
+pub const SubscriptionRelRelationId: Oid = Oid::new(6102);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

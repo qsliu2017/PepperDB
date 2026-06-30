@@ -731,9 +731,9 @@ pub(crate) mod tests {
             handler: SyncRequestHandler::Md as i16,
             forknum: crate::common::relpath::ForkNumber::MAIN_FORKNUM as i16,
             rlocator: crate::storage::relfilelocator::RelFileLocator {
-                spcOid: crate::postgres_ext::Oid(1663),
-                dbOid: crate::postgres_ext::Oid(5),
-                relNumber: crate::postgres_ext::Oid(rel),
+                spcOid: crate::postgres_ext::Oid::new(1663),
+                dbOid: crate::postgres_ext::Oid::new(5),
+                relNumber: crate::postgres_ext::Oid::new(rel),
             },
             segno: 0,
         }

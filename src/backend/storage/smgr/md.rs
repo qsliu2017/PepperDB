@@ -768,9 +768,9 @@ fn register_forget_request(
 /// ForgetDatabaseSyncRequests() -- forget all fsyncs/unlinks for a database.
 pub fn forget_database_sync_requests(shared: &Arc<SharedState>, dbid: Oid) {
     let rlocator = crate::storage::relfilelocator::RelFileLocator {
-        spcOid: Oid(0),
+        spcOid: Oid::new(0),
         dbOid: dbid,
-        relNumber: Oid(0),
+        relNumber: Oid::new(0),
     };
     let tag = FileTag {
         handler: SyncRequestHandler::Md as i16,

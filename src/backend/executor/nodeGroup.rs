@@ -207,26 +207,21 @@ pub fn grouping_equal(
 /// Mirrors execExpr's `type_cmp_proc` map (the seeded int/float/numeric/date
 /// btree opclasses); the general type-cache path grows later.
 fn type_cmp(typeid: Oid, a: Datum, b: Datum) -> i32 {
-    use crate::catalog::genbki::{
-        DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID, INT8OID, NUMERICOID, OIDOID, TEXTOID,
-        TIMESTAMPOID,
-    };
-    use crate::utils::fmgroids as f;
     let proc = match typeid {
-        t if t == INT4OID => f::F_BTINT4CMP,
-        t if t == INT2OID => f::F_BTINT2CMP,
-        t if t == INT8OID => f::F_BTINT8CMP,
-        t if t == OIDOID => f::F_BTOIDCMP,
-        t if t == TEXTOID => f::F_BTTEXTCMP,
-        t if t == FLOAT4OID => f::F_BTFLOAT4CMP,
-        t if t == FLOAT8OID => f::F_BTFLOAT8CMP,
-        t if t == NUMERICOID => f::F_NUMERIC_CMP,
-        t if t == DATEOID => f::F_DATE_CMP,
-        t if t == TIMESTAMPOID => f::F_TIMESTAMP_CMP,
+        Oid::INT4OID => Oid::F_BTINT4CMP,
+        Oid::INT2OID => Oid::F_BTINT2CMP,
+        Oid::INT8OID => Oid::F_BTINT8CMP,
+        Oid::OIDOID => Oid::F_BTOIDCMP,
+        Oid::TEXTOID => Oid::F_BTTEXTCMP,
+        Oid::FLOAT4OID => Oid::F_BTFLOAT4CMP,
+        Oid::FLOAT8OID => Oid::F_BTFLOAT8CMP,
+        Oid::NUMERICOID => Oid::F_NUMERIC_CMP,
+        Oid::DATEOID => Oid::F_DATE_CMP,
+        Oid::TIMESTAMPOID => Oid::F_TIMESTAMP_CMP,
         _ => {
             crate::elog!(
                 crate::utils::elog::ERROR,
-                format!("grouping_equal: no comparison function for type {}", typeid.0)
+                format!("grouping_equal: no comparison function for type {}", typeid.get())
             );
             unreachable!("elog!(ERROR) raises")
         }
@@ -249,7 +244,7 @@ mod tests {
     use crate::postgres::Int32GetDatum;
     use std::sync::Arc;
 
-    const INT4OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(23);
+    const INT4OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(23);
     const INVALID: crate::postgres_ext::Oid = crate::postgres_ext::InvalidOid;
 
     fn int4_desc(n: usize) -> TupleDesc {
@@ -287,7 +282,7 @@ mod tests {
             },
             num_cols,
             grp_col_idx: colidx,
-            grp_operators: vec![crate::postgres_ext::Oid(96); num_cols as usize], // int4eq
+            grp_operators: vec![crate::postgres_ext::Oid::new(96); num_cols as usize], // int4eq
             grp_collations: vec![INVALID; num_cols as usize],
         }
     }

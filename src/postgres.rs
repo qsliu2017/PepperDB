@@ -89,10 +89,10 @@ pub const fn UInt32GetDatum(x: u32) -> Datum {
 }
 
 pub const fn DatumGetObjectId(x: Datum) -> Oid {
-    Oid(x.0 as u32)
+    Oid::new(x.0 as u32)
 }
 pub const fn ObjectIdGetDatum(x: Oid) -> Datum {
-    Datum(x.0 as usize)
+    Datum(x.get() as usize)
 }
 
 pub const fn DatumGetTransactionId(x: Datum) -> TransactionId {

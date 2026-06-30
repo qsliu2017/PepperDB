@@ -4,7 +4,7 @@ use crate::c::{regproc, NameData};
 use crate::catalog::objectaddress::ObjectAddress;
 use crate::postgres_ext::Oid;
 
-pub const ConversionRelationId: Oid = Oid(2607);
+pub const ConversionRelationId: Oid = Oid::new(2607);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

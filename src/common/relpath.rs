@@ -13,7 +13,7 @@ pub type RelFileNumber = Oid;
 pub const InvalidRelFileNumber: RelFileNumber = InvalidOid;
 
 pub const fn rel_file_number_is_valid(relnumber: RelFileNumber) -> bool {
-    relnumber.0 != InvalidRelFileNumber.0
+    relnumber.is_valid()
 }
 
 /// Name of major-version-specific tablespace subdirectories.
@@ -83,8 +83,8 @@ pub const REL_PATH_STR_MAXLEN: usize = (PG_TBLSPC_DIR.len())
 
 /// Tablespace OIDs from pg_tablespace.dat (the catalog .dat is not generated in
 /// the port yet, so the two well-known values are inlined here).
-pub const DEFAULTTABLESPACE_OID: Oid = Oid(1663);
-pub const GLOBALTABLESPACE_OID: Oid = Oid(1664);
+pub const DEFAULTTABLESPACE_OID: Oid = Oid::new(1663);
+pub const GLOBALTABLESPACE_OID: Oid = Oid::new(1664);
 
 /// String of the exact length required to represent a relation path. The C type
 /// is a fixed `char[]`; we keep the produced path in a `String` since Rust paths
@@ -106,10 +106,10 @@ pub fn get_database_path(db_oid: Oid, spc_oid: Oid) -> String {
         "global".to_string()
     } else if spc_oid == DEFAULTTABLESPACE_OID {
         // The default tablespace is {datadir}/base
-        format!("base/{}", db_oid.0)
+        format!("base/{}", db_oid.get())
     } else {
         // All other tablespaces are accessed via symlinks
-        format!("{}/{}/{}/{}", PG_TBLSPC_DIR, spc_oid.0, tablespace_version_directory(), db_oid.0)
+        format!("{}/{}/{}/{}", PG_TBLSPC_DIR, spc_oid.get(), tablespace_version_directory(), db_oid.get())
     }
 }
 
@@ -131,21 +131,21 @@ pub fn get_relation_path(
 
     let str = if spc_oid == GLOBALTABLESPACE_OID {
         // Shared system relations live in {datadir}/global
-        fork_suffix(&format!("global/{}", rel_number.0))
+        fork_suffix(&format!("global/{}", rel_number.get()))
     } else if spc_oid == DEFAULTTABLESPACE_OID {
         // The default tablespace is {datadir}/base
         if proc_number == INVALID_PROC_NUMBER {
-            fork_suffix(&format!("base/{}/{}", db_oid.0, rel_number.0))
+            fork_suffix(&format!("base/{}/{}", db_oid.get(), rel_number.get()))
         } else {
-            fork_suffix(&format!("base/{}/t{}_{}", db_oid.0, proc_number, rel_number.0))
+            fork_suffix(&format!("base/{}/t{}_{}", db_oid.get(), proc_number, rel_number.get()))
         }
     } else {
         // All other tablespaces are accessed via symlinks
-        let base = format!("{}/{}/{}", PG_TBLSPC_DIR, spc_oid.0, tablespace_version_directory());
+        let base = format!("{}/{}/{}", PG_TBLSPC_DIR, spc_oid.get(), tablespace_version_directory());
         if proc_number == INVALID_PROC_NUMBER {
-            fork_suffix(&format!("{base}/{}/{}", db_oid.0, rel_number.0))
+            fork_suffix(&format!("{base}/{}/{}", db_oid.get(), rel_number.get()))
         } else {
-            fork_suffix(&format!("{base}/{}/t{}_{}", db_oid.0, proc_number, rel_number.0))
+            fork_suffix(&format!("{base}/{}/t{}_{}", db_oid.get(), proc_number, rel_number.get()))
         }
     };
 

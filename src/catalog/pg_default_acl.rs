@@ -3,7 +3,7 @@
 use crate::postgres_ext::Oid;
 use crate::utils::acl::AclItem;
 
-pub const DefaultAclRelationId: Oid = Oid(826);
+pub const DefaultAclRelationId: Oid = Oid::new(826);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

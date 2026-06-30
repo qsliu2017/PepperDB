@@ -491,9 +491,9 @@ impl TupleDescData {
     pub fn hash_row_type(&self) -> u32 {
         let natts_u32 = u32::try_from(self.natts).unwrap_or(0);
         let mut s = hash_combine(0, DatumGetUInt32(hash_uint32(natts_u32)));
-        s = hash_combine(s, DatumGetUInt32(hash_uint32(self.tdtypeid.0)));
+        s = hash_combine(s, DatumGetUInt32(hash_uint32(self.tdtypeid.get())));
         for attr in &self.attrs {
-            s = hash_combine(s, DatumGetUInt32(hash_uint32(attr.atttypid.0)));
+            s = hash_combine(s, DatumGetUInt32(hash_uint32(attr.atttypid.get())));
         }
         s
     }
@@ -541,13 +541,13 @@ impl TupleDescData {
         if !HeapTupleIsValid(tuple_ref) {
             elog!(
                 crate::utils::elog::ERROR,
-                format!("cache lookup failed for type {}", oidtypeid.0)
+                format!("cache lookup failed for type {}", oidtypeid.get())
             );
         }
         let tuple = tuple.unwrap_or_else(|| {
             elog!(
                 crate::utils::elog::ERROR,
-                format!("cache lookup failed for type {}", oidtypeid.0)
+                format!("cache lookup failed for type {}", oidtypeid.get())
             );
             core::ptr::null_mut()
         });
@@ -685,7 +685,7 @@ impl TupleDescData {
         } else {
             elog!(
                 crate::utils::elog::ERROR,
-                format!("unsupported type {}", oidtypeid.0)
+                format!("unsupported type {}", oidtypeid.get())
             );
         }
 

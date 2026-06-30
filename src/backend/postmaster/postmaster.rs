@@ -341,7 +341,7 @@ fn ensure_cluster_dirs(shared: &Arc<SharedState>) {
     let _ = std::fs::create_dir_all(base.join(crate::access::xlog_internal::XLOGDIR));
     let _ = std::fs::create_dir_all(
         base.join("base")
-            .join(crate::backend::tcop::postgres::DEFAULT_DATABASE_OID.0.to_string()),
+            .join(crate::backend::tcop::postgres::DEFAULT_DATABASE_OID.get().to_string()),
     );
 }
 

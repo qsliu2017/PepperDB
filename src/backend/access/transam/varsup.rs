@@ -214,8 +214,8 @@ impl VariableCache {
         let (result, need_log, new_next) = self.with(|v| {
             // Wraparound / first post-initdb assignment handling (standalone
             // path; the postmaster-environment fork is a later concern). TODO(guc).
-            if v.next_oid.0 < FIRST_NORMAL_OBJECT_ID {
-                v.next_oid = Oid(FIRST_NORMAL_OBJECT_ID);
+            if v.next_oid.get() < FIRST_NORMAL_OBJECT_ID {
+                v.next_oid = Oid::new(FIRST_NORMAL_OBJECT_ID);
                 v.oid_count = 0;
             }
             let need_log = v.oid_count == 0;
@@ -225,7 +225,7 @@ impl VariableCache {
                 v.oid_count = VAR_OID_PREFETCH;
             }
             let result = v.next_oid;
-            v.next_oid = Oid(v.next_oid.0.wrapping_add(1));
+            v.next_oid = Oid::new(v.next_oid.get().wrapping_add(1));
             v.oid_count -= 1;
             (result, need_log, v.next_oid)
         });
@@ -236,9 +236,9 @@ impl VariableCache {
     /// varsup.c SetNextObjectId (initdb only).
     fn set_next_object_id(&self, next_oid: Oid) {
         self.with(|v| {
-            assert!(v.next_oid.0 <= next_oid.0, 
+            assert!(v.next_oid.get() <= next_oid.get(),
                 "too late to advance OID counter to {}, it is now {}",
-                next_oid.0, v.next_oid.0
+                next_oid.get(), v.next_oid.get()
             );
             v.next_oid = next_oid;
             v.oid_count = 0;
@@ -247,7 +247,7 @@ impl VariableCache {
 
     /// varsup.c StopGeneratingPinnedObjectIds (initdb only).
     pub fn stop_generating_pinned_object_ids(&self) {
-        self.set_next_object_id(Oid(FIRST_UNPINNED_OBJECT_ID));
+        self.set_next_object_id(Oid::new(FIRST_UNPINNED_OBJECT_ID));
     }
 }
 
@@ -295,7 +295,7 @@ mod tests {
         let vc = shared.variable_cache();
         let a = vc.get_new_object_id();
         let b = vc.get_new_object_id();
-        assert_ne!(a.0, 0);
-        assert_eq!(b.0, a.0 + 1);
+        assert_ne!(a.get(), 0);
+        assert_eq!(b.get(), a.get() + 1);
     }
 }

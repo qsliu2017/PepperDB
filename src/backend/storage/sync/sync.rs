@@ -80,9 +80,9 @@ impl FileTagKey {
         Self {
             handler: tag.handler,
             forknum: tag.forknum,
-            spc: tag.rlocator.spcOid.0,
-            db: tag.rlocator.dbOid.0,
-            rel: tag.rlocator.relNumber.0,
+            spc: tag.rlocator.spcOid.get(),
+            db: tag.rlocator.dbOid.get(),
+            rel: tag.rlocator.relNumber.get(),
             segno: tag.segno,
         }
     }
@@ -256,9 +256,9 @@ fn key_to_tag(k: &FileTagKey) -> FileTag {
         handler: k.handler,
         forknum: k.forknum,
         rlocator: crate::storage::relfilelocator::RelFileLocator {
-            spcOid: crate::postgres_ext::Oid(k.spc),
-            dbOid: crate::postgres_ext::Oid(k.db),
-            relNumber: crate::postgres_ext::Oid(k.rel),
+            spcOid: crate::postgres_ext::Oid::new(k.spc),
+            dbOid: crate::postgres_ext::Oid::new(k.db),
+            relNumber: crate::postgres_ext::Oid::new(k.rel),
         },
         segno: k.segno,
     }
@@ -382,9 +382,9 @@ mod tests {
             handler: SyncRequestHandler::Md as i16,
             forknum: ForkNumber::MAIN_FORKNUM as i16,
             rlocator: RelFileLocator {
-                spcOid: Oid(1663),
-                dbOid: Oid(5),
-                relNumber: Oid(rel),
+                spcOid: Oid::new(1663),
+                dbOid: Oid::new(5),
+                relNumber: Oid::new(rel),
             },
             segno,
         }
@@ -420,9 +420,9 @@ mod tests {
             handler: SyncRequestHandler::Md as i16,
             forknum: ForkNumber::InvalidForkNumber as i16,
             rlocator: RelFileLocator {
-                spcOid: Oid(0),
-                dbOid: Oid(5),
-                relNumber: Oid(0),
+                spcOid: Oid::new(0),
+                dbOid: Oid::new(5),
+                relNumber: Oid::new(0),
             },
             segno: 0,
         };

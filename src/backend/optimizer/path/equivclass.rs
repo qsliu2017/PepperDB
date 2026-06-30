@@ -323,7 +323,7 @@ fn commit_ri_ec(
 /// PG case-2 merge: fold `eq_classes[i2]` into `eq_classes[i1]`, mark ec2 merged,
 /// and remove ec2's entry. Operates by index per the module's representation note.
 fn merge_eclasses(root: &mut PlannerInfo, i1: usize, i2: usize) {
-    let ec2 = std::mem::replace(&mut root.eq_classes[i2], Box::new(new_eclass(Vec::new(), Oid(0), 0)));
+    let ec2 = std::mem::replace(&mut root.eq_classes[i2], Box::new(new_eclass(Vec::new(), Oid::new(0), 0)));
     let ec2_members = ec2.members;
     let ec2_sources = ec2.sources;
     let ec2_derives = ec2.derives_list;
@@ -1333,9 +1333,9 @@ mod tests {
     use crate::nodes::pathnodes::{PlannerGlobal, QualCost, RelOptKind, VolatileFunctionStatus};
     use crate::nodes::primnodes::{OverridingKind, Var, VarReturningType};
 
-    const INT4OID: Oid = Oid(23);
-    const INT4EQ: Oid = Oid(96); // pg_proc/pg_operator OID of int4eq's operator (=)
-    const BTREE_INT4_OPF: Oid = Oid(1976);
+    const INT4OID: Oid = Oid::new(23);
+    const INT4EQ: Oid = Oid::new(96); // pg_proc/pg_operator OID of int4eq's operator (=)
+    const BTREE_INT4_OPF: Oid = Oid::new(1976);
 
     fn make_var(varno: i32, attno: i16) -> Node {
         Node::Var(Box::new(Var {

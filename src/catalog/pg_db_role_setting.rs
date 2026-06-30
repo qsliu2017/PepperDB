@@ -8,7 +8,7 @@ use crate::utils::snapshot::Snapshot;
 use std::sync::Arc;
 use crate::utils::rel::RelationData;
 
-pub const DbRoleSettingRelationId: Oid = Oid(2964);
+pub const DbRoleSettingRelationId: Oid = Oid::new(2964);
 
 // CATALOG(pg_db_role_setting,2964,DbRoleSettingRelationId) BKI_SHARED_RELATION
 #[repr(C)]

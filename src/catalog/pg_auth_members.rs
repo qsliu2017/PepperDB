@@ -3,8 +3,8 @@
 use crate::postgres_ext::Oid;
 
 // BKI_SHARED_RELATION BKI_ROWTYPE_OID(2843,AuthMemRelation_Rowtype_Id) BKI_SCHEMA_MACRO
-pub const AuthMemRelationId: Oid = Oid(1261);
-pub const AuthMemRelation_Rowtype_Id: Oid = Oid(2843);
+pub const AuthMemRelationId: Oid = Oid::new(1261);
+pub const AuthMemRelation_Rowtype_Id: Oid = Oid::new(2843);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

@@ -186,7 +186,7 @@ impl SInvalBuffer {
             .map(|_| {
                 UnsafeCell::new(SharedInvalidationMessage::Relmap(
                     crate::storage::sinval::SharedInvalRelmapMsg {
-                        db_id: crate::postgres_ext::Oid(0),
+                        db_id: crate::postgres_ext::Oid::new(0),
                     },
                 ))
             })
@@ -607,8 +607,8 @@ mod tests {
 
     fn relcache_msg(rel: u32) -> SharedInvalidationMessage {
         SharedInvalidationMessage::Relcache(SharedInvalRelcacheMsg {
-            db_id: Oid(1),
-            rel_id: Oid(rel),
+            db_id: Oid::new(1),
+            rel_id: Oid::new(rel),
         })
     }
 

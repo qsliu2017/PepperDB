@@ -3,8 +3,8 @@
 use crate::c::text;
 use crate::postgres_ext::Oid;
 
-pub const SharedSecLabelRelationId: Oid = Oid(3592); // BKI_SHARED_RELATION
-pub const SharedSecLabelRelation_Rowtype_Id: Oid = Oid(4066); // BKI_ROWTYPE_OID
+pub const SharedSecLabelRelationId: Oid = Oid::new(3592); // BKI_SHARED_RELATION
+pub const SharedSecLabelRelation_Rowtype_Id: Oid = Oid::new(4066); // BKI_ROWTYPE_OID
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

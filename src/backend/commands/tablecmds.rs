@@ -32,7 +32,7 @@ use crate::postgres_ext::{InvalidOid, Oid};
 use crate::shared_state::SharedState;
 
 /// The heap table access method OID (`pg_am`: heap). M2 has a single AM.
-const HEAP_TABLE_AM_OID: Oid = Oid(2);
+const HEAP_TABLE_AM_OID: Oid = Oid::new(2);
 
 /// Panic for a DefineRelation feature path not yet translated (rules.md s4).
 #[cold]
@@ -826,7 +826,7 @@ async fn store_check_constraint(
     relid: Oid,
     con: &crate::nodes::parsenodes::Constraint,
 ) {
-    let conname = con.conname.clone().unwrap_or_else(|| format!("{}_check", relid.0));
+    let conname = con.conname.clone().unwrap_or_else(|| format!("{}_check", relid.get()));
     let raw = con
         .raw_expr
         .as_ref()
@@ -1066,7 +1066,7 @@ mod tests {
     };
 
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    const DB_OID: Oid = Oid(90000);
+    const DB_OID: Oid = Oid::new(90000);
 
     fn new_shared() -> Arc<SharedState> {
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1239,7 +1239,7 @@ mod tests {
             let relid = range_var_get_relid(&shared, None, "t").await;
             assert!(relid.is_some(), "the new table resolves by name");
             let relid = relid.unwrap();
-            assert!(relid.0 != 0);
+            assert!(relid.get() != 0);
 
             // Its heap storage exists on disk.
             let loc = crate::storage::relfilelocator::RelFileLocator {
@@ -1265,7 +1265,7 @@ mod tests {
                 let natts = rd.rd_att.as_ref().unwrap().natts;
                 assert_eq!(natts, 1, "the rebuilt descriptor has the one user column");
                 let att0 = rd.rd_att.as_ref().unwrap().attr(0);
-                assert_eq!(att0.atttypid, Oid(23), "column a is int4");
+                assert_eq!(att0.atttypid, Oid::new(23), "column a is int4");
             }
         }))
         .await;
@@ -1413,7 +1413,7 @@ mod tests {
 
             run_util(&shared, "ALTER TABLE t RENAME TO t2").await;
             refresh_active_snapshot(&shared);
-            relation_forget_relation(range_var_get_relid(&shared, None, "t2").await.unwrap_or(Oid(0)));
+            relation_forget_relation(range_var_get_relid(&shared, None, "t2").await.unwrap_or(Oid::new(0)));
 
             assert!(range_var_get_relid(&shared, None, "t2").await.is_some(), "t2 resolves");
             assert!(range_var_get_relid(&shared, None, "t").await.is_none(), "old name gone");

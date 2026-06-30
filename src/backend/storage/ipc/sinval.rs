@@ -79,7 +79,7 @@ impl ReceiveState {
         // A dummy fill value; cells are never read before being written by
         // SIGetDataEntries (nummsgs gates reads). Relmap is the cheapest variant.
         let dummy = SharedInvalidationMessage::Relmap(crate::storage::sinval::SharedInvalRelmapMsg {
-            db_id: crate::postgres_ext::Oid(0),
+            db_id: crate::postgres_ext::Oid::new(0),
         });
         Self {
             messages: [dummy; MAXINVALMSGS],
@@ -270,8 +270,8 @@ mod tests {
 
     fn relcache_msg(rel: u32) -> SharedInvalidationMessage {
         SharedInvalidationMessage::Relcache(SharedInvalRelcacheMsg {
-            db_id: Oid(1),
-            rel_id: Oid(rel),
+            db_id: Oid::new(1),
+            rel_id: Oid::new(rel),
         })
     }
 
@@ -394,7 +394,7 @@ mod tests {
 
             let mut got = seen.into_inner();
             got.sort_by_key(|m| match m {
-                SharedInvalidationMessage::Relcache(r) => r.rel_id.0,
+                SharedInvalidationMessage::Relcache(r) => r.rel_id.get(),
                 _ => u32::MAX,
             });
             let expect: Vec<_> = (0..5).map(relcache_msg).collect();

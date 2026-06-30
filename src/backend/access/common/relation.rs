@@ -44,7 +44,7 @@ pub async fn relation_open(relation_id: Oid, lockmode: LockMode) -> Arc<Relation
     let r = RelationIdGetRelation(relation_id);
 
     if !relation_is_valid(&r) {
-        elog!(ERROR, format!("could not open relation with OID {}", relation_id.0));
+        elog!(ERROR, format!("could not open relation with OID {}", relation_id.get()));
     }
     let r = r.unwrap_or_else(|| unreachable!("relation_is_valid checked above"));
 
@@ -87,7 +87,7 @@ pub async fn try_relation_open(relation_id: Oid, lockmode: LockMode) -> Option<A
     let r = RelationIdGetRelation(relation_id);
 
     if !relation_is_valid(&r) {
-        elog!(ERROR, format!("could not open relation with OID {}", relation_id.0));
+        elog!(ERROR, format!("could not open relation with OID {}", relation_id.get()));
     }
     let r = r.unwrap_or_else(|| unreachable!("relation_is_valid checked above"));
 

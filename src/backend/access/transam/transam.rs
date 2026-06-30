@@ -55,7 +55,7 @@ impl VariableCache {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(TransamVariablesData {
-                next_oid: crate::postgres_ext::Oid(0),
+                next_oid: crate::postgres_ext::Oid::new(0),
                 oid_count: 0,
                 next_xid: crate::access::transam::FIRST_NORMAL_FULL_TRANSACTION_ID,
                 oldest_xid: crate::access::transam::FIRST_NORMAL_TRANSACTION_ID,
@@ -63,7 +63,7 @@ impl VariableCache {
                 xid_warn_limit: TransactionId(0),
                 xid_stop_limit: TransactionId(0),
                 xid_wrap_limit: TransactionId(0),
-                oldest_xid_db: crate::postgres_ext::Oid(0),
+                oldest_xid_db: crate::postgres_ext::Oid::new(0),
                 oldest_commit_ts_xid: TransactionId(0),
                 newest_commit_ts_xid: TransactionId(0),
                 latest_completed_xid: crate::access::transam::FIRST_NORMAL_FULL_TRANSACTION_ID,

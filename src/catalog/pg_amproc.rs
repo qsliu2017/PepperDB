@@ -3,7 +3,7 @@
 use crate::c::regproc;
 use crate::postgres_ext::Oid;
 
-pub const AccessMethodProcedureRelationId: Oid = Oid(2603);
+pub const AccessMethodProcedureRelationId: Oid = Oid::new(2603);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

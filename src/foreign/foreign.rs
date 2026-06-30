@@ -58,7 +58,7 @@ pub struct ForeignTable {
 
 /// MappingUserName(userid): username for a user mapping, "public" if invalid.
 pub fn MappingUserName(userid: Oid) -> String {
-    if userid == Oid(0) {
+    if userid == Oid::new(0) {
         "public".to_string()
     } else {
         GetUserNameFromId(userid, false)

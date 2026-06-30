@@ -85,7 +85,7 @@ pub async fn type_create(
     type_not_null: bool,
     type_collation: Oid,
 ) -> ObjectAddress {
-    assert!(new_type_oid.0 != 0, "M2 TypeCreate requires a predetermined OID");
+    assert!(new_type_oid.is_valid(), "M2 TypeCreate requires a predetermined OID");
 
     let pg_type = relation_id_get_relation(TypeRelationId)
         .unwrap_or_else(|| unreachable!("pg_type is nailed/open"));

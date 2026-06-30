@@ -4,7 +4,7 @@ use crate::c::TransactionId;
 use crate::postgres_ext::Oid;
 use crate::storage::lock::LOCKMODE;
 
-pub const InheritsRelationId: Oid = Oid(2611);
+pub const InheritsRelationId: Oid = Oid::new(2611);
 
 /// pg_inherits has no implicit oid column.
 #[repr(C)]

@@ -45,11 +45,11 @@ use crate::shared_state::SharedState;
 use crate::storage::relfilelocator::RelFileLocator;
 use crate::utils::rel::{LockInfoData, LockRelId, RelationData};
 
-const INT4OID: Oid = Oid(23);
-const INT4_BTREE_OPS_OID: Oid = Oid(1978);
-const INT4_EQ: Oid = Oid(96);
-const INT4_LT: Oid = Oid(97);
-const INT4_GT: Oid = Oid(521);
+const INT4OID: Oid = Oid::new(23);
+const INT4_BTREE_OPS_OID: Oid = Oid::new(1978);
+const INT4_EQ: Oid = Oid::new(96);
+const INT4_LT: Oid = Oid::new(97);
+const INT4_GT: Oid = Oid::new(521);
 
 static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -87,7 +87,7 @@ where
 }
 
 fn rloc(rel: u32) -> RelFileLocator {
-    RelFileLocator { spcOid: Oid(1663), dbOid: Oid(90000), relNumber: Oid(83000 + rel) }
+    RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(90000), relNumber: Oid::new(83000 + rel) }
 }
 
 fn one_int4_desc() -> crate::access::tupdesc::TupleDesc {
@@ -108,7 +108,7 @@ fn make_relation(
     form.relkind = relkind;
     form.relpersistence = RELPERSISTENCE_PERMANENT;
     form.relnatts = tupdesc.natts as i16;
-    form.relam = Oid(403);
+    form.relam = Oid::new(403);
     let mut rel = RelationData::blank();
     rel.rd_locator = locator;
     rel.rd_refcnt.store(1, Ordering::Relaxed);
@@ -177,7 +177,7 @@ fn index_info(nkeys: i32) -> crate::nodes::execnodes::IndexInfo {
         summarizing: false,
         without_overlaps: false,
         parallel_workers: 0,
-        am: Oid(403),
+        am: Oid::new(403),
         am_cache: Default::default(),
         context: Default::default(),
     }
@@ -220,9 +220,9 @@ fn project_col_a(desc: &crate::access::tupdesc::TupleDesc) -> Vec<Node> {
 
 fn op_proc(op: Oid) -> Oid {
     match op {
-        INT4_EQ => Oid(65),  // int4eq
-        INT4_LT => Oid(66),  // int4lt
-        INT4_GT => Oid(147), // int4gt
+        INT4_EQ => Oid::new(65),  // int4eq
+        INT4_LT => Oid::new(66),  // int4lt
+        INT4_GT => Oid::new(147), // int4gt
         _ => unreachable!("test uses only int4 = / < / >"),
     }
 }
@@ -232,7 +232,7 @@ fn index_qual(op: Oid, value: i32) -> Node {
     let rightconst = make_const(INT4OID, -1, InvalidOid, 4, Int32GetDatum(value), false, true);
     let mut clause = make_opclause(
         op,
-        Oid(16),
+        Oid::new(16),
         false,
         Some(Node::Var(Box::new(leftvar))),
         Some(Node::Const(Box::new(rightconst))),
@@ -251,7 +251,7 @@ fn heap_qual(op: Oid, value: i32) -> Node {
     let rightconst = make_const(INT4OID, -1, InvalidOid, 4, Int32GetDatum(value), false, true);
     let mut clause = make_opclause(
         op,
-        Oid(16),
+        Oid::new(16),
         false,
         Some(Node::Var(Box::new(leftvar))),
         Some(Node::Const(Box::new(rightconst))),

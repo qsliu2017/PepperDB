@@ -100,7 +100,7 @@ fn with_state<R>(f: impl FnOnce(&mut RelCacheState) -> R) -> Option<R> {
 
 /// Look up a cached relation by OID, returning an `Arc` clone of the entry.
 fn cache_lookup(relid: Oid) -> Option<Arc<RelationData>> {
-    with_state(|st| st.by_oid.get(&relid.0).map(Arc::clone)).flatten()
+    with_state(|st| st.by_oid.get(&relid.get()).map(Arc::clone)).flatten()
 }
 
 /// Insert a freshly built relation; return an `Arc` clone of the stored entry.
@@ -108,7 +108,7 @@ fn cache_lookup(relid: Oid) -> Option<Arc<RelationData>> {
 fn cache_insert(rel: RelationData) -> Arc<RelationData> {
     let rel = Arc::new(rel);
     with_state(|st| {
-        let oid = rel.rd_id.0;
+        let oid = rel.rd_id.get();
         Arc::clone(st.by_oid.entry(oid).or_insert(rel))
     })
     .unwrap_or_else(|| unreachable!("relcache state must be established to insert"))
@@ -151,7 +151,7 @@ pub fn relation_close(relation: Arc<RelationData>) {
 /// handles); a no-op if the relation is not cached or is shared.
 pub fn update_relation_stats(relid: Oid, relpages: i32, reltuples: f32) {
     with_state(|st| {
-        let Some(entry) = st.by_oid.get_mut(&relid.0) else { return };
+        let Some(entry) = st.by_oid.get_mut(&relid.get()) else { return };
         let Some(rel) = Arc::get_mut(entry) else { return };
         if let Some(form) = rel.rd_rel.as_deref_mut() {
             form.relpages = relpages;
@@ -170,7 +170,7 @@ pub fn relation_forget_relation(relid: Oid) -> bool {
     if is_nailed_catalog(relid) {
         return false;
     }
-    with_state(|st| st.by_oid.remove(&relid.0).is_some()).unwrap_or(false)
+    with_state(|st| st.by_oid.remove(&relid.get()).is_some()).unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -583,7 +583,7 @@ pub fn index_init_opclass_support(
 #[must_use]
 pub fn btree_opclass_cmp_proc(opclass: Oid) -> Oid {
     use crate::utils::fmgroids as f;
-    match opclass.0 {
+    match opclass.get() {
         1978 => f::F_BTINT4CMP, // INT4_BTREE_OPS_OID
         1979 => f::F_BTINT2CMP, // INT2_BTREE_OPS_OID
         3124 => f::F_BTINT8CMP, // INT8_BTREE_OPS_OID
@@ -597,12 +597,12 @@ pub fn btree_opclass_cmp_proc(opclass: Oid) -> Oid {
 /// syscache would return). M2 builtin set.
 #[must_use]
 fn btree_opclass_intype(opclass: Oid) -> Oid {
-    match opclass.0 {
-        1978 => Oid(23),  // int4
-        1979 => Oid(21),  // int2
-        3124 => Oid(20),  // int8
-        1981 => Oid(26),  // oid
-        3126 => Oid(25),  // text
+    match opclass.get() {
+        1978 => Oid::new(23),  // int4
+        1979 => Oid::new(21),  // int2
+        3124 => Oid::new(20),  // int8
+        1981 => Oid::new(26),  // oid
+        3126 => Oid::new(25),  // text
         _ => crate::postgres_ext::InvalidOid,
     }
 }
@@ -611,8 +611,8 @@ fn btree_opclass_intype(opclass: Oid) -> Oid {
 // helpers
 // ---------------------------------------------------------------------------
 
-const PG_CATALOG_NAMESPACE: Oid = Oid(11);
-const HEAP_TABLE_AM_OID: Oid = Oid(2); // pg_am: heap
+const PG_CATALOG_NAMESPACE: Oid = Oid::new(11);
+const HEAP_TABLE_AM_OID: Oid = Oid::new(2); // pg_am: heap
 
 fn namestrcpy(name: &mut crate::c::NameData, src: &str) {
     let bytes = src.as_bytes();

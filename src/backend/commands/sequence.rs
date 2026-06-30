@@ -124,7 +124,7 @@ fn init_params(options: &[Node]) -> SeqParams {
 }
 
 /// The default-heap-AM OID (pg_am `heap`). Sequences are stored as heap relations.
-const HEAP_TABLE_AM_OID: Oid = Oid(2);
+const HEAP_TABLE_AM_OID: Oid = Oid::new(2);
 
 /// The three-column tuple descriptor of a sequence relation: `last_value int8`,
 /// `log_cnt int8`, `is_called bool`. Built directly (PG forms `ColumnDef`s and runs
@@ -342,7 +342,7 @@ pub async fn currval(shared: &Arc<SharedState>, seqrelid: Oid) -> i64 {
     if !is_called {
         crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
             e.errcode(crate::utils::errcodes::ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE).errmsg(
-                format!("currval of sequence with relid {} is not yet defined in this session", seqrelid.0),
+                format!("currval of sequence with relid {} is not yet defined in this session", seqrelid.get()),
             );
         });
         unreachable!("ereport(ERROR) diverges");
@@ -359,7 +359,7 @@ pub async fn setval(shared: &Arc<SharedState>, seqrelid: Oid, next: i64, iscalle
     if next < p.minvalue || next > p.maxvalue {
         crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
             e.errcode(crate::utils::errcodes::ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE)
-                .errmsg(format!("setval: value {next} is out of bounds for sequence (relid {})", seqrelid.0));
+                .errmsg(format!("setval: value {next} is out of bounds for sequence (relid {})", seqrelid.get()));
         });
         unreachable!("ereport(ERROR) diverges");
     }
@@ -374,7 +374,7 @@ fn seq_range_error(seqrelid: Oid, ascending: bool) -> ! {
     let dir = if ascending { "maximum" } else { "minimum" };
     crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(crate::utils::errcodes::ERRCODE_SEQUENCE_GENERATOR_LIMIT_EXCEEDED)
-            .errmsg(format!("nextval: reached {dir} value of sequence (relid {})", seqrelid.0));
+            .errmsg(format!("nextval: reached {dir} value of sequence (relid {})", seqrelid.get()));
     });
     unreachable!("ereport(ERROR) diverges");
 }
@@ -564,7 +564,7 @@ async fn read_pg_sequence_row(shared: &Arc<SharedState>, seqrelid: Oid) -> SeqPa
 
 /// Read an OID-typed Datum (a 32-bit value carried in a Datum).
 fn oid_from_datum(d: Datum) -> Oid {
-    Oid(d.0 as u32)
+    Oid::new(d.0 as u32)
 }
 
 /// Delete a sequence's pg_sequence catalog row (the ALTER re-store path).
@@ -629,7 +629,7 @@ mod tests {
     use crate::shared_state::{SharedState, SharedStateConfig};
 
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    const DB_OID: Oid = Oid(90000);
+    const DB_OID: Oid = Oid::new(90000);
 
     fn new_shared() -> Arc<SharedState> {
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

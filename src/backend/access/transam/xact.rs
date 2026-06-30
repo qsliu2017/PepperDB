@@ -207,7 +207,7 @@ impl TransactionStateData {
             nesting_level: 0,
             guc_nest_level: 0,
             child_xids: Vec::new(),
-            prev_user: crate::postgres_ext::Oid(0),
+            prev_user: crate::postgres_ext::Oid::new(0),
             prev_sec_context: 0,
             prev_xact_read_only: false,
             started_in_recovery: false,
@@ -2390,7 +2390,7 @@ fn push_transaction() {
             guc_nest_level: p.guc_nest_level + 1, // NewGUCNestLevel (GUC deferred)
             child_xids: Vec::new(),
             prev_user: crate::session::try_current()
-                .map_or(crate::postgres_ext::Oid(0), |s| s.current_user_id()),
+                .map_or(crate::postgres_ext::Oid::new(0), |s| s.current_user_id()),
             prev_sec_context: crate::session::try_current()
                 .map_or(0, |s| s.sec_context()),
             prev_xact_read_only: x.xact_read_only,
@@ -2640,9 +2640,9 @@ fn relfilelocators_header_bytes(n: usize) -> Vec<u8> {
 fn relfilelocators_to_bytes(rels: &[RelFileLocator]) -> Vec<u8> {
     let mut v = Vec::with_capacity(rels.len() * 12);
     for r in rels {
-        v.extend_from_slice(&r.spcOid.0.to_ne_bytes());
-        v.extend_from_slice(&r.dbOid.0.to_ne_bytes());
-        v.extend_from_slice(&r.relNumber.0.to_ne_bytes());
+        v.extend_from_slice(&r.spcOid.get().to_ne_bytes());
+        v.extend_from_slice(&r.dbOid.get().to_ne_bytes());
+        v.extend_from_slice(&r.relNumber.get().to_ne_bytes());
     }
     v
 }

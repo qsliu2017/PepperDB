@@ -163,7 +163,7 @@ pub fn restriction_selectivity(
     args: &[Node],
     var_relid: i32,
 ) -> Selectivity {
-    match oprrest.0 {
+    match oprrest.get() {
         F_EQSEL => eqsel(root, operator, args, var_relid),
         F_NEQSEL => neqsel(root, operator, args, var_relid),
         F_SCALARLTSEL | F_SCALARGTSEL | F_SCALARLESEL | F_SCALARGESEL => {
@@ -183,7 +183,7 @@ pub fn join_selectivity(
     jointype: JoinType,
     sjinfo: &SpecialJoinInfo,
 ) -> Selectivity {
-    match oprjoin.0 {
+    match oprjoin.get() {
         F_EQJOINSEL => eqjoinsel(root, operator, args, jointype, sjinfo),
         F_NEQJOINSEL => neqjoinsel(root, operator, args, jointype, sjinfo),
         F_SCALARLTJOINSEL | F_SCALARGTJOINSEL | F_SCALARLEJOINSEL | F_SCALARGEJOINSEL => {
@@ -225,21 +225,21 @@ mod tests {
     #[test]
     fn eqsel_no_stats_is_default_eq_sel() {
         let mut root = root();
-        let s = eqsel(&mut root, Oid(96), &[], 1);
+        let s = eqsel(&mut root, Oid::new(96), &[], 1);
         assert!((s - DEFAULT_EQ_SEL).abs() < 1e-12, "eqsel no-stats = 1/200 = {DEFAULT_EQ_SEL}");
     }
 
     #[test]
     fn neqsel_no_stats_is_one_minus_default() {
         let mut root = root();
-        let s = neqsel(&mut root, Oid(96), &[], 1);
+        let s = neqsel(&mut root, Oid::new(96), &[], 1);
         assert!((s - (1.0 - DEFAULT_EQ_SEL)).abs() < 1e-12);
     }
 
     #[test]
     fn scalarltsel_no_stats_is_default_ineq() {
         let mut root = root();
-        let s = scalarineqsel_default(&mut root, Oid(97), &[], 1);
+        let s = scalarineqsel_default(&mut root, Oid::new(97), &[], 1);
         assert!((s - DEFAULT_INEQ_SEL).abs() < 1e-12);
     }
 
@@ -247,7 +247,7 @@ mod tests {
     fn eqjoinsel_no_stats_is_one_over_max_nd() {
         let mut root = root();
         let sj = sjinfo();
-        let s = eqjoinsel(&mut root, Oid(96), &[], JoinType::INNER, &sj);
+        let s = eqjoinsel(&mut root, Oid::new(96), &[], JoinType::INNER, &sj);
         // 1 / max(200, 200) = 1/200 = DEFAULT_EQ_SEL.
         assert!((s - 1.0 / DEFAULT_NUM_DISTINCT).abs() < 1e-12);
         assert!((s - DEFAULT_EQ_SEL).abs() < 1e-12);
@@ -257,14 +257,14 @@ mod tests {
     fn restriction_and_join_dispatch_by_proc_oid() {
         let mut root = root();
         // oprrest = eqsel (101) -> DEFAULT_EQ_SEL.
-        let r = restriction_selectivity(&mut root, Oid(F_EQSEL), Oid(96), &[], 1);
+        let r = restriction_selectivity(&mut root, Oid::new(F_EQSEL), Oid::new(96), &[], 1);
         assert!((r - DEFAULT_EQ_SEL).abs() < 1e-12);
         // oprrest = scalarltsel (103) -> DEFAULT_INEQ_SEL.
-        let r = restriction_selectivity(&mut root, Oid(F_SCALARLTSEL), Oid(97), &[], 1);
+        let r = restriction_selectivity(&mut root, Oid::new(F_SCALARLTSEL), Oid::new(97), &[], 1);
         assert!((r - DEFAULT_INEQ_SEL).abs() < 1e-12);
         // oprjoin = eqjoinsel (105) -> 1/200.
         let sj = sjinfo();
-        let j = join_selectivity(&mut root, Oid(F_EQJOINSEL), Oid(96), &[], JoinType::INNER, &sj);
+        let j = join_selectivity(&mut root, Oid::new(F_EQJOINSEL), Oid::new(96), &[], JoinType::INNER, &sj);
         assert!((j - DEFAULT_EQ_SEL).abs() < 1e-12);
         let _ = InvalidOid;
     }

@@ -215,7 +215,7 @@ fn lookup_aggregate(aggfnoid: Oid) -> (Oid, Oid, Oid, Option<Datum>) {
     else {
         crate::elog!(
             crate::utils::elog::ERROR,
-            format!("cache lookup failed for aggregate {} (AGGFNOID not warm)", aggfnoid.0)
+            format!("cache lookup failed for aggregate {} (AGGFNOID not warm)", aggfnoid.get())
         );
         unreachable!("elog!(ERROR) raises")
     };
@@ -247,7 +247,7 @@ fn lookup_aggregate(aggfnoid: Oid) -> (Oid, Oid, Oid, Option<Datum>) {
 fn agg_initval(aggfnoid: Oid, transtype: Oid) -> Option<Datum> {
     use crate::catalog::genbki::INT8OID;
     // count() = 2803, count(any) = 2147 -> int8 initval 0.
-    if (aggfnoid.0 == 2803 || aggfnoid.0 == 2147) && transtype == INT8OID {
+    if (aggfnoid.get() == 2803 || aggfnoid.get() == 2147) && transtype == INT8OID {
         return Some(Int64GetDatum(0));
     }
     None
@@ -657,8 +657,8 @@ mod tests {
     use crate::postgres::{DatumGetInt32, DatumGetInt64, Int32GetDatum};
     use crate::shared_state::{SharedState, SharedStateConfig};
 
-    const INT4OID: Oid = Oid(23);
-    const INT8OID: Oid = Oid(20);
+    const INT4OID: Oid = Oid::new(23);
+    const INT8OID: Oid = Oid::new(20);
     const INVALID: Oid = crate::postgres_ext::InvalidOid;
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -768,7 +768,7 @@ mod tests {
         Agg {
             plan: empty_plan(targetlist),
             aggstrategy: strategy, aggsplit: AggSplit::SIMPLE, num_cols: n,
-            grp_col_idx: grp_cols, grp_operators: vec![Oid(96); n as usize],
+            grp_col_idx: grp_cols, grp_operators: vec![Oid::new(96); n as usize],
             grp_collations: vec![INVALID; n as usize], num_groups: 0, transition_space: 0,
             agg_params: None, grouping_sets: Vec::new(), chain: Vec::new(),
         }
@@ -799,7 +799,7 @@ mod tests {
                 let desc = int4_desc(1);
                 let child = make_source(&desc, vec![vec![1], vec![2], vec![3], vec![4]]);
                 // count() = aggfnoid 2803, returns int8.
-                let tlist = vec![te(Node::Aggref(Box::new(aggref(Oid(2803), INT8OID, None, 0))), 1)];
+                let tlist = vec![te(Node::Aggref(Box::new(aggref(Oid::new(2803), INT8OID, None, 0))), 1)];
                 run_agg(agg_node(AggStrategy::PLAIN, tlist, vec![]), child, 1).await
             })
             .await;
@@ -814,7 +814,7 @@ mod tests {
             let got = with_initdb(new_shared(), |_s| async move {
                 let desc = int4_desc(1);
                 let child = make_source(&desc, vec![]);
-                let tlist = vec![te(Node::Aggref(Box::new(aggref(Oid(2803), INT8OID, None, 0))), 1)];
+                let tlist = vec![te(Node::Aggref(Box::new(aggref(Oid::new(2803), INT8OID, None, 0))), 1)];
                 run_agg(agg_node(AggStrategy::PLAIN, tlist, vec![]), child, 1).await
             })
             .await;
@@ -831,8 +831,8 @@ mod tests {
                 let child = make_source(&desc, vec![vec![10], vec![20], vec![30]]);
                 // sum(int4) = aggfnoid 2108 (-> int8), input column a (attno 1).
                 let tlist = vec![
-                    te(Node::Aggref(Box::new(aggref(Oid(2803), INT8OID, None, 0))), 1),
-                    te(Node::Aggref(Box::new(aggref(Oid(2108), INT8OID, Some(1), 1))), 2),
+                    te(Node::Aggref(Box::new(aggref(Oid::new(2803), INT8OID, None, 0))), 1),
+                    te(Node::Aggref(Box::new(aggref(Oid::new(2108), INT8OID, Some(1), 1))), 2),
                 ];
                 run_agg(agg_node(AggStrategy::PLAIN, tlist, vec![]), child, 2).await
             })
@@ -850,8 +850,8 @@ mod tests {
                 let child = make_source(&desc, vec![vec![5], vec![2], vec![9], vec![3]]);
                 // min(int4) = 2132, max(int4) = 2116, both -> int4.
                 let tlist = vec![
-                    te(Node::Aggref(Box::new(aggref(Oid(2132), INT4OID, Some(1), 0))), 1),
-                    te(Node::Aggref(Box::new(aggref(Oid(2116), INT4OID, Some(1), 1))), 2),
+                    te(Node::Aggref(Box::new(aggref(Oid::new(2132), INT4OID, Some(1), 0))), 1),
+                    te(Node::Aggref(Box::new(aggref(Oid::new(2116), INT4OID, Some(1), 1))), 2),
                 ];
                 run_agg(agg_node(AggStrategy::PLAIN, tlist, vec![]), child, 2).await
             })
@@ -874,7 +874,7 @@ mod tests {
                 // targetlist: a (Var), count(*) (Aggref) -> result cols (a int4, count int8).
                 let tlist = vec![
                     te(Node::Var(Box::new(crate::backend::nodes::makefuncs::make_var(1, 1, INT4OID, -1, INVALID, 0))), 1),
-                    te(Node::Aggref(Box::new(aggref(Oid(2803), INT8OID, None, 0))), 2),
+                    te(Node::Aggref(Box::new(aggref(Oid::new(2803), INT8OID, None, 0))), 2),
                 ];
                 run_agg(agg_node(AggStrategy::SORTED, tlist, vec![1]), child, 2).await
             })
@@ -898,7 +898,7 @@ mod tests {
                 let child = make_source(&desc, vec![vec![2], vec![1], vec![2], vec![3], vec![1], vec![2]]);
                 let tlist = vec![
                     te(Node::Var(Box::new(crate::backend::nodes::makefuncs::make_var(1, 1, INT4OID, -1, INVALID, 0))), 1),
-                    te(Node::Aggref(Box::new(aggref(Oid(2803), INT8OID, None, 0))), 2),
+                    te(Node::Aggref(Box::new(aggref(Oid::new(2803), INT8OID, None, 0))), 2),
                 ];
                 run_agg(agg_node(AggStrategy::HASHED, tlist, vec![1]), child, 2).await
             })

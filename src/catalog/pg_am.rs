@@ -3,7 +3,7 @@
 use crate::c::{regproc, NameData};
 use crate::postgres_ext::Oid;
 
-pub const AccessMethodRelationId: Oid = Oid(2601);
+pub const AccessMethodRelationId: Oid = Oid::new(2601);
 
 // `Anum_pg_am_*` and `Natts_pg_am` are emitted by #[derive(Catalog)] from the
 // field order below (replacing genbki's pg_am_d.h consts).

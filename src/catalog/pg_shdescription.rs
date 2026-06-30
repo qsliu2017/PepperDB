@@ -3,7 +3,7 @@
 use crate::c::text;
 use crate::postgres_ext::Oid;
 
-pub const SharedDescriptionRelationId: Oid = Oid(2396); // BKI_SHARED_RELATION
+pub const SharedDescriptionRelationId: Oid = Oid::new(2396); // BKI_SHARED_RELATION
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

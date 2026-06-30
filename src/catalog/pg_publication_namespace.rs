@@ -2,7 +2,7 @@
 
 use crate::postgres_ext::Oid;
 
-pub const PublicationNamespaceRelationId: Oid = Oid(6237);
+pub const PublicationNamespaceRelationId: Oid = Oid::new(6237);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

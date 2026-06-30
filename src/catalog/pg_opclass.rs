@@ -4,7 +4,7 @@ use crate::c::NameData;
 use crate::postgres_ext::Oid;
 
 // CATALOG(pg_opclass,2616,OperatorClassRelationId)
-pub const OperatorClassRelationId: Oid = Oid(2616);
+pub const OperatorClassRelationId: Oid = Oid::new(2616);
 
 /// On-disk catalog row for pg_opclass.
 #[repr(C)]
@@ -24,7 +24,7 @@ pub struct FormData_pg_opclass {
 pub type Form_pg_opclass = *mut FormData_pg_opclass; // TODO(ptr)
 
 // DECLARE_UNIQUE_INDEX(pg_opclass_am_name_nsp_index, 2686, OpclassAmNameNspIndexId, ...)
-pub const OpclassAmNameNspIndexId: Oid = Oid(2686);
+pub const OpclassAmNameNspIndexId: Oid = Oid::new(2686);
 // DECLARE_UNIQUE_INDEX_PKEY(pg_opclass_oid_index, 2687, OpclassOidIndexId, ...)
-pub const OpclassOidIndexId: Oid = Oid(2687);
+pub const OpclassOidIndexId: Oid = Oid::new(2687);
 // MAKE_SYSCACHE(CLAAMNAMENSP, ...); MAKE_SYSCACHE(CLAOID, ...) - syscaches (later)

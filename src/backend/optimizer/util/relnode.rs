@@ -745,7 +745,7 @@ mod tests {
         Node::Var(Box::new(Var {
             varno,
             varattno,
-            vartype: crate::postgres_ext::Oid(23),
+            vartype: crate::postgres_ext::Oid::new(23),
             vartypmod: -1,
             varcollid: InvalidOid,
             varnullingrels: None,

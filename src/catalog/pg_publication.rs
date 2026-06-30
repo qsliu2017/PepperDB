@@ -13,7 +13,7 @@ use crate::utils::rel::RelationData;
 // pg_list tombstoned; these `List *` values are node/relation lists.
 type List = Vec<Node>;
 
-pub const PublicationRelationId: Oid = Oid(6104);
+pub const PublicationRelationId: Oid = Oid::new(6104);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

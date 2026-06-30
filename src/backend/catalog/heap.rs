@@ -49,8 +49,8 @@ use crate::storage::relfilelocator::RelFileLocator;
 use crate::storage::smgr::SmgrRelation;
 use crate::utils::rel::{LockInfoData, LockRelId, RelationData};
 
-const HEAP_TABLE_AM_OID: Oid = Oid(2);
-const RECORDOID: Oid = Oid(2249);
+const HEAP_TABLE_AM_OID: Oid = Oid::new(2);
+const RECORDOID: Oid = Oid::new(2249);
 const DEFAULT_TYPDELIM: i8 = b',' as i8;
 
 /// Copy `src` into a `NameData`, NUL-padded to NAMEDATALEN (C namestrcpy).
@@ -155,7 +155,7 @@ pub async fn heap_create(
     shared_relation: bool,
     create_storage: bool,
 ) -> Arc<RelationData> {
-    debug_assert!(relid.0 != 0, "heap_create requires a valid relid");
+    debug_assert!(relid.is_valid(), "heap_create requires a valid relid");
 
     let rel = build_local_relation(
         relname,
@@ -445,7 +445,7 @@ pub async fn heap_create_with_catalog(
         .unwrap_or_else(|| unreachable!("pg_class is nailed/open"));
 
     // Assign the relation OID (== relfilenumber) collision-free.
-    let relid = if relid.0 != 0 {
+    let relid = if relid.is_valid() {
         relid
     } else {
         get_new_rel_file_number(shared, reltablespace, Some(Arc::clone(&pg_class_desc)), relpersistence).await
@@ -482,7 +482,7 @@ pub async fn heap_create_with_catalog(
         let new_array_oid = InvalidOid;
         // Assign a fresh rowtype OID if none predetermined (PG: TypeCreate would
         // call GetNewOidWithIndex; the M2 type_create takes the OID directly).
-        let row_type_oid = if reltypeid.0 != 0 {
+        let row_type_oid = if reltypeid.is_valid() {
             reltypeid
         } else {
             get_new_rel_file_number(shared, reltablespace, Some(Arc::clone(&pg_class_desc)), relpersistence).await

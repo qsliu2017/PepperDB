@@ -159,5 +159,5 @@ pub fn acquire_deletion_lock(_object: &ObjectAddress, _flags: i32) {}
 /// class predicate.
 #[must_use]
 pub const fn is_relation_class(class_id: Oid) -> bool {
-    class_id.0 == RelationRelationId.0
+    class_id.get() == RelationRelationId.get()
 }

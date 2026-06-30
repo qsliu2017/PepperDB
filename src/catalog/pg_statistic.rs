@@ -3,7 +3,7 @@
 use crate::c::{float4, varlena};
 use crate::postgres_ext::Oid;
 
-pub const StatisticRelationId: Oid = Oid(2619);
+pub const StatisticRelationId: Oid = Oid::new(2619);
 
 pub const STATISTIC_NUM_SLOTS: i32 = 5;
 

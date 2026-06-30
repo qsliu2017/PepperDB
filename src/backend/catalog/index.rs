@@ -38,7 +38,7 @@ use crate::postgres_ext::{InvalidOid, Oid};
 use crate::shared_state::SharedState;
 use crate::utils::rel::RelationData;
 
-const BTREE_AM_OID: Oid = Oid(403);
+const BTREE_AM_OID: Oid = Oid::new(403);
 
 /// Build an [`IndexInfo`] for a simple-column btree index over `key_attnums`
 /// (1-based heap attnums), with `unique`. M2: no expressions/predicates/exclusion.
@@ -167,12 +167,12 @@ pub async fn index_create(
     let index_tup_desc = construct_tuple_descriptor(heap_relation, index_info, index_col_names);
 
     // Assign the index OID / relfilenumber.
-    let index_relation_id = if index_relation_id.0 != 0 {
+    let index_relation_id = if index_relation_id.is_valid() {
         index_relation_id
     } else {
         get_new_rel_file_number(shared, table_space_id, Some(Arc::clone(&pg_class)), relpersistence).await
     };
-    let rel_file_number = if rel_file_number.0 != 0 { rel_file_number } else { index_relation_id };
+    let rel_file_number = if rel_file_number.is_valid() { rel_file_number } else { index_relation_id };
 
     // Storage-level create of the index relation.
     let index_relation = heap_create(

@@ -884,9 +884,9 @@ fn empty_block() -> DecodedBkpBlock {
     DecodedBkpBlock {
         in_use: false,
         rlocator: RelFileLocator {
-            spcOid: crate::postgres_ext::Oid(0),
-            dbOid: crate::postgres_ext::Oid(0),
-            relNumber: crate::postgres_ext::Oid(0),
+            spcOid: crate::postgres_ext::Oid::new(0),
+            dbOid: crate::postgres_ext::Oid::new(0),
+            relNumber: crate::postgres_ext::Oid::new(0),
         },
         forknum: ForkNumber::MAIN_FORKNUM,
         blkno: 0,
@@ -909,9 +909,9 @@ fn empty_block() -> DecodedBkpBlock {
 /// RelFileLocator from 12 on-disk bytes (spcOid, dbOid, relNumber: 3 x u32, NE).
 fn read_rlocator(b: &[u8]) -> RelFileLocator {
     RelFileLocator {
-        spcOid: crate::postgres_ext::Oid(u32::from_ne_bytes(b[0..4].try_into().unwrap())),
-        dbOid: crate::postgres_ext::Oid(u32::from_ne_bytes(b[4..8].try_into().unwrap())),
-        relNumber: crate::postgres_ext::Oid(u32::from_ne_bytes(b[8..12].try_into().unwrap())),
+        spcOid: crate::postgres_ext::Oid::new(u32::from_ne_bytes(b[0..4].try_into().unwrap())),
+        dbOid: crate::postgres_ext::Oid::new(u32::from_ne_bytes(b[4..8].try_into().unwrap())),
+        relNumber: crate::postgres_ext::Oid::new(u32::from_ne_bytes(b[8..12].try_into().unwrap())),
     }
 }
 
@@ -1132,7 +1132,7 @@ mod tests {
     #[tokio::test]
     async fn round_trip_block_and_data() {
         let (xlog, dir) = fresh_xlog(crate::backend::access::transam::xlog::DEFAULT_WAL_SEGMENT_SIZE, 16).await;
-        let rloc = RelFileLocator { spcOid: Oid(1663), dbOid: Oid(5), relNumber: Oid(16384) };
+        let rloc = RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(5), relNumber: Oid::new(16384) };
         let main = b"main data here";
         let blkdata = b"per-block tuple bytes";
         // Use NO_IMAGE so the block contributes data (not an FPI).
@@ -1173,7 +1173,7 @@ mod tests {
     #[tokio::test]
     async fn round_trip_fpi_with_hole() {
         let (xlog, dir) = fresh_xlog(crate::backend::access::transam::xlog::DEFAULT_WAL_SEGMENT_SIZE, 16).await;
-        let rloc = RelFileLocator { spcOid: Oid(1663), dbOid: Oid(5), relNumber: Oid(16390) };
+        let rloc = RelFileLocator { spcOid: Oid::new(1663), dbOid: Oid::new(5), relNumber: Oid::new(16390) };
         let mut page = Page::zeroed();
         // Standard page with a hole: pd_lower=40, pd_upper=8000. Fill the non-hole
         // regions with recognizable data.

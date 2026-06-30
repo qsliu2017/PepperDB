@@ -270,7 +270,7 @@ pub fn formrdesc_tupdesc(relid: Oid, reltype: Oid, attrs: &[BootstrapAttr]) -> T
         let att = &mut desc.attrs[i];
         att.attrelid = relid;
         namestrcpy(&mut att.attname, a.attname);
-        att.atttypid = OidT(a.atttypid);
+        att.atttypid = OidT::new(a.atttypid);
         att.attlen = a.attlen;
         att.attnum = a.attnum;
         att.attndims = a.attndims;
@@ -278,7 +278,7 @@ pub fn formrdesc_tupdesc(relid: Oid, reltype: Oid, attrs: &[BootstrapAttr]) -> T
         att.attalign = a.attalign;
         att.attstorage = a.attstorage;
         att.attnotnull = a.attnotnull;
-        att.attcollation = OidT(a.attcollation);
+        att.attcollation = OidT::new(a.attcollation);
         att.attislocal = true;
         att.atttypmod = -1;
         has_not_null |= a.attnotnull;
@@ -511,10 +511,10 @@ pub async fn bootstrap_catalogs(
         TypeOidIndexId,
         &oid_info,
         &["oid".to_owned()],
-        Oid(403), // btree
+        Oid::new(403), // btree
         crate::common::relpath::DEFAULTTABLESPACE_OID,
-        &[Oid(0)],
-        &[Oid(1981)], // oid_ops
+        &[Oid::new(0)],
+        &[Oid::new(1981)], // oid_ops
         &[0],
         false,
     )
@@ -533,7 +533,7 @@ pub async fn bootstrap_catalogs(
             PG_CATALOG_NAMESPACE,
             InvalidOid, // typrelid (base types have no rowtype relation)
             0,          // relation kind: none
-            Oid(10),    // owner (bootstrap superuser)
+            Oid::new(10),    // owner (bootstrap superuser)
             ty.len,
             TYPTYPE_BASE,
             ty.category,
@@ -618,8 +618,8 @@ async fn warm_m3_resolution_caches(shared: &std::sync::Arc<crate::shared_state::
         let nd = name_data(op.name);
         let keys = [
             NameGetDatum(&nd),
-            ObjectIdGetDatum(Oid(op.left)),
-            ObjectIdGetDatum(Oid(op.right)),
+            ObjectIdGetDatum(Oid::new(op.left)),
+            ObjectIdGetDatum(Oid::new(op.right)),
             ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
         ];
         if let Some(t) = search_sys_cache_populate(shared, Sc::OPERNAMENSP, &keys).await {
@@ -627,7 +627,7 @@ async fn warm_m3_resolution_caches(shared: &std::sync::Arc<crate::shared_state::
         }
         // OPEROID (oid).
         if let Some(t) =
-            search_sys_cache_populate(shared, Sc::OPEROID, &[ObjectIdGetDatum(Oid(op.oid))]).await
+            search_sys_cache_populate(shared, Sc::OPEROID, &[ObjectIdGetDatum(Oid::new(op.oid))]).await
         {
             release_sys_cache(t);
         }
@@ -637,13 +637,13 @@ async fn warm_m3_resolution_caches(shared: &std::sync::Arc<crate::shared_state::
         // PROCOID (oid) -- needed by get_func_retset in make_op and by the cast
         // FuncExpr resolution (the cast support functions).
         if let Some(t) =
-            search_sys_cache_populate(shared, Sc::PROCOID, &[ObjectIdGetDatum(Oid(pr.oid))]).await
+            search_sys_cache_populate(shared, Sc::PROCOID, &[ObjectIdGetDatum(Oid::new(pr.oid))]).await
         {
             release_sys_cache(t);
         }
         // PROCNAMEARGSNSP (proname, proargtypes, pronamespace) -- function-by-name.
         let nd = name_data(pr.name);
-        let argoids: Vec<Oid> = pr.argtypes.iter().map(|&o| Oid(o)).collect();
+        let argoids: Vec<Oid> = pr.argtypes.iter().map(|&o| Oid::new(o)).collect();
         let argvec = crate::utils::builtins::buildoidvector(&argoids);
         let keys = [
             NameGetDatum(&nd),
@@ -660,7 +660,7 @@ async fn warm_m3_resolution_caches(shared: &std::sync::Arc<crate::shared_state::
     // -- find_coercion_pathway, getTypeOutputInfo/getTypeInputInfo -- hits a warm
     // cache over the wire).
     for ct in SEED_PG_CAST_M4 {
-        let keys = [ObjectIdGetDatum(Oid(ct.source)), ObjectIdGetDatum(Oid(ct.target))];
+        let keys = [ObjectIdGetDatum(Oid::new(ct.source)), ObjectIdGetDatum(Oid::new(ct.target))];
         if let Some(t) = search_sys_cache_populate(shared, Sc::CASTSOURCETARGET, &keys).await {
             release_sys_cache(t);
         }
@@ -677,7 +677,7 @@ async fn warm_m3_resolution_caches(shared: &std::sync::Arc<crate::shared_state::
     // SearchSysCache1(AGGFNOID) hits at ExecInitAgg time.
     for agg in SEED_PG_AGGREGATE_M5 {
         if let Some(t) =
-            search_sys_cache_populate(shared, Sc::AGGFNOID, &[ObjectIdGetDatum(Oid(agg.aggfnoid))]).await
+            search_sys_cache_populate(shared, Sc::AGGFNOID, &[ObjectIdGetDatum(Oid::new(agg.aggfnoid))]).await
         {
             release_sys_cache(t);
         }
@@ -718,8 +718,8 @@ async fn seed_pg_proc_m3(shared: &std::sync::Arc<crate::shared_state::SharedStat
     let oid_info = make_index_info(&[p::Anum_pg_proc_oid as i16], true);
     index_create(
         shared, &pg_proc, "pg_proc_oid_index", ProcedureOidIndexId, ProcedureOidIndexId,
-        &oid_info, &["oid".to_owned()], Oid(403), crate::common::relpath::DEFAULTTABLESPACE_OID,
-        &[Oid(0)], &[Oid(1981)], &[0], false,
+        &oid_info, &["oid".to_owned()], Oid::new(403), crate::common::relpath::DEFAULTTABLESPACE_OID,
+        &[Oid::new(0)], &[Oid::new(1981)], &[0], false,
     ).await;
     let _ = ProcedureNameArgsNspIndexId;
 
@@ -733,14 +733,14 @@ async fn seed_pg_proc_m3(shared: &std::sync::Arc<crate::shared_state::SharedStat
         let mut isnull = vec![false; natts];
         let set = |v: &mut [Datum], anum: i32, d: Datum| v[(anum - 1) as usize] = d;
 
-        let argoids: Vec<Oid> = pr.argtypes.iter().map(|&o| Oid(o)).collect();
+        let argoids: Vec<Oid> = pr.argtypes.iter().map(|&o| Oid::new(o)).collect();
         let argvec = crate::utils::builtins::buildoidvector(&argoids);
         let name = name_data(pr.name);
-        set(&mut values, p::Anum_pg_proc_oid, ObjectIdGetDatum(Oid(pr.oid)));
+        set(&mut values, p::Anum_pg_proc_oid, ObjectIdGetDatum(Oid::new(pr.oid)));
         set(&mut values, p::Anum_pg_proc_proname, NameGetDatum(&name));
         set(&mut values, p::Anum_pg_proc_pronamespace, ObjectIdGetDatum(PG_CATALOG_NAMESPACE));
-        set(&mut values, p::Anum_pg_proc_proowner, ObjectIdGetDatum(Oid(10)));
-        set(&mut values, p::Anum_pg_proc_prolang, ObjectIdGetDatum(Oid(12))); // internal
+        set(&mut values, p::Anum_pg_proc_proowner, ObjectIdGetDatum(Oid::new(10)));
+        set(&mut values, p::Anum_pg_proc_prolang, ObjectIdGetDatum(Oid::new(12))); // internal
         set(&mut values, p::Anum_pg_proc_procost, Float4GetDatum(1.0));
         set(&mut values, p::Anum_pg_proc_prorows, Float4GetDatum(0.0));
         set(&mut values, p::Anum_pg_proc_provariadic, ObjectIdGetDatum(InvalidOid));
@@ -754,7 +754,7 @@ async fn seed_pg_proc_m3(shared: &std::sync::Arc<crate::shared_state::SharedStat
         set(&mut values, p::Anum_pg_proc_proparallel, CharGetDatum(PROPARALLEL_SAFE));
         set(&mut values, p::Anum_pg_proc_pronargs, Int16GetDatum(i16::try_from(pr.argtypes.len()).unwrap_or(0)));
         set(&mut values, p::Anum_pg_proc_pronargdefaults, Int16GetDatum(0));
-        set(&mut values, p::Anum_pg_proc_prorettype, ObjectIdGetDatum(Oid(pr.rettype)));
+        set(&mut values, p::Anum_pg_proc_prorettype, ObjectIdGetDatum(Oid::new(pr.rettype)));
         set(&mut values, p::Anum_pg_proc_proargtypes, PointerGetDatum(argvec.cast::<u8>()));
         set(&mut values, p::Anum_pg_proc_prosrc, crate::utils::builtins::CStringGetTextDatum(pr.prosrc));
 
@@ -803,8 +803,8 @@ async fn seed_pg_operator_m3(shared: &std::sync::Arc<crate::shared_state::Shared
     let oid_info = make_index_info(&[o::Anum_pg_operator_oid as i16], true);
     index_create(
         shared, &pg_operator, "pg_operator_oid_index", OperatorOidIndexId, OperatorOidIndexId,
-        &oid_info, &["oid".to_owned()], Oid(403), crate::common::relpath::DEFAULTTABLESPACE_OID,
-        &[Oid(0)], &[Oid(1981)], &[0], false,
+        &oid_info, &["oid".to_owned()], Oid::new(403), crate::common::relpath::DEFAULTTABLESPACE_OID,
+        &[Oid::new(0)], &[Oid::new(1981)], &[0], false,
     ).await;
     let _ = OperatorNameNspIndexId;
 
@@ -817,20 +817,20 @@ async fn seed_pg_operator_m3(shared: &std::sync::Arc<crate::shared_state::Shared
         let set = |v: &mut [Datum], anum: i32, d: Datum| v[(anum - 1) as usize] = d;
 
         let name = name_data(op.name);
-        set(&mut values, o::Anum_pg_operator_oid, ObjectIdGetDatum(Oid(op.oid)));
+        set(&mut values, o::Anum_pg_operator_oid, ObjectIdGetDatum(Oid::new(op.oid)));
         set(&mut values, o::Anum_pg_operator_oprname, NameGetDatum(&name));
         set(&mut values, o::Anum_pg_operator_oprnamespace, ObjectIdGetDatum(PG_CATALOG_NAMESPACE));
-        set(&mut values, o::Anum_pg_operator_oprowner, ObjectIdGetDatum(Oid(10)));
+        set(&mut values, o::Anum_pg_operator_oprowner, ObjectIdGetDatum(Oid::new(10)));
         set(&mut values, o::Anum_pg_operator_oprkind, CharGetDatum(op.kind as i8));
         set(&mut values, o::Anum_pg_operator_oprcanmerge, BoolGetDatum(false));
         set(&mut values, o::Anum_pg_operator_oprcanhash, BoolGetDatum(false));
-        set(&mut values, o::Anum_pg_operator_oprleft, ObjectIdGetDatum(Oid(op.left)));
-        set(&mut values, o::Anum_pg_operator_oprright, ObjectIdGetDatum(Oid(op.right)));
-        set(&mut values, o::Anum_pg_operator_oprresult, ObjectIdGetDatum(Oid(op.result)));
+        set(&mut values, o::Anum_pg_operator_oprleft, ObjectIdGetDatum(Oid::new(op.left)));
+        set(&mut values, o::Anum_pg_operator_oprright, ObjectIdGetDatum(Oid::new(op.right)));
+        set(&mut values, o::Anum_pg_operator_oprresult, ObjectIdGetDatum(Oid::new(op.result)));
         // commutator/negator references are not needed for M3 resolution.
         set(&mut values, o::Anum_pg_operator_oprcom, ObjectIdGetDatum(InvalidOid));
         set(&mut values, o::Anum_pg_operator_oprnegate, ObjectIdGetDatum(InvalidOid));
-        set(&mut values, o::Anum_pg_operator_oprcode, ObjectIdGetDatum(Oid(op.code)));
+        set(&mut values, o::Anum_pg_operator_oprcode, ObjectIdGetDatum(Oid::new(op.code)));
         set(&mut values, o::Anum_pg_operator_oprrest, ObjectIdGetDatum(InvalidOid));
         set(&mut values, o::Anum_pg_operator_oprjoin, ObjectIdGetDatum(InvalidOid));
 
@@ -870,8 +870,8 @@ async fn seed_pg_cast_m4(shared: &std::sync::Arc<crate::shared_state::SharedStat
     let oid_info = make_index_info(&[c::Anum_pg_cast_oid as i16], true);
     index_create(
         shared, &pg_cast, "pg_cast_oid_index", CastOidIndexId, CastOidIndexId,
-        &oid_info, &["oid".to_owned()], Oid(403), crate::common::relpath::DEFAULTTABLESPACE_OID,
-        &[Oid(0)], &[Oid(1981)], &[0], false,
+        &oid_info, &["oid".to_owned()], Oid::new(403), crate::common::relpath::DEFAULTTABLESPACE_OID,
+        &[Oid::new(0)], &[Oid::new(1981)], &[0], false,
     ).await;
     let st_info = make_index_info(
         &[c::Anum_pg_cast_castsource as i16, c::Anum_pg_cast_casttarget as i16],
@@ -880,9 +880,9 @@ async fn seed_pg_cast_m4(shared: &std::sync::Arc<crate::shared_state::SharedStat
     index_create(
         shared, &pg_cast, "pg_cast_source_target_index", CastSourceTargetIndexId,
         CastSourceTargetIndexId, &st_info,
-        &["castsource".to_owned(), "casttarget".to_owned()], Oid(403),
+        &["castsource".to_owned(), "casttarget".to_owned()], Oid::new(403),
         crate::common::relpath::DEFAULTTABLESPACE_OID,
-        &[Oid(0), Oid(0)], &[Oid(1981), Oid(1981)], &[0, 0], false,
+        &[Oid::new(0), Oid::new(0)], &[Oid::new(1981), Oid::new(1981)], &[0, 0], false,
     ).await;
 
     let desc = pg_cast.rd_att.clone().unwrap_or_else(|| unreachable!("pg_cast has a descriptor"));
@@ -893,10 +893,10 @@ async fn seed_pg_cast_m4(shared: &std::sync::Arc<crate::shared_state::SharedStat
         let isnull = vec![false; natts];
         let set = |v: &mut [Datum], anum: i32, d: Datum| v[(anum - 1) as usize] = d;
 
-        set(&mut values, c::Anum_pg_cast_oid, ObjectIdGetDatum(Oid(ct.oid)));
-        set(&mut values, c::Anum_pg_cast_castsource, ObjectIdGetDatum(Oid(ct.source)));
-        set(&mut values, c::Anum_pg_cast_casttarget, ObjectIdGetDatum(Oid(ct.target)));
-        set(&mut values, c::Anum_pg_cast_castfunc, ObjectIdGetDatum(Oid(ct.func)));
+        set(&mut values, c::Anum_pg_cast_oid, ObjectIdGetDatum(Oid::new(ct.oid)));
+        set(&mut values, c::Anum_pg_cast_castsource, ObjectIdGetDatum(Oid::new(ct.source)));
+        set(&mut values, c::Anum_pg_cast_casttarget, ObjectIdGetDatum(Oid::new(ct.target)));
+        set(&mut values, c::Anum_pg_cast_castfunc, ObjectIdGetDatum(Oid::new(ct.func)));
         set(&mut values, c::Anum_pg_cast_castcontext, CharGetDatum(ct.context as i8));
         set(&mut values, c::Anum_pg_cast_castmethod, CharGetDatum(ct.method as i8));
 
@@ -943,14 +943,14 @@ async fn seed_pg_proc_m5_agg(shared: &std::sync::Arc<crate::shared_state::Shared
         let mut isnull = vec![false; natts];
         let set = |v: &mut [Datum], anum: i32, d: Datum| v[(anum - 1) as usize] = d;
 
-        let argoids: Vec<Oid> = pr.argtypes.iter().map(|&o| Oid(o)).collect();
+        let argoids: Vec<Oid> = pr.argtypes.iter().map(|&o| Oid::new(o)).collect();
         let argvec = crate::utils::builtins::buildoidvector(&argoids);
         let name = name_data(pr.name);
-        set(&mut values, p::Anum_pg_proc_oid, ObjectIdGetDatum(Oid(pr.oid)));
+        set(&mut values, p::Anum_pg_proc_oid, ObjectIdGetDatum(Oid::new(pr.oid)));
         set(&mut values, p::Anum_pg_proc_proname, NameGetDatum(&name));
         set(&mut values, p::Anum_pg_proc_pronamespace, ObjectIdGetDatum(PG_CATALOG_NAMESPACE));
-        set(&mut values, p::Anum_pg_proc_proowner, ObjectIdGetDatum(Oid(10)));
-        set(&mut values, p::Anum_pg_proc_prolang, ObjectIdGetDatum(Oid(12))); // internal
+        set(&mut values, p::Anum_pg_proc_proowner, ObjectIdGetDatum(Oid::new(10)));
+        set(&mut values, p::Anum_pg_proc_prolang, ObjectIdGetDatum(Oid::new(12))); // internal
         set(&mut values, p::Anum_pg_proc_procost, Float4GetDatum(1.0));
         set(&mut values, p::Anum_pg_proc_prorows, Float4GetDatum(0.0));
         set(&mut values, p::Anum_pg_proc_provariadic, ObjectIdGetDatum(InvalidOid));
@@ -964,7 +964,7 @@ async fn seed_pg_proc_m5_agg(shared: &std::sync::Arc<crate::shared_state::Shared
         set(&mut values, p::Anum_pg_proc_proparallel, CharGetDatum(PROPARALLEL_SAFE));
         set(&mut values, p::Anum_pg_proc_pronargs, Int16GetDatum(i16::try_from(pr.argtypes.len()).unwrap_or(0)));
         set(&mut values, p::Anum_pg_proc_pronargdefaults, Int16GetDatum(0));
-        set(&mut values, p::Anum_pg_proc_prorettype, ObjectIdGetDatum(Oid(pr.rettype)));
+        set(&mut values, p::Anum_pg_proc_prorettype, ObjectIdGetDatum(Oid::new(pr.rettype)));
         set(&mut values, p::Anum_pg_proc_proargtypes, PointerGetDatum(argvec.cast::<u8>()));
         set(&mut values, p::Anum_pg_proc_prosrc, crate::utils::builtins::CStringGetTextDatum(pr.prosrc));
 
@@ -1007,9 +1007,9 @@ async fn seed_pg_aggregate_m5(shared: &std::sync::Arc<crate::shared_state::Share
     let oid_info = make_index_info(&[a::Anum_pg_aggregate_aggfnoid as i16], true);
     index_create(
         shared, &pg_aggregate, "pg_aggregate_fnoid_index", AggregateFnoidIndexId,
-        AggregateFnoidIndexId, &oid_info, &["aggfnoid".to_owned()], Oid(403),
+        AggregateFnoidIndexId, &oid_info, &["aggfnoid".to_owned()], Oid::new(403),
         crate::common::relpath::DEFAULTTABLESPACE_OID,
-        &[Oid(0)], &[Oid(1981)], &[0], false,
+        &[Oid::new(0)], &[Oid::new(1981)], &[0], false,
     ).await;
 
     let desc = pg_aggregate.rd_att.clone().unwrap_or_else(|| unreachable!("pg_aggregate has a descriptor"));
@@ -1020,11 +1020,11 @@ async fn seed_pg_aggregate_m5(shared: &std::sync::Arc<crate::shared_state::Share
         let mut isnull = vec![false; natts];
         let set = |v: &mut [Datum], anum: i32, d: Datum| v[(anum - 1) as usize] = d;
 
-        set(&mut values, a::Anum_pg_aggregate_aggfnoid, ObjectIdGetDatum(Oid(agg.aggfnoid)));
+        set(&mut values, a::Anum_pg_aggregate_aggfnoid, ObjectIdGetDatum(Oid::new(agg.aggfnoid)));
         set(&mut values, a::Anum_pg_aggregate_aggkind, CharGetDatum(agg.aggkind as i8));
         set(&mut values, a::Anum_pg_aggregate_aggnumdirectargs, Int16GetDatum(0));
-        set(&mut values, a::Anum_pg_aggregate_aggtransfn, ObjectIdGetDatum(Oid(agg.aggtransfn)));
-        set(&mut values, a::Anum_pg_aggregate_aggfinalfn, ObjectIdGetDatum(Oid(agg.aggfinalfn)));
+        set(&mut values, a::Anum_pg_aggregate_aggtransfn, ObjectIdGetDatum(Oid::new(agg.aggtransfn)));
+        set(&mut values, a::Anum_pg_aggregate_aggfinalfn, ObjectIdGetDatum(Oid::new(agg.aggfinalfn)));
         set(&mut values, a::Anum_pg_aggregate_aggcombinefn, ObjectIdGetDatum(InvalidOid));
         set(&mut values, a::Anum_pg_aggregate_aggserialfn, ObjectIdGetDatum(InvalidOid));
         set(&mut values, a::Anum_pg_aggregate_aggdeserialfn, ObjectIdGetDatum(InvalidOid));
@@ -1036,7 +1036,7 @@ async fn seed_pg_aggregate_m5(shared: &std::sync::Arc<crate::shared_state::Share
         set(&mut values, a::Anum_pg_aggregate_aggfinalmodify, CharGetDatum(b'r' as i8));
         set(&mut values, a::Anum_pg_aggregate_aggmfinalmodify, CharGetDatum(b'r' as i8));
         set(&mut values, a::Anum_pg_aggregate_aggsortop, ObjectIdGetDatum(InvalidOid));
-        set(&mut values, a::Anum_pg_aggregate_aggtranstype, ObjectIdGetDatum(Oid(agg.aggtranstype)));
+        set(&mut values, a::Anum_pg_aggregate_aggtranstype, ObjectIdGetDatum(Oid::new(agg.aggtranstype)));
         set(&mut values, a::Anum_pg_aggregate_aggtransspace, crate::postgres::Int32GetDatum(0));
         set(&mut values, a::Anum_pg_aggregate_aggmtranstype, ObjectIdGetDatum(InvalidOid));
         set(&mut values, a::Anum_pg_aggregate_aggmtransspace, crate::postgres::Int32GetDatum(0));
@@ -1087,8 +1087,8 @@ async fn seed_object_ddl_catalogs(shared: &std::sync::Arc<crate::shared_state::S
         let info = make_index_info(&[attno], true);
         index_create(
             shared, &rel, index_name, index_id, index_id, &info, &[col.to_owned()],
-            Oid(403), crate::common::relpath::DEFAULTTABLESPACE_OID,
-            &[Oid(0)], &[Oid(1981)], &[0], false,
+            Oid::new(403), crate::common::relpath::DEFAULTTABLESPACE_OID,
+            &[Oid::new(0)], &[Oid::new(1981)], &[0], false,
         )
         .await;
         relation_close(rel);
@@ -1127,10 +1127,10 @@ async fn seed_object_ddl_catalogs(shared: &std::sync::Arc<crate::shared_state::S
 
         let mut values = vec![Datum(0); natts];
         let mut isnull = vec![false; natts];
-        values[(ns::Anum_pg_namespace_oid - 1) as usize] = ObjectIdGetDatum(Oid(oid));
+        values[(ns::Anum_pg_namespace_oid - 1) as usize] = ObjectIdGetDatum(Oid::new(oid));
         values[(ns::Anum_pg_namespace_nspname - 1) as usize] = NameGetDatum(&nsp_name);
         // BKI_DEFAULT(POSTGRES): the bootstrap superuser (oid 10).
-        values[(ns::Anum_pg_namespace_nspowner - 1) as usize] = ObjectIdGetDatum(Oid(10));
+        values[(ns::Anum_pg_namespace_nspowner - 1) as usize] = ObjectIdGetDatum(Oid::new(10));
         // nspacl is NULL (no initial ACL).
         isnull[(ns::Anum_pg_namespace_nspacl - 1) as usize] = true;
 
@@ -1216,14 +1216,14 @@ mod tests {
     fn schema_physical_types_match_genbki() {
         let oid_col = &SCHEMA_PG_CLASS[0];
         assert_eq!(oid_col.attname, "oid");
-        assert_eq!(oid_col.atttypid, OIDOID.0);
+        assert_eq!(oid_col.atttypid, OIDOID.get());
         assert_eq!(oid_col.attlen, 4);
         assert!(oid_col.attbyval);
         assert!(oid_col.attnotnull);
 
         let name_col = &SCHEMA_PG_CLASS[1];
         assert_eq!(name_col.attname, "relname");
-        assert_eq!(name_col.atttypid, NAMEOID.0);
+        assert_eq!(name_col.atttypid, NAMEOID.get());
         assert_eq!(name_col.attlen, 64);
         assert!(!name_col.attbyval);
         assert!(name_col.attnotnull);
@@ -1233,7 +1233,7 @@ mod tests {
             .iter()
             .find(|a| a.attname == "attlen")
             .expect("attlen column");
-        assert_eq!(attlen_col.atttypid, INT2OID.0);
+        assert_eq!(attlen_col.atttypid, INT2OID.get());
         assert_eq!(attlen_col.attlen, 2);
     }
 

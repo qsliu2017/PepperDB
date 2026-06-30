@@ -3,7 +3,7 @@
 use crate::c::{NameData, text};
 use crate::postgres_ext::Oid;
 
-pub const TSDictionaryRelationId: Oid = Oid(3600);
+pub const TSDictionaryRelationId: Oid = Oid::new(3600);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

@@ -154,7 +154,7 @@ mod tests {
     use crate::postgres::Int32GetDatum;
     use std::sync::Arc;
 
-    const INT4OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(23);
+    const INT4OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(23);
     const INVALID: crate::postgres_ext::Oid = crate::postgres_ext::InvalidOid;
 
     fn int4_desc(n: usize) -> TupleDesc {
@@ -192,7 +192,7 @@ mod tests {
             },
             num_cols,
             uniq_col_idx: colidx,
-            uniq_operators: vec![crate::postgres_ext::Oid(96); num_cols as usize], // int4eq
+            uniq_operators: vec![crate::postgres_ext::Oid::new(96); num_cols as usize], // int4eq
             uniq_collations: vec![INVALID; num_cols as usize],
         }
     }

@@ -3,7 +3,7 @@
 use crate::c::{NameData, varlena};
 use crate::postgres_ext::Oid;
 
-pub const TableSpaceRelationId: Oid = Oid(1213); // BKI_SHARED_RELATION
+pub const TableSpaceRelationId: Oid = Oid::new(1213); // BKI_SHARED_RELATION
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

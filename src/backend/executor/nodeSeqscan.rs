@@ -297,7 +297,7 @@ mod tests {
     use crate::utils::rel::{LockInfoData, LockRelId, RelationData};
     use crate::access::sdir::ScanDirection;
 
-    const INT4OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(23);
+    const INT4OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(23);
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
     fn new_shared() -> Arc<SharedState> {
@@ -335,9 +335,9 @@ mod tests {
 
     fn rloc(rel: u32) -> RelFileLocator {
         RelFileLocator {
-            spcOid: crate::postgres_ext::Oid(1663),
-            dbOid: crate::postgres_ext::Oid(90000),
-            relNumber: crate::postgres_ext::Oid(81000 + rel),
+            spcOid: crate::postgres_ext::Oid::new(1663),
+            dbOid: crate::postgres_ext::Oid::new(90000),
+            relNumber: crate::postgres_ext::Oid::new(81000 + rel),
         }
     }
 
@@ -359,7 +359,7 @@ mod tests {
         form.relkind = RELKIND_RELATION;
         form.relpersistence = RELPERSISTENCE_PERMANENT;
         form.relnatts = tupdesc.natts as i16;
-        form.relam = crate::postgres_ext::Oid(2);
+        form.relam = crate::postgres_ext::Oid::new(2);
         let form_ptr = Some(form);
 
         let mut rel = RelationData::blank();
@@ -372,7 +372,7 @@ mod tests {
         rel.rd_lockInfo = LockInfoData {
             lockRelId: LockRelId { relId: locator.relNumber, dbId: locator.dbOid },
         };
-        rel.rd_amhandler = crate::postgres_ext::Oid(2);
+        rel.rd_amhandler = crate::postgres_ext::Oid::new(2);
         Arc::new(rel)
     }
 

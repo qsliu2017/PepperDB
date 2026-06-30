@@ -13,8 +13,8 @@ use crate::postgres_ext::Oid;
 use crate::utils::acl::AclItem;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(71,TypeRelation_Rowtype_Id) BKI_SCHEMA_MACRO
-pub const TypeRelationId: Oid = Oid(1247);
-pub const TypeRelation_Rowtype_Id: Oid = Oid(71);
+pub const TypeRelationId: Oid = Oid::new(1247);
+pub const TypeRelation_Rowtype_Id: Oid = Oid::new(71);
 
 // pg_node_tree catalog field is varlena (text); aclitem is the fixed acl struct.
 pub type PgNodeTree = text;
@@ -66,9 +66,9 @@ pub type Form_pg_type = *mut FormData_pg_type; // TODO(ptr)
 // MAKE_SYSCACHE(TYPENAMENSP, pg_type_typname_nsp_index, 64)
 
 /// pg_type_oid_index: unique index on oid (the pkey).
-pub const TypeOidIndexId: Oid = Oid(2703);
+pub const TypeOidIndexId: Oid = Oid::new(2703);
 /// pg_type_typname_nsp_index: unique index on (typname, typnamespace).
-pub const TypeNameNspIndexId: Oid = Oid(2704);
+pub const TypeNameNspIndexId: Oid = Oid::new(2704);
 
 // typtype values.
 pub const TYPTYPE_BASE: i8 = b'b' as i8;

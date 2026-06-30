@@ -15,8 +15,8 @@ use crate::postgres_ext::Oid;
 pub type List<T = ()> = Vec<T>;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(81,ProcedureRelation_Rowtype_Id) BKI_SCHEMA_MACRO
-pub const ProcedureRelationId: Oid = Oid(1255);
-pub const ProcedureRelation_Rowtype_Id: Oid = Oid(81);
+pub const ProcedureRelationId: Oid = Oid::new(1255);
+pub const ProcedureRelation_Rowtype_Id: Oid = Oid::new(81);
 
 // oidvector / pg_node_tree / aclitem catalog fields are varlena; modeled here.
 pub type Oidvector = text;
@@ -64,9 +64,9 @@ pub type Form_pg_proc = *mut FormData_pg_proc; // TODO(ptr)
 
 // DECLARE_TOAST(pg_proc, 2836, 2837)
 // DECLARE_UNIQUE_INDEX_PKEY(pg_proc_oid_index, 2690, ProcedureOidIndexId, ...)
-pub const ProcedureOidIndexId: Oid = Oid(2690);
+pub const ProcedureOidIndexId: Oid = Oid::new(2690);
 // DECLARE_UNIQUE_INDEX(pg_proc_proname_args_nsp_index, 2691, ProcedureNameArgsNspIndexId, ...)
-pub const ProcedureNameArgsNspIndexId: Oid = Oid(2691);
+pub const ProcedureNameArgsNspIndexId: Oid = Oid::new(2691);
 // MAKE_SYSCACHE(PROCOID, pg_proc_oid_index, 128)
 // MAKE_SYSCACHE(PROCNAMEARGSNSP, pg_proc_proname_args_nsp_index, 128)
 

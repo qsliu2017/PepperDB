@@ -4,7 +4,7 @@ use crate::c::bytea;
 use crate::postgres_ext::Oid;
 use crate::utils::snapshot::Snapshot;
 
-pub const LargeObjectRelationId: Oid = Oid(2613);
+pub const LargeObjectRelationId: Oid = Oid::new(2613);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

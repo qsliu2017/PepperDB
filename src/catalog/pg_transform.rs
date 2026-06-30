@@ -3,7 +3,7 @@
 use crate::c::regproc;
 use crate::postgres_ext::Oid;
 
-pub const TransformRelationId: Oid = Oid(3576);
+pub const TransformRelationId: Oid = Oid::new(3576);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

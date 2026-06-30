@@ -120,9 +120,9 @@ mod tests {
     async fn set_get_user_id_and_sec_context_round_trip() {
         let s = Arc::new(Session::new(BackendType::BACKEND));
         session::scope(s, async {
-            set_user_id_and_sec_context(Oid(77), SecurityContext::empty());
+            set_user_id_and_sec_context(Oid::new(77), SecurityContext::empty());
             let (uid, ctx) = get_user_id_and_sec_context();
-            assert_eq!(uid, Oid(77));
+            assert_eq!(uid, Oid::new(77));
             assert!(ctx.is_empty());
             assert!(!in_security_restricted_operation());
         })
@@ -133,11 +133,11 @@ mod tests {
     async fn security_restricted_flag_set_and_clear() {
         let s = Arc::new(Session::new(BackendType::BACKEND));
         session::scope(s, async {
-            set_user_id_and_sec_context(Oid(1), SecurityContext::RESTRICTED_OPERATION);
+            set_user_id_and_sec_context(Oid::new(1), SecurityContext::RESTRICTED_OPERATION);
             assert!(in_security_restricted_operation());
             assert!(!in_local_user_id_change());
 
-            set_user_id_and_sec_context(Oid(1), SecurityContext::empty());
+            set_user_id_and_sec_context(Oid::new(1), SecurityContext::empty());
             assert!(!in_security_restricted_operation());
         })
         .await;

@@ -5,7 +5,7 @@ use bitflags::bitflags;
 use crate::c::text;
 use crate::postgres_ext::Oid;
 
-pub const IndexRelationId: Oid = Oid(2610);
+pub const IndexRelationId: Oid = Oid::new(2610);
 
 // int2vector / oidvector / pg_node_tree catalog fields are varlena; modeled as text.
 pub type Int2vector = text;
@@ -48,9 +48,9 @@ pub type Form_pg_index = *mut FormData_pg_index; // TODO(ptr)
 // MAKE_SYSCACHE(INDEXRELID, pg_index_indexrelid_index, 64)
 
 /// pg_index_indrelid_index: (non-unique) index on indrelid.
-pub const IndexIndrelidIndexId: Oid = Oid(2678);
+pub const IndexIndrelidIndexId: Oid = Oid::new(2678);
 /// pg_index_indexrelid_index: unique index on indexrelid (the pkey).
-pub const IndexRelidIndexId: Oid = Oid(2679);
+pub const IndexRelidIndexId: Oid = Oid::new(2679);
 // DECLARE_ARRAY_FOREIGN_KEY_OPT((indrelid, indkey), pg_attribute, (attrelid, attnum))
 
 // per-column indoption bits (packed in the on-disk indoption int2vector)

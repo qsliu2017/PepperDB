@@ -83,7 +83,7 @@ const WHERE_TO_SEND_OUTPUT: CommandDest = CommandDest::DestRemote;
 /// database name to its pg_database OID in InitPostgres; M2 has a single seeded
 /// database at this fixed OID (matching the boot initdb), so the name is recorded
 /// on the Session for diagnostics but every backend attaches here.
-pub const DEFAULT_DATABASE_OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(90000);
+pub const DEFAULT_DATABASE_OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(90000);
 
 pub async fn postgres_main(
     stream: TcpStream,
@@ -604,7 +604,7 @@ async fn exec_parse_message(shared: &Arc<SharedState>, body: &[u8]) {
     let query_string = pq_getmsgstring(&mut r).to_owned();
     let num_param_types = pq_getmsgint(&mut r, 2) as usize;
     let mut param_types: Vec<crate::postgres_ext::Oid> = (0..num_param_types)
-        .map(|_| crate::postgres_ext::Oid(pq_getmsgint(&mut r, 4)))
+        .map(|_| crate::postgres_ext::Oid::new(pq_getmsgint(&mut r, 4)))
         .collect();
 
     // start_xact_command + raw parse. An empty query string yields an empty
@@ -797,7 +797,7 @@ fn exec_describe_statement_message(stmt_name: &str) {
     msg.begin_message(crate::libpq::protocol::PQMSG_PARAMETER_DESCRIPTION);
     msg.send_int16(u16::try_from(param_types.len()).unwrap_or(0));
     for ptype in &param_types {
-        msg.send_int32(ptype.0);
+        msg.send_int32(ptype.get());
     }
     pq_putmessage_sync(msg.msgtype, &msg.data);
 
@@ -1152,7 +1152,7 @@ async fn open_range_table_relations(
         let Node::RangeTblEntry(rte) = rte_node else {
             continue; // non-RTE placeholder (e.g. the const RTE_RESULT for SELECT 1)
         };
-        if rte.rtekind != RTEKind::RELATION || rte.relid.0 == 0 {
+        if rte.rtekind != RTEKind::RELATION || !rte.relid.is_valid() {
             continue;
         }
         let rti = i + 1;

@@ -422,9 +422,9 @@ impl SlruCtl {
             handler: self.sync_handler as i16,
             forknum: 0,
             rlocator: crate::storage::relfilelocator::RelFileLocator {
-                spcOid: crate::postgres_ext::Oid(0),
-                dbOid: crate::postgres_ext::Oid(0),
-                relNumber: crate::postgres_ext::Oid(0),
+                spcOid: crate::postgres_ext::Oid::new(0),
+                dbOid: crate::postgres_ext::Oid::new(0),
+                relNumber: crate::postgres_ext::Oid::new(0),
             },
             segno: segno as u64,
         }

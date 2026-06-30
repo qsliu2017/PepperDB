@@ -118,14 +118,14 @@ impl Session {
             start_time: timestamptz_to_unix_secs(start_timestamp),
             start_timestamp,
             backend_type: AtomicU32::new(backend_type as u32),
-            database_id: AtomicU32::new(InvalidOid.0),
-            database_tablespace: AtomicU32::new(InvalidOid.0),
+            database_id: AtomicU32::new(InvalidOid.get()),
+            database_tablespace: AtomicU32::new(InvalidOid.get()),
             database_has_login_event_triggers: AtomicBool::new(false),
             database_name: Mutex::new(None),
-            authenticated_user_id: AtomicU32::new(InvalidOid.0),
-            session_user_id: AtomicU32::new(InvalidOid.0),
-            outer_user_id: AtomicU32::new(InvalidOid.0),
-            current_user_id: AtomicU32::new(InvalidOid.0),
+            authenticated_user_id: AtomicU32::new(InvalidOid.get()),
+            session_user_id: AtomicU32::new(InvalidOid.get()),
+            outer_user_id: AtomicU32::new(InvalidOid.get()),
+            current_user_id: AtomicU32::new(InvalidOid.get()),
             sec_context: AtomicI32::new(0),
             session_user_is_superuser: AtomicBool::new(false),
             set_role_is_active: AtomicBool::new(false),
@@ -159,16 +159,16 @@ impl Session {
 
     // --- Database ---
     pub fn database_id(&self) -> Oid {
-        Oid(self.database_id.load(Ordering::Relaxed))
+        Oid::new(self.database_id.load(Ordering::Relaxed))
     }
     pub fn set_database_id(&self, oid: Oid) {
-        self.database_id.store(oid.0, Ordering::Relaxed);
+        self.database_id.store(oid.get(), Ordering::Relaxed);
     }
     pub fn database_tablespace(&self) -> Oid {
-        Oid(self.database_tablespace.load(Ordering::Relaxed))
+        Oid::new(self.database_tablespace.load(Ordering::Relaxed))
     }
     pub fn set_database_tablespace(&self, oid: Oid) {
-        self.database_tablespace.store(oid.0, Ordering::Relaxed);
+        self.database_tablespace.store(oid.get(), Ordering::Relaxed);
     }
     pub fn database_has_login_event_triggers(&self) -> bool {
         self.database_has_login_event_triggers.load(Ordering::Relaxed)
@@ -185,22 +185,22 @@ impl Session {
 
     // --- User-id stack ---
     pub fn authenticated_user_id(&self) -> Oid {
-        Oid(self.authenticated_user_id.load(Ordering::Relaxed))
+        Oid::new(self.authenticated_user_id.load(Ordering::Relaxed))
     }
     pub fn set_authenticated_user_id(&self, oid: Oid) {
-        self.authenticated_user_id.store(oid.0, Ordering::Relaxed);
+        self.authenticated_user_id.store(oid.get(), Ordering::Relaxed);
     }
     pub fn session_user_id(&self) -> Oid {
-        Oid(self.session_user_id.load(Ordering::Relaxed))
+        Oid::new(self.session_user_id.load(Ordering::Relaxed))
     }
     pub fn outer_user_id(&self) -> Oid {
-        Oid(self.outer_user_id.load(Ordering::Relaxed))
+        Oid::new(self.outer_user_id.load(Ordering::Relaxed))
     }
     pub fn current_user_id(&self) -> Oid {
-        Oid(self.current_user_id.load(Ordering::Relaxed))
+        Oid::new(self.current_user_id.load(Ordering::Relaxed))
     }
     pub fn set_current_user_id(&self, oid: Oid) {
-        self.current_user_id.store(oid.0, Ordering::Relaxed);
+        self.current_user_id.store(oid.get(), Ordering::Relaxed);
     }
     pub fn sec_context(&self) -> i32 {
         self.sec_context.load(Ordering::Relaxed)
@@ -220,7 +220,7 @@ impl Session {
 
     /// PG `SetSessionUserId`: set the session user id + superuser flag.
     pub fn set_session_user_id(&self, oid: Oid, is_superuser: bool) {
-        self.session_user_id.store(oid.0, Ordering::Relaxed);
+        self.session_user_id.store(oid.get(), Ordering::Relaxed);
         self.session_user_is_superuser.store(is_superuser, Ordering::Relaxed);
     }
 
@@ -228,8 +228,8 @@ impl Session {
     /// user to match. The C side also updates the `is_superuser` GUC; that is a
     /// GUC concern carried on `session_user_is_superuser` here.
     pub fn set_outer_user_id(&self, oid: Oid, _is_superuser: bool) {
-        self.outer_user_id.store(oid.0, Ordering::Relaxed);
-        self.current_user_id.store(oid.0, Ordering::Relaxed);
+        self.outer_user_id.store(oid.get(), Ordering::Relaxed);
+        self.current_user_id.store(oid.get(), Ordering::Relaxed);
     }
 
     // --- Interrupt holdoff / critical-section counters ---
@@ -359,11 +359,11 @@ mod tests {
     #[test]
     fn user_id_setters_round_trip() {
         let s = Session::new(BackendType::BACKEND);
-        s.set_session_user_id(Oid(42), true);
-        s.set_outer_user_id(Oid(42), true);
-        assert_eq!(s.session_user_id(), Oid(42));
-        assert_eq!(s.outer_user_id(), Oid(42));
-        assert_eq!(s.current_user_id(), Oid(42));
+        s.set_session_user_id(Oid::new(42), true);
+        s.set_outer_user_id(Oid::new(42), true);
+        assert_eq!(s.session_user_id(), Oid::new(42));
+        assert_eq!(s.outer_user_id(), Oid::new(42));
+        assert_eq!(s.current_user_id(), Oid::new(42));
         assert!(s.session_user_is_superuser());
     }
 
@@ -394,10 +394,10 @@ mod tests {
             let s = Arc::new(Session::new(BackendType::BACKEND));
             scope(s, async {
                 let cur = current();
-                cur.set_current_user_id(Oid(7));
+                cur.set_current_user_id(Oid::new(7));
                 cur.set_database_name(Some("db".to_string()));
                 tokio::task::yield_now().await;
-                assert_eq!(cur.current_user_id(), Oid(7));
+                assert_eq!(cur.current_user_id(), Oid::new(7));
                 assert_eq!(cur.database_name().as_deref(), Some("db"));
             })
             .await;

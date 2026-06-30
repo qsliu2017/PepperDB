@@ -10,8 +10,8 @@ use crate::c::{text, NameData};
 use crate::postgres_ext::Oid;
 
 // BKI_SHARED_RELATION BKI_ROWTYPE_OID(6101,SubscriptionRelation_Rowtype_Id) BKI_SCHEMA_MACRO
-pub const SubscriptionRelationId: Oid = Oid(6100);
-pub const SubscriptionRelation_Rowtype_Id: Oid = Oid(6101);
+pub const SubscriptionRelationId: Oid = Oid::new(6100);
+pub const SubscriptionRelation_Rowtype_Id: Oid = Oid::new(6101);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

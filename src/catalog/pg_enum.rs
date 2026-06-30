@@ -3,7 +3,7 @@
 use crate::c::{float4, NameData};
 use crate::postgres_ext::Oid;
 
-pub const EnumRelationId: Oid = Oid(3501);
+pub const EnumRelationId: Oid = Oid::new(3501);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

@@ -295,7 +295,7 @@ mod tests {
     use crate::postgres::{DatumGetInt32, Int32GetDatum};
     use std::sync::Arc;
 
-    const INT4OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid(23);
+    const INT4OID: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(23);
     const INVALID: crate::postgres_ext::Oid = crate::postgres_ext::InvalidOid;
 
     fn int4_desc(ncols: usize) -> TupleDesc {
@@ -381,8 +381,8 @@ mod tests {
         out
     }
 
-    const INT4_LT: crate::postgres_ext::Oid = crate::postgres_ext::Oid(97);
-    const INT4_GT: crate::postgres_ext::Oid = crate::postgres_ext::Oid(521);
+    const INT4_LT: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(97);
+    const INT4_GT: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(521);
 
     #[tokio::test(flavor = "multi_thread")]
     async fn datum_sort_ascending() {

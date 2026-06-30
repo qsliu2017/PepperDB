@@ -16,5 +16,5 @@ use crate::postgres_ext::Oid;
 include!(concat!(env!("OUT_DIR"), "/catalog_oids_generated.rs"));
 
 // Pin a few generated OIDs against known PostgreSQL values (genbki fidelity).
-const _: () = assert!(BOOLOID.0 == 16 && INT4OID.0 == 23 && TIMESTAMPOID.0 == 1114);
-const _: () = assert!(BOOL_BTREE_FAM_OID.0 == 424 && INT4ARRAYOID.0 == 1007);
+const _: () = assert!(BOOLOID.get() == 16 && INT4OID.get() == 23 && TIMESTAMPOID.get() == 1114);
+const _: () = assert!(BOOL_BTREE_FAM_OID.get() == 424 && INT4ARRAYOID.get() == 1007);

@@ -106,7 +106,7 @@ fn builtin_type_output(r#type: Oid) -> (Oid, bool) {
 fn cache_lookup_failed(typid: Oid) -> ! {
     crate::elog!(
         crate::utils::elog::ERROR,
-        format!("cache lookup failed for type {} (syscache not warm)", typid.0)
+        format!("cache lookup failed for type {} (syscache not warm)", typid.get())
     );
     unreachable!("elog!(ERROR) raises")
 }
@@ -251,7 +251,7 @@ fn name_to_string(name: &crate::c::NameData) -> String {
 fn proc_cache_lookup_failed(funcid: Oid) -> ! {
     crate::elog!(
         crate::utils::elog::ERROR,
-        format!("cache lookup failed for function {} (syscache not warm)", funcid.0)
+        format!("cache lookup failed for function {} (syscache not warm)", funcid.get())
     );
     unreachable!("elog!(ERROR) raises")
 }
@@ -407,14 +407,14 @@ struct EqOpFamilies {
 
 // btree/hash opfamily OIDs (catalog_oids_generated): integer_ops 1976/1977,
 // text_ops 1994/1995, oid_ops 1989/1990, bool_ops 424/2222.
-const BTREE_INTEGER_FAM: Oid = Oid(1976);
-const HASH_INTEGER_FAM: Oid = Oid(1977);
-const BTREE_TEXT_FAM: Oid = Oid(1994);
-const HASH_TEXT_FAM: Oid = Oid(1995);
-const BTREE_OID_FAM: Oid = Oid(1989);
-const HASH_OID_FAM: Oid = Oid(1990);
-const BTREE_BOOL_FAM: Oid = Oid(424);
-const HASH_BOOL_FAM: Oid = Oid(2222);
+const BTREE_INTEGER_FAM: Oid = Oid::new(1976);
+const HASH_INTEGER_FAM: Oid = Oid::new(1977);
+const BTREE_TEXT_FAM: Oid = Oid::new(1994);
+const HASH_TEXT_FAM: Oid = Oid::new(1995);
+const BTREE_OID_FAM: Oid = Oid::new(1989);
+const HASH_OID_FAM: Oid = Oid::new(1990);
+const BTREE_BOOL_FAM: Oid = Oid::new(424);
+const HASH_BOOL_FAM: Oid = Oid::new(2222);
 
 // The builtin same-type "=" operators of the M7 seed (pg_operator.dat). int2/int4/
 // int8 share the integer opfamilies; bool/text/oid each have their own.
@@ -428,7 +428,7 @@ const BUILTIN_EQ_OPS: &[EqOpFamilies] = &[
 ];
 
 fn lookup_builtin_eq(opno: Oid) -> Option<&'static EqOpFamilies> {
-    BUILTIN_EQ_OPS.iter().find(|e| e.opno == opno.0)
+    BUILTIN_EQ_OPS.iter().find(|e| e.opno == opno.get())
 }
 
 /// PG `op_mergejoinable`: true if the operator can be used as a mergejoin clause
@@ -468,18 +468,18 @@ pub fn get_opcode(opno: Oid) -> Oid {
         // SAFETY: a held OPEROID hit -> a pg_operator row.
         let out = {
             let op: Form_pg_operator = GETSTRUCT(unsafe { &*tuple }).cast::<FormData_pg_operator>();
-            Oid(unsafe { &*op }.oprcode.0)
+            Oid::new(unsafe { &*op }.oprcode.get())
         };
         release_sys_cache(tuple);
         return out;
     }
     // Builtin fallback for the seeded "=" operators (the join-key equalities).
-    builtin_eq_opcode(opno).map_or(crate::postgres_ext::InvalidOid, Oid)
+    builtin_eq_opcode(opno).map_or(crate::postgres_ext::InvalidOid, Oid::new)
 }
 
 /// The implementing function OID of a builtin "=" operator (pg_proc seed OIDs).
 fn builtin_eq_opcode(opno: Oid) -> Option<u32> {
-    Some(match opno.0 {
+    Some(match opno.get() {
         94 => 63,   // int2eq
         96 => 65,   // int4eq
         410 => 467, // int8eq
@@ -509,7 +509,7 @@ pub fn op_input_types(opno: Oid) -> (Oid, Oid) {
     }
     // Builtin fallback (catalog not warm): the known "=" operators.
     if let Some(e) = lookup_builtin_eq(opno) {
-        return (Oid(e.lefttype), Oid(e.righttype));
+        return (Oid::new(e.lefttype), Oid::new(e.righttype));
     }
     (crate::postgres_ext::InvalidOid, crate::postgres_ext::InvalidOid)
 }
@@ -526,12 +526,12 @@ pub fn get_oprrest(opno: Oid) -> Oid {
         // SAFETY: a held OPEROID hit -> a pg_operator row.
         let out = {
             let op: Form_pg_operator = GETSTRUCT(unsafe { &*tuple }).cast::<FormData_pg_operator>();
-            Oid(unsafe { &*op }.oprrest.0)
+            Oid::new(unsafe { &*op }.oprrest.get())
         };
         release_sys_cache(tuple);
         return out;
     }
-    builtin_op_selectivity(opno).map_or(crate::postgres_ext::InvalidOid, |s| Oid(s.oprrest))
+    builtin_op_selectivity(opno).map_or(crate::postgres_ext::InvalidOid, |s| Oid::new(s.oprrest))
 }
 
 /// PG `get_oprjoin`: the operator's join-selectivity estimator proc OID (the seeded
@@ -544,12 +544,12 @@ pub fn get_oprjoin(opno: Oid) -> Oid {
         // SAFETY: a held OPEROID hit -> a pg_operator row.
         let out = {
             let op: Form_pg_operator = GETSTRUCT(unsafe { &*tuple }).cast::<FormData_pg_operator>();
-            Oid(unsafe { &*op }.oprjoin.0)
+            Oid::new(unsafe { &*op }.oprjoin.get())
         };
         release_sys_cache(tuple);
         return out;
     }
-    builtin_op_selectivity(opno).map_or(crate::postgres_ext::InvalidOid, |s| Oid(s.oprjoin))
+    builtin_op_selectivity(opno).map_or(crate::postgres_ext::InvalidOid, |s| Oid::new(s.oprjoin))
 }
 
 /// Cold-catalog fallback for `get_oprrest`/`get_oprjoin`: the (oprrest, oprjoin)
@@ -573,7 +573,7 @@ fn builtin_op_selectivity(opno: Oid) -> Option<OpSelectivity> {
         return Some(OpSelectivity { oprrest: F_EQSEL, oprjoin: F_EQJOINSEL });
     }
     // Ordering comparisons + "<>" for the integer types (the M7 inequality set).
-    let (rest, join) = match opno.0 {
+    let (rest, join) = match opno.get() {
         // int2/int4/int8 "<"
         37 | 95 | 97 | 412 | 418 | 534 | 535 | 1864 | 1865 => (F_SCALARLTSEL, F_SCALARLTJOINSEL),
         // ">"
@@ -599,8 +599,8 @@ pub fn get_op_index_interpretation(opno: Oid) -> Vec<crate::utils::lsyscache::Op
         vec![crate::utils::lsyscache::OpIndexInterpretation {
             opfamily_id: e.btree_opfamily,
             cmptype: CompareType::Eq,
-            oplefttype: Oid(e.lefttype),
-            oprighttype: Oid(e.righttype),
+            oplefttype: Oid::new(e.lefttype),
+            oprighttype: Oid::new(e.righttype),
         }]
     })
 }

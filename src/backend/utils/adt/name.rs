@@ -197,7 +197,7 @@ pub fn nameconcatoid(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     let nam = unsafe { pg_getarg_name(fcinfo, 0) };
     let oid = crate::postgres::DatumGetObjectId(fcinfo.args[1].value);
 
-    let suffix = format!("_{}", oid.0);
+    let suffix = format!("_{}", oid.get());
     let suflen = suffix.len();
     let name_bytes = name_str(nam);
     let mut namlen = name_bytes.len();
@@ -319,13 +319,13 @@ mod tests {
 
     #[test]
     fn nameconcatoid_basic_and_truncate() {
-        let r = nameconcatoid(&mut fc(&[name_datum("foo"), ObjectIdGetDatum(Oid(42))]));
+        let r = nameconcatoid(&mut fc(&[name_datum("foo"), ObjectIdGetDatum(Oid::new(42))]));
         let mut of = fc(&[r]);
         assert_eq!(out_to_string(nameout(&mut of)), "foo_42");
 
         // Oversize: name truncated, suffix preserved.
         let long = name_datum(&"x".repeat(70));
-        let r = nameconcatoid(&mut fc(&[long, ObjectIdGetDatum(Oid(7))]));
+        let r = nameconcatoid(&mut fc(&[long, ObjectIdGetDatum(Oid::new(7))]));
         let mut of = fc(&[r]);
         let back = out_to_string(nameout(&mut of));
         assert!(back.ends_with("_7"), "suffix kept: {back}");

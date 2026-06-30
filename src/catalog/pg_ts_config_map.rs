@@ -2,7 +2,7 @@
 
 use crate::postgres_ext::Oid;
 
-pub const TSConfigMapRelationId: Oid = Oid(3603);
+pub const TSConfigMapRelationId: Oid = Oid::new(3603);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

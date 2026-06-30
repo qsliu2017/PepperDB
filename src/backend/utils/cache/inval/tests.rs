@@ -35,18 +35,18 @@ fn add_and_dedup_relcache_messages() {
             let mut st = cell.borrow_mut();
             let mut group = InvalidationMsgsGroup::default();
             let arrays = &mut st.inval_message_arrays;
-            add_relcache_invalidation_message(arrays, &mut group, Oid(1), Oid(10));
-            add_relcache_invalidation_message(arrays, &mut group, Oid(1), Oid(11));
+            add_relcache_invalidation_message(arrays, &mut group, Oid::new(1), Oid::new(10));
+            add_relcache_invalidation_message(arrays, &mut group, Oid::new(1), Oid::new(11));
             // Duplicate relId is dropped.
-            add_relcache_invalidation_message(arrays, &mut group, Oid(1), Oid(10));
+            add_relcache_invalidation_message(arrays, &mut group, Oid::new(1), Oid::new(10));
             assert_eq!(group.num_in_subgroup(REL_CACHE_MSGS), 2);
 
             // InvalidOid (whole relcache) then a specific one: the specific one is
             // redundant because InvalidOid already covers all.
             let mut g2 = InvalidationMsgsGroup::default();
             g2.set_group_to_follow(&group);
-            add_relcache_invalidation_message(arrays, &mut g2, Oid(1), InvalidOid);
-            add_relcache_invalidation_message(arrays, &mut g2, Oid(1), Oid(99));
+            add_relcache_invalidation_message(arrays, &mut g2, Oid::new(1), InvalidOid);
+            add_relcache_invalidation_message(arrays, &mut g2, Oid::new(1), Oid::new(99));
             assert_eq!(g2.num_in_subgroup(REL_CACHE_MSGS), 1);
         });
     });
@@ -62,12 +62,12 @@ fn append_folds_current_into_prior() {
             current.set_group_to_follow(&prior);
             {
                 let arrays = &mut st.inval_message_arrays;
-                add_catcache_invalidation_message(arrays, &mut prior, 3, 100, Oid(1));
-                add_relcache_invalidation_message(arrays, &mut prior, Oid(1), Oid(10));
+                add_catcache_invalidation_message(arrays, &mut prior, 3, 100, Oid::new(1));
+                add_relcache_invalidation_message(arrays, &mut prior, Oid::new(1), Oid::new(10));
                 // current must follow prior in the array to be adjacent.
                 current.set_group_to_follow(&prior);
-                add_catcache_invalidation_message(arrays, &mut current, 4, 200, Oid(1));
-                add_relcache_invalidation_message(arrays, &mut current, Oid(1), Oid(11));
+                add_catcache_invalidation_message(arrays, &mut current, 4, 200, Oid::new(1));
+                add_relcache_invalidation_message(arrays, &mut current, Oid::new(1), Oid::new(11));
             }
             assert_eq!(prior.num_in_group(), 2);
             assert_eq!(current.num_in_group(), 2);
@@ -97,8 +97,8 @@ fn prepare_state_nesting_and_subxact_merge() {
                 add_relcache_invalidation_message(
                     arrays,
                     &mut top.prior_cmd_invalid_msgs,
-                    Oid(1),
-                    Oid(10),
+                    Oid::new(1),
+                    Oid::new(10),
                 );
                 top.ii
                     .current_cmd_invalid_msgs
@@ -120,8 +120,8 @@ fn prepare_state_nesting_and_subxact_merge() {
                 add_relcache_invalidation_message(
                     arrays,
                     &mut child.prior_cmd_invalid_msgs,
-                    Oid(1),
-                    Oid(20),
+                    Oid::new(1),
+                    Oid::new(20),
                 );
             }
             st.trans_inval_info.push(child);
@@ -184,12 +184,12 @@ fn xact_get_committed_orders_prior_then_current() {
             {
                 let arrays = &mut st.inval_message_arrays;
                 // prior: cat id=1, rel relId=10
-                add_catcache_invalidation_message(arrays, &mut top.prior_cmd_invalid_msgs, 1, 0, Oid(1));
-                add_relcache_invalidation_message(arrays, &mut top.prior_cmd_invalid_msgs, Oid(1), Oid(10));
+                add_catcache_invalidation_message(arrays, &mut top.prior_cmd_invalid_msgs, 1, 0, Oid::new(1));
+                add_relcache_invalidation_message(arrays, &mut top.prior_cmd_invalid_msgs, Oid::new(1), Oid::new(10));
                 // current follows prior; cat id=2, rel relId=11
                 top.ii.current_cmd_invalid_msgs.set_group_to_follow(&top.prior_cmd_invalid_msgs);
-                add_catcache_invalidation_message(arrays, &mut top.ii.current_cmd_invalid_msgs, 2, 0, Oid(1));
-                add_relcache_invalidation_message(arrays, &mut top.ii.current_cmd_invalid_msgs, Oid(1), Oid(11));
+                add_catcache_invalidation_message(arrays, &mut top.ii.current_cmd_invalid_msgs, 2, 0, Oid::new(1));
+                add_relcache_invalidation_message(arrays, &mut top.ii.current_cmd_invalid_msgs, Oid::new(1), Oid::new(11));
             }
             st.trans_inval_info.push(top);
         });
@@ -225,7 +225,7 @@ where
     let latch = Arc::new(Latch::new());
     let (_key, slot) = reg.register(1000 + procno, b"k", latch);
     let sess = Arc::new(Session::new(BackendType::BACKEND));
-    sess.set_database_id(Oid(1));
+    sess.set_database_id(Oid::new(1));
     my_proc_scope(sess_scope(
         sess,
         ps_scope(

@@ -76,7 +76,7 @@ pub fn registry_present() -> bool {
 pub fn register_catalog_index(heap_relid: Oid, index: Arc<RelationData>, info: IndexInfo) {
     let _ = CATALOG_INDEXES.try_with(|cell| {
         cell.borrow_mut()
-            .entry(heap_relid.0)
+            .entry(heap_relid.get())
             .or_default()
             .push(RegisteredIndex { index, info });
     });
@@ -93,7 +93,7 @@ pub fn unregister_catalog_index(indexoid: Oid) -> Option<Oid> {
                 let pos = indexes.iter().position(|ri| ri.index.rd_id == indexoid);
                 if let Some(pos) = pos {
                     indexes.remove(pos);
-                    return Some(Oid(heap));
+                    return Some(Oid::new(heap));
                 }
             }
             None
@@ -110,7 +110,7 @@ fn lookup_catalog_indexes(heap_relid: Oid) -> Vec<(Arc<RelationData>, Vec<i32>)>
     CATALOG_INDEXES
         .try_with(|cell| {
             cell.borrow()
-                .get(&heap_relid.0)
+                .get(&heap_relid.get())
                 .map(|v| {
                     v.iter()
                         .map(|ri| {
@@ -143,7 +143,7 @@ pub fn relation_get_index_list(heap_relid: Oid) -> Vec<RegisteredIndexInfo> {
     CATALOG_INDEXES
         .try_with(|cell| {
             cell.borrow()
-                .get(&heap_relid.0)
+                .get(&heap_relid.get())
                 .map(|v| {
                     v.iter()
                         .map(|ri| RegisteredIndexInfo {

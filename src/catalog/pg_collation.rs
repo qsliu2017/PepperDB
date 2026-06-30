@@ -3,7 +3,7 @@
 use crate::c::{text, NameData};
 use crate::postgres_ext::Oid;
 
-pub const CollationRelationId: Oid = Oid(3456);
+pub const CollationRelationId: Oid = Oid::new(3456);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

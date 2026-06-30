@@ -392,7 +392,7 @@ mod tests {
         Node::Var(Box::new(Var {
             varno,
             varattno: 1,
-            vartype: Oid(23),
+            vartype: Oid::new(23),
             vartypmod: -1,
             varcollid: InvalidOid,
             varnullingrels: None,

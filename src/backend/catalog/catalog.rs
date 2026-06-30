@@ -116,7 +116,7 @@ pub async fn get_new_rel_file_number(
 /// toast tables/indexes.
 #[must_use]
 pub fn is_catalog_relation_oid(relid: Oid) -> bool {
-    relid.0 < FIRST_UNPINNED_OBJECT_ID
+    relid.get() < FIRST_UNPINNED_OBJECT_ID
 }
 
 /// `IsCatalogRelation`: [`is_catalog_relation_oid`] of the relation's OID.
@@ -158,10 +158,10 @@ pub fn is_shared_relation(_relation_id: Oid) -> bool {
 pub fn is_pinned_object(class_id: Oid, object_id: Oid) -> bool {
     // Databases and the public namespace are intentionally not pinned; large
     // objects are never pinned. Their class OIDs:
-    const NAMESPACE_RELATION_ID: Oid = Oid(2615);
-    const DATABASE_RELATION_ID: Oid = Oid(1262);
-    const PG_PUBLIC_NAMESPACE: Oid = Oid(2200);
-    if object_id.0 >= FIRST_UNPINNED_OBJECT_ID {
+    const NAMESPACE_RELATION_ID: Oid = Oid::new(2615);
+    const DATABASE_RELATION_ID: Oid = Oid::new(1262);
+    const PG_PUBLIC_NAMESPACE: Oid = Oid::new(2200);
+    if object_id.get() >= FIRST_UNPINNED_OBJECT_ID {
         return false;
     }
     if class_id == NAMESPACE_RELATION_ID && object_id == PG_PUBLIC_NAMESPACE {
@@ -176,14 +176,14 @@ pub fn is_pinned_object(class_id: Oid, object_id: Oid) -> bool {
 /// `IsCatalogNamespace`: pg_catalog (OID 11).
 #[must_use]
 pub fn is_catalog_namespace(namespace_id: Oid) -> bool {
-    namespace_id == Oid(11)
+    namespace_id == Oid::new(11)
 }
 
 /// `IsToastNamespace`: pg_toast (OID 99). M2 creates no toast namespaces, but the
 /// predicate is cheap and faithful.
 #[must_use]
 pub fn is_toast_namespace(namespace_id: Oid) -> bool {
-    namespace_id == Oid(99)
+    namespace_id == Oid::new(99)
 }
 
 /// The default tablespace for a relation given its requested tablespace: a shared

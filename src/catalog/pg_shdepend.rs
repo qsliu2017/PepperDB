@@ -2,7 +2,7 @@
 
 use crate::postgres_ext::Oid;
 
-pub const SharedDependRelationId: Oid = Oid(1214); // BKI_SHARED_RELATION
+pub const SharedDependRelationId: Oid = Oid::new(1214); // BKI_SHARED_RELATION
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

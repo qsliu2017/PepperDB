@@ -825,7 +825,7 @@ mod tests {
 
     fn opexpr(opno: u32, opfuncid: Oid, resulttype: Oid, args: Vec<Node>) -> Node {
         Node::OpExpr(Box::new(OpExpr {
-            opno: Oid(opno),
+            opno: Oid::new(opno),
             opfuncid,
             opresulttype: resulttype,
             opretset: false,

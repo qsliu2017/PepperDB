@@ -3,7 +3,7 @@
 use crate::c::{NameData, regproc};
 use crate::postgres_ext::Oid;
 
-pub const TSTemplateRelationId: Oid = Oid(3764);
+pub const TSTemplateRelationId: Oid = Oid::new(3764);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]

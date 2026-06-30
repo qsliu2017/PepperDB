@@ -285,7 +285,7 @@ fn shim_comparator_for(cmp_func: Oid) -> SortComparator {
         _ => {
             crate::elog!(
                 crate::utils::elog::ERROR,
-                format!("no sort-support comparator for function {}", cmp_func.0)
+                format!("no sort-support comparator for function {}", cmp_func.get())
             );
             unreachable!("elog!(ERROR) raises")
         }
@@ -300,7 +300,7 @@ fn call_cmp(cmp_func: Oid, x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
         .unwrap_or_else(|| {
             crate::elog!(
                 crate::utils::elog::ERROR,
-                format!("comparator function {} returned NULL", cmp_func.0)
+                format!("comparator function {} returned NULL", cmp_func.get())
             );
             unreachable!("elog!(ERROR) raises")
         });
@@ -341,7 +341,7 @@ pub fn PrepareSortSupportFromOrderingOp(ordering_op: Oid, ssup: SortSupport) {
     let Some((opfamily, opcintype, cmptype)) = get_ordering_op_properties(ordering_op) else {
         crate::elog!(
             crate::utils::elog::ERROR,
-            format!("operator {} is not a valid ordering operator", ordering_op.0)
+            format!("operator {} is not a valid ordering operator", ordering_op.get())
         );
         unreachable!("elog!(ERROR) raises")
     };
@@ -359,7 +359,7 @@ fn finish_sort_support_function(opfamily: Oid, opcintype: Oid, ssup: SortSupport
             crate::utils::elog::ERROR,
             format!(
                 "missing support function {}({},{}) in opfamily {}",
-                BTORDER_PROC, opcintype.0, opcintype.0, opfamily.0
+                BTORDER_PROC, opcintype.get(), opcintype.get(), opfamily.get()
             )
         );
     }
@@ -376,19 +376,19 @@ fn get_ordering_op_properties(opno: Oid) -> Option<(Oid, Oid, crate::access::cmp
     use crate::access::cmptype::CompareType::{Gt, Lt};
     // (opfamily, opcintype) for each btree default opclass family; OIDs from the
     // seeded pg_opfamily / pg_type rows.
-    const INTEGER_OPS: Oid = Oid(1976); // btree/integer_ops
-    const OID_OPS: Oid = Oid(1989); // btree/oid_ops
-    const TEXT_OPS: Oid = Oid(1994); // btree/text_ops
-    const DATETIME_OPS: Oid = Oid(434); // btree/datetime_ops
-    const NUMERIC_OPS: Oid = Oid(1988); // btree/numeric_ops
-    const INT2: Oid = Oid(21);
-    const INT4: Oid = Oid(23);
-    const INT8: Oid = Oid(20);
-    const OID_T: Oid = Oid(26);
-    const TEXT: Oid = Oid(25);
-    const DATE: Oid = Oid(1082);
-    const NUMERIC: Oid = Oid(1700);
-    let (family, intype, cmp) = match opno.0 {
+    const INTEGER_OPS: Oid = Oid::new(1976); // btree/integer_ops
+    const OID_OPS: Oid = Oid::new(1989); // btree/oid_ops
+    const TEXT_OPS: Oid = Oid::new(1994); // btree/text_ops
+    const DATETIME_OPS: Oid = Oid::new(434); // btree/datetime_ops
+    const NUMERIC_OPS: Oid = Oid::new(1988); // btree/numeric_ops
+    const INT2: Oid = Oid::new(21);
+    const INT4: Oid = Oid::new(23);
+    const INT8: Oid = Oid::new(20);
+    const OID_T: Oid = Oid::new(26);
+    const TEXT: Oid = Oid::new(25);
+    const DATE: Oid = Oid::new(1082);
+    const NUMERIC: Oid = Oid::new(1700);
+    let (family, intype, cmp) = match opno.get() {
         95 => (INTEGER_OPS, INT2, Lt),   // int2lt
         520 => (INTEGER_OPS, INT2, Gt),  // int2gt
         97 => (INTEGER_OPS, INT4, Lt),   // int4lt
@@ -451,7 +451,7 @@ fn builtin_opfamily_order_proc(opfamily: Oid, lefttype: Oid, procnum: i16) -> Oi
     if procnum != BTORDER_PROC {
         return crate::postgres_ext::InvalidOid;
     }
-    match lefttype.0 {
+    match lefttype.get() {
         21 => f::F_BTINT2CMP,
         23 => f::F_BTINT4CMP,
         20 => f::F_BTINT8CMP,

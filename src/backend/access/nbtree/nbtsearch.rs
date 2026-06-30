@@ -777,7 +777,7 @@ mod tests {
         for i in 0..ncols {
             let att: &mut FormData_pg_attribute = &mut desc.attrs[i];
             att.attnum = (i + 1) as i16;
-            att.atttypid = crate::postgres_ext::Oid(23); // INT4OID
+            att.atttypid = crate::postgres_ext::Oid::new(23); // INT4OID
             att.attlen = 4;
             att.attbyval = true;
             att.attalign = TYPALIGN_INT;

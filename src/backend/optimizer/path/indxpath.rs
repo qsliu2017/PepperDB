@@ -165,13 +165,12 @@ fn is_pseudoconstant(node: &Node) -> bool {
 /// executor's `op_btree_strategy` (nodeIndexscan) but returns Option so a
 /// non-indexable operator simply fails to match instead of panicking.
 fn op_btree_strategy(opno: crate::postgres_ext::Oid) -> Option<StrategyNumber> {
-    use crate::postgres_ext::Oid;
-    let s = match opno {
-        Oid(96) => BT_EQUAL_STRATEGY_NUMBER,          // int4 =
-        Oid(97) => BT_LESS_STRATEGY_NUMBER,           // int4 <
-        Oid(521) => BT_GREATER_STRATEGY_NUMBER,       // int4 >
-        Oid(523) => BT_LESS_EQUAL_STRATEGY_NUMBER,    // int4 <=
-        Oid(525) => BT_GREATER_EQUAL_STRATEGY_NUMBER, // int4 >=
+    let s = match opno.get() {
+        96 => BT_EQUAL_STRATEGY_NUMBER,          // int4 =
+        97 => BT_LESS_STRATEGY_NUMBER,           // int4 <
+        521 => BT_GREATER_STRATEGY_NUMBER,       // int4 >
+        523 => BT_LESS_EQUAL_STRATEGY_NUMBER,    // int4 <=
+        525 => BT_GREATER_EQUAL_STRATEGY_NUMBER, // int4 >=
         _ => return None,
     };
     Some(s)

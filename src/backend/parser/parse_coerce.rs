@@ -418,7 +418,7 @@ pub fn coerce_to_common_type(
 fn type_mismatch_error(context: &str, t1: Oid, t2: Oid) -> ! {
     crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(crate::utils::errcodes::ERRCODE_DATATYPE_MISMATCH)
-            .errmsg(format!("{context} types {} and {} cannot be matched", t1.0, t2.0));
+            .errmsg(format!("{context} types {} and {} cannot be matched", t1.get(), t2.get()));
     });
     unreachable!("ereport(ERROR) diverges");
 }

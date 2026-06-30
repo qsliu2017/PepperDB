@@ -105,7 +105,7 @@ mod tests {
     fn bkp_block(bimg_len: u16, has_image: bool) -> DecodedBkpBlock {
         DecodedBkpBlock {
             in_use: true,
-            rlocator: RelFileLocator { spcOid: Oid(1), dbOid: Oid(2), relNumber: Oid(3) },
+            rlocator: RelFileLocator { spcOid: Oid::new(1), dbOid: Oid::new(2), relNumber: Oid::new(3) },
             forknum: ForkNumber::MAIN_FORKNUM,
             blkno: 0,
             prefetch_buffer: crate::storage::buf::INVALID_BUFFER,

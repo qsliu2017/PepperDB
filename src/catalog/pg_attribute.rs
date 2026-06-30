@@ -7,8 +7,8 @@ use crate::postgres_ext::{InvalidOid, Oid};
 use crate::utils::acl::AclItem;
 
 // BKI_BOOTSTRAP BKI_ROWTYPE_OID(75,AttributeRelation_Rowtype_Id) BKI_SCHEMA_MACRO
-pub const AttributeRelationId: Oid = Oid(1249);
-pub const AttributeRelation_Rowtype_Id: Oid = Oid(75);
+pub const AttributeRelationId: Oid = Oid::new(1249);
+pub const AttributeRelation_Rowtype_Id: Oid = Oid::new(75);
 
 #[repr(C)]
 #[derive(pepperdb_derive::Catalog)]
@@ -134,9 +134,9 @@ pub struct FormExtraData_pg_attribute {
 // MAKE_SYSCACHE(ATTNUM, pg_attribute_relid_attnum_index, 128)
 
 /// pg_attribute_relid_attnam_index: unique index on (attrelid, attname).
-pub const AttributeRelidNameIndexId: Oid = Oid(2658);
+pub const AttributeRelidNameIndexId: Oid = Oid::new(2658);
 /// pg_attribute_relid_attnum_index: unique index on (attrelid, attnum).
-pub const AttributeRelidNumIndexId: Oid = Oid(2659);
+pub const AttributeRelidNumIndexId: Oid = Oid::new(2659);
 
 pub const ATTRIBUTE_IDENTITY_ALWAYS: i8 = b'a' as i8;
 pub const ATTRIBUTE_IDENTITY_BY_DEFAULT: i8 = b'd' as i8;

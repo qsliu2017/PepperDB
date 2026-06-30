@@ -354,7 +354,7 @@ fn btree_lt_of_eq(eq_opno: crate::postgres_ext::Oid) -> crate::postgres_ext::Oid
     use crate::postgres_ext::Oid;
     // pg_operator.dat same-type "<": int2(95), int4(97), int8(412), bool(58),
     // text(664), oid(609). Maps from the "=" OID.
-    let lt = match eq_opno.0 {
+    let lt = match eq_opno.get() {
         94 => 95,   // int2
         96 => 97,   // int4
         410 => 412, // int8
@@ -363,7 +363,7 @@ fn btree_lt_of_eq(eq_opno: crate::postgres_ext::Oid) -> crate::postgres_ext::Oid
         607 => 609, // oid
         _ => return crate::postgres_ext::InvalidOid,
     };
-    Oid(lt)
+    Oid::new(lt)
 }
 
 /// The child output column position (1-based) of a base-rel Var, by matching
@@ -964,8 +964,8 @@ mod join_tests {
     use crate::postgres_ext::{InvalidOid, Oid};
     use crate::backend::optimizer::util::relnode::make_node_reloptinfo;
 
-    const INT4: Oid = Oid(23);
-    const INT4_EQ: Oid = Oid(96);
+    const INT4: Oid = Oid::new(23);
+    const INT4_EQ: Oid = Oid::new(96);
 
     fn var(varno: i32, varattno: i16) -> Node {
         Node::Var(Box::new(Var {
@@ -1024,7 +1024,7 @@ mod join_tests {
         let clause = Node::OpExpr(Box::new(OpExpr {
             opno: INT4_EQ,
             opfuncid: InvalidOid,
-            opresulttype: Oid(16),
+            opresulttype: Oid::new(16),
             opretset: false,
             opcollid: InvalidOid,
             inputcollid: InvalidOid,
@@ -1134,7 +1134,7 @@ mod join_tests {
     fn dummy_pathkey() -> crate::nodes::pathnodes::PathKey {
         crate::nodes::pathnodes::PathKey {
             eclass: Box::new(empty_eclass()),
-            opfamily: Oid(1976),
+            opfamily: Oid::new(1976),
             cmptype: crate::access::cmptype::CompareType::Lt,
             nulls_first: false,
         }

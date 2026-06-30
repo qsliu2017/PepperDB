@@ -146,7 +146,7 @@ impl CatCache {
 /// in-memory bucketing only, so it need not match PG's wire hash).
 fn hash_one_key(kind: KeyKind, v: Datum) -> u32 {
     let raw: u32 = match kind {
-        KeyKind::Oid => DatumGetObjectId(v).0,
+        KeyKind::Oid => DatumGetObjectId(v).get(),
         KeyKind::Int4 => DatumGetInt32(v) as u32,
         KeyKind::Int2 => DatumGetInt16(v) as u32,
         KeyKind::Name => {
@@ -594,7 +594,7 @@ mod tests {
         use crate::backend::utils::cache::relcache::scope_async as relcache_scope;
         use crate::backend::utils::time::{combocid::combocid_scope, snapmgr::snapmgr_scope};
         let sess = Arc::new(crate::session::Session::new(crate::miscadmin::BackendType::BACKEND));
-        sess.set_database_id(Oid(90000));
+        sess.set_database_id(Oid::new(90000));
         sess.set_database_tablespace(crate::common::relpath::DEFAULTTABLESPACE_OID);
         let owner = crate::backend::utils::resowner::resowner::ResourceOwner::create(None, "Test");
         // Box::pin each scope layer's inner future so the deeply-nested
@@ -617,7 +617,7 @@ mod tests {
     async fn create_catalog_fork(shared: &Arc<SharedState>, relid: Oid) {
         let loc = crate::storage::relfilelocator::RelFileLocator {
             spcOid: crate::common::relpath::DEFAULTTABLESPACE_OID,
-            dbOid: Oid(90000),
+            dbOid: Oid::new(90000),
             relNumber: relid,
         };
         let mut smgr = crate::storage::smgr::SmgrRelation::open(
@@ -643,8 +643,8 @@ mod tests {
         let set = |v: &mut [Datum], anum: i32, d: Datum| v[(anum - 1) as usize] = d;
         set(&mut values, t::Anum_pg_type_oid, ObjectIdGetDatum(INT4OID));
         set(&mut values, t::Anum_pg_type_typname, NameGetDatum(name));
-        set(&mut values, t::Anum_pg_type_typnamespace, ObjectIdGetDatum(Oid(11)));
-        set(&mut values, t::Anum_pg_type_typowner, ObjectIdGetDatum(Oid(10)));
+        set(&mut values, t::Anum_pg_type_typnamespace, ObjectIdGetDatum(Oid::new(11)));
+        set(&mut values, t::Anum_pg_type_typowner, ObjectIdGetDatum(Oid::new(10)));
         set(&mut values, t::Anum_pg_type_typlen, Int16GetDatum(4));
         set(&mut values, t::Anum_pg_type_typbyval, BoolGetDatum(true));
         set(&mut values, t::Anum_pg_type_typtype, CharGetDatum(TYPTYPE_BASE));
@@ -652,24 +652,24 @@ mod tests {
         set(&mut values, t::Anum_pg_type_typispreferred, BoolGetDatum(false));
         set(&mut values, t::Anum_pg_type_typisdefined, BoolGetDatum(true));
         set(&mut values, t::Anum_pg_type_typdelim, CharGetDatum(b',' as i8));
-        set(&mut values, t::Anum_pg_type_typrelid, ObjectIdGetDatum(Oid(0)));
-        set(&mut values, t::Anum_pg_type_typsubscript, ObjectIdGetDatum(Oid(0)));
-        set(&mut values, t::Anum_pg_type_typelem, ObjectIdGetDatum(Oid(0)));
-        set(&mut values, t::Anum_pg_type_typarray, ObjectIdGetDatum(Oid(1007)));
+        set(&mut values, t::Anum_pg_type_typrelid, ObjectIdGetDatum(Oid::new(0)));
+        set(&mut values, t::Anum_pg_type_typsubscript, ObjectIdGetDatum(Oid::new(0)));
+        set(&mut values, t::Anum_pg_type_typelem, ObjectIdGetDatum(Oid::new(0)));
+        set(&mut values, t::Anum_pg_type_typarray, ObjectIdGetDatum(Oid::new(1007)));
         set(&mut values, t::Anum_pg_type_typinput, ObjectIdGetDatum(crate::utils::fmgroids::F_INT4IN));
         set(&mut values, t::Anum_pg_type_typoutput, ObjectIdGetDatum(crate::utils::fmgroids::F_INT4OUT));
-        set(&mut values, t::Anum_pg_type_typreceive, ObjectIdGetDatum(Oid(0)));
-        set(&mut values, t::Anum_pg_type_typsend, ObjectIdGetDatum(Oid(0)));
-        set(&mut values, t::Anum_pg_type_typmodin, ObjectIdGetDatum(Oid(0)));
-        set(&mut values, t::Anum_pg_type_typmodout, ObjectIdGetDatum(Oid(0)));
-        set(&mut values, t::Anum_pg_type_typanalyze, ObjectIdGetDatum(Oid(0)));
+        set(&mut values, t::Anum_pg_type_typreceive, ObjectIdGetDatum(Oid::new(0)));
+        set(&mut values, t::Anum_pg_type_typsend, ObjectIdGetDatum(Oid::new(0)));
+        set(&mut values, t::Anum_pg_type_typmodin, ObjectIdGetDatum(Oid::new(0)));
+        set(&mut values, t::Anum_pg_type_typmodout, ObjectIdGetDatum(Oid::new(0)));
+        set(&mut values, t::Anum_pg_type_typanalyze, ObjectIdGetDatum(Oid::new(0)));
         set(&mut values, t::Anum_pg_type_typalign, CharGetDatum(TYPALIGN_INT));
         set(&mut values, t::Anum_pg_type_typstorage, CharGetDatum(TYPSTORAGE_PLAIN));
         set(&mut values, t::Anum_pg_type_typnotnull, BoolGetDatum(false));
-        set(&mut values, t::Anum_pg_type_typbasetype, ObjectIdGetDatum(Oid(0)));
+        set(&mut values, t::Anum_pg_type_typbasetype, ObjectIdGetDatum(Oid::new(0)));
         set(&mut values, t::Anum_pg_type_typtypmod, crate::postgres::Int32GetDatum(-1));
         set(&mut values, t::Anum_pg_type_typndims, crate::postgres::Int32GetDatum(0));
-        set(&mut values, t::Anum_pg_type_typcollation, ObjectIdGetDatum(Oid(0)));
+        set(&mut values, t::Anum_pg_type_typcollation, ObjectIdGetDatum(Oid::new(0)));
         // Trailing varlena columns are NULL.
         isnull[(t::Anum_pg_type_typdefaultbin - 1) as usize] = true;
         isnull[(t::Anum_pg_type_typdefault - 1) as usize] = true;
@@ -752,7 +752,7 @@ mod tests {
             CommandCounterIncrement();
 
             // Look up a type OID that is not seeded -> miss -> negative entry cached.
-            let missing = Oid(999_999);
+            let missing = Oid::new(999_999);
             let r = crate::backend::utils::cache::syscache::search_sys_cache_populate(
                 &shared,
                 SysCacheIdentifier::TYPEOID,

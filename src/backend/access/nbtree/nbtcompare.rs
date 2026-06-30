@@ -269,17 +269,17 @@ pub fn btoidsortsupport(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
 
 fn oid_decrement(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = DatumGetObjectId(existing);
-    if v.0 == 0 {
+    if v.get() == 0 {
         return (Datum(0), true);
     }
-    (ObjectIdGetDatum(Oid(v.0 - 1)), false)
+    (ObjectIdGetDatum(Oid::new(v.get() - 1)), false)
 }
 fn oid_increment(_rel: Option<&crate::utils::rel::RelationData>, existing: Datum) -> (Datum, bool) {
     let v = DatumGetObjectId(existing);
-    if v.0 == OID_MAX.0 {
+    if v.get() == OID_MAX.get() {
         return (Datum(0), true);
     }
-    (ObjectIdGetDatum(Oid(v.0 + 1)), false)
+    (ObjectIdGetDatum(Oid::new(v.get() + 1)), false)
 }
 
 /// PG `btoidskipsupport`.
@@ -289,7 +289,7 @@ pub fn btoidskipsupport(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     let sksup = unsafe { &mut *sksup };
     sksup.decrement = oid_decrement;
     sksup.increment = oid_increment;
-    sksup.low_elem = ObjectIdGetDatum(Oid(0));
+    sksup.low_elem = ObjectIdGetDatum(Oid::new(0));
     sksup.high_elem = ObjectIdGetDatum(OID_MAX);
     Datum(0)
 }
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn oid_cmp() {
-        let r = btoidcmp(&mut fc2(ObjectIdGetDatum(Oid(10)), ObjectIdGetDatum(Oid(20))));
+        let r = btoidcmp(&mut fc2(ObjectIdGetDatum(Oid::new(10)), ObjectIdGetDatum(Oid::new(20))));
         assert_eq!(DatumGetInt32(r), -1);
     }
 
