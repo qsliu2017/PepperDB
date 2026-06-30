@@ -98,6 +98,24 @@ pub fn standard_planner(
         not_yet_reachable("standard_planner: bound parameters");
     }
 
+    // WITH query (CTEs): plan each CTE body into a subplan and the host body's
+    // CteScan/RecursiveUnion over them (SS_process_ctes), building the combined
+    // rangetable. Routed here (like the set-op / ModifyTable paths) rather than through
+    // the scan/join path machinery.
+    if !parse.cteList.is_empty() {
+        return plan_with_query_stmt(parse);
+    }
+
+    // Set-operation top query (UNION/INTERSECT/EXCEPT): the analyze layer built the
+    // SetOperationStmt tree (with embedded leaf Querys) and the executor has real
+    // Append/SetOp leaf nodes; prepunion plans each branch and combines them, building
+    // the combined rangetable. Routed here (like ModifyTable below) rather than through
+    // the scan/join path machinery. ORDER BY/LIMIT over the set-op result are staged in
+    // analyze, so the combined plan is the final plan.
+    if parse.setOperations.is_some() {
+        return plan_set_operations_stmt(parse);
+    }
+
     // Set up global state for this planner invocation.
     let mut glob = make_planner_global();
 
@@ -191,6 +209,111 @@ pub fn standard_planner(
         result_relations: glob.result_relations.clone(),
         // glob.append_relations is empty on the M1 path (no inheritance/partitioning);
         // its Vec<Box<AppendRelInfo>> -> Vec<Node> conversion grows with that.
+        append_relations: Vec::new(),
+        subplans: glob.subplans.clone(),
+        rewind_plan_ids: glob.rewind_plan_ids.clone(),
+        row_marks: glob.finalrowmarks.clone(),
+        relation_oids: glob.relation_oids.clone(),
+        inval_items: glob.inval_items.clone(),
+        param_exec_types: glob.param_exec_types.clone(),
+        utility_stmt: parse.utilityStmt.clone(),
+        stmt_location: parse.stmt_location,
+        stmt_len: parse.stmt_len,
+    }
+}
+
+/// Plan a set-operation top Query (`parse.setOperations` is set) into a
+/// `PlannedStmt`. prepunion's `plan_set_operations` recurses the SetOperationStmt
+/// tree, plans each leaf branch, and combines them (Append / Append+Unique / SetOp),
+/// building the combined rangetable. The combined plan's scan nodes already
+/// reference final RT indices; `set_plan_references` runs over it (rtoffset 0) to
+/// assign plan node ids and flatten the rangetable into `glob.finalrtable`.
+fn plan_set_operations_stmt(parse: &mut Query) -> PlannedStmt {
+    use crate::nodes::parsenodes::SetOperationStmt;
+
+    let Some(Node::SetOperationStmt(sostmt)) = parse.setOperations.as_ref() else {
+        not_yet_reachable("plan_set_operations_stmt: setOperations is not a SetOperationStmt");
+    };
+    let sostmt: SetOperationStmt = (**sostmt).clone();
+
+    let result = crate::backend::optimizer::prep::prepunion::plan_set_operations(
+        &sostmt,
+        &parse.targetList,
+    );
+
+    // Move the combined rangetable into the Query so set_plan_references flattens it
+    // (rtoffset 0; the combined plan's scan Vars/scanrelids are already final).
+    parse.rtable = result.rtable;
+    parse.rteperminfos = result.perminfos;
+
+    let mut glob = make_planner_global();
+    let mut root = make_planner_info(&glob, parse, 1);
+    let _ = &mut glob;
+
+    let top_plan = set_plan_references(&mut root, result.plan);
+    let glob = &root.glob;
+
+    PlannedStmt {
+        command_type: CmdType::SELECT,
+        query_id: parse.queryId,
+        plan_id: 0,
+        has_returning: false,
+        has_modifying_cte: parse.hasModifyingCTE,
+        can_set_tag: parse.canSetTag,
+        transient_plan: glob.transient_plan,
+        depends_on_role: glob.depends_on_role,
+        parallel_mode_needed: glob.parallel_mode_needed,
+        jit_flags: PGJIT_NONE,
+        plan_tree: top_plan,
+        part_prune_infos: glob.part_prune_infos.clone(),
+        rtable: glob.finalrtable.clone(),
+        unprunable_relids: None,
+        perm_infos: glob.finalrteperminfos.clone(),
+        result_relations: glob.result_relations.clone(),
+        append_relations: Vec::new(),
+        subplans: glob.subplans.clone(),
+        rewind_plan_ids: glob.rewind_plan_ids.clone(),
+        row_marks: glob.finalrowmarks.clone(),
+        relation_oids: glob.relation_oids.clone(),
+        inval_items: glob.inval_items.clone(),
+        param_exec_types: glob.param_exec_types.clone(),
+        utility_stmt: parse.utilityStmt.clone(),
+        stmt_location: parse.stmt_location,
+        stmt_len: parse.stmt_len,
+    }
+}
+
+/// Plan a WITH query (`parse.cteList` is non-empty) into a `PlannedStmt`. subselect's
+/// `plan_with_query` plans each CTE body + the host body's CteScan/RecursiveUnion,
+/// building the combined rangetable. set_plan_references runs over the combined plan
+/// (rtoffset 0; the embedded scan nodes already carry final RT indices).
+fn plan_with_query_stmt(parse: &mut Query) -> PlannedStmt {
+    let result = crate::backend::optimizer::plan::subselect::plan_with_query(parse);
+    parse.rtable = result.rtable;
+    parse.rteperminfos = result.perminfos;
+
+    let glob = make_planner_global();
+    let mut root = make_planner_info(&glob, parse, 1);
+    let top_plan = set_plan_references(&mut root, result.plan);
+    let glob = &root.glob;
+
+    PlannedStmt {
+        command_type: CmdType::SELECT,
+        query_id: parse.queryId,
+        plan_id: 0,
+        has_returning: false,
+        has_modifying_cte: parse.hasModifyingCTE,
+        can_set_tag: parse.canSetTag,
+        transient_plan: glob.transient_plan,
+        depends_on_role: glob.depends_on_role,
+        parallel_mode_needed: glob.parallel_mode_needed,
+        jit_flags: PGJIT_NONE,
+        plan_tree: top_plan,
+        part_prune_infos: glob.part_prune_infos.clone(),
+        rtable: glob.finalrtable.clone(),
+        unprunable_relids: None,
+        perm_infos: glob.finalrteperminfos.clone(),
+        result_relations: glob.result_relations.clone(),
         append_relations: Vec::new(),
         subplans: glob.subplans.clone(),
         rewind_plan_ids: glob.rewind_plan_ids.clone(),
@@ -415,7 +538,12 @@ pub fn subquery_planner(
         not_yet_reachable("subquery_planner: recursive query");
     }
     if setops.is_some() {
-        not_yet_reachable("subquery_planner: set operations");
+        // M12 (step 43): the analyze layer builds the SetOperationStmt with the
+        // cross-branch column-type reconcile, and the executor has real Append /
+        // SetOp / RecursiveUnion / CteScan / WorkTableScan leaf nodes; the planner
+        // glue that flattens the per-branch rangetables into one PlannedStmt (PG's
+        // prepunion plan_set_operations + OffsetVarNodes) is staged.
+        not_yet_reachable("subquery_planner: set-operation plan assembly (prepunion)");
     }
     let query_level = parent_root.as_ref().map_or(1, |p| p.query_level + 1);
     if parent_root.is_some() {
@@ -430,10 +558,14 @@ pub fn subquery_planner(
     // pullup, and UNION ALL flattening all precede the rangetable survey. None
     // applies to the M2 single-rel / const SELECT / INSERT ... VALUES paths.
     if !root.parse.cteList.is_empty() {
-        not_yet_reachable("subquery_planner: WITH clause");
+        // M12 (step 43): transformWithClause builds the cteList and the executor has
+        // real CteScan/RecursiveUnion/WorkTableScan nodes; SS_process_ctes (planning
+        // each CTE into a CteScan-backed subplan) + CTE-reference resolution in FROM
+        // are staged.
+        not_yet_reachable("subquery_planner: WITH clause CTE planning (SS_process_ctes)");
     }
     if root.parse.setOperations.is_some() {
-        not_yet_reachable("subquery_planner: set operations");
+        not_yet_reachable("subquery_planner: set-operation plan assembly (prepunion)");
     }
     if root.parse.hasSubLinks {
         not_yet_reachable("subquery_planner: sublinks");
@@ -520,6 +652,47 @@ pub fn subquery_planner(
     // rel is identified (set inside grouping_planner via set_cheapest already).
 
     root
+}
+
+/// A planned sub-Query: a finished, executable plan tree whose scan nodes
+/// reference RT indices 1..k local to `rtable`, plus that flattened rangetable and
+/// its permission infos. Used by the set-op (prepunion) and CTE (subselect) glue
+/// to plan each leaf SELECT / CTE body independently, then splice the per-leaf
+/// rangetables into the combined PlannedStmt (offsetting RT indices).
+pub struct PlannedSubquery {
+    pub plan: Node,
+    pub rtable: Vec<Node>,
+    pub perminfos: Vec<Node>,
+}
+
+/// Plan one sub-Query into a finished, self-contained plan tree + its flattened
+/// rangetable. Mirrors the core of `standard_planner` (subquery_planner ->
+/// create_plan -> build_upper_plan -> set_plan_references) over a FRESH
+/// `PlannerGlobal`, so the result's RT indices are 1..k local to its own
+/// rangetable and the upper-node Vars are already in OUTER_VAR form. The caller
+/// (prepunion / subselect) offsets the scan nodes' `scanrelid` and concatenates
+/// the rangetables. `wt_param_id` (>= 0) plants a recursive-CTE working-table
+/// param id on the root so a WorkTableScan in the body picks it up.
+pub fn plan_subquery(parse: &mut Query, wt_param_id: i32) -> PlannedSubquery {
+    let mut glob = make_planner_global();
+    let mut root = subquery_planner(&mut glob, parse, None, false, 0.0, None);
+    root.wt_param_id = wt_param_id;
+
+    let final_rel = fetch_final_rel(&root);
+    let best_path = final_rel
+        .cheapest_total_path
+        .clone()
+        .unwrap_or_else(|| not_yet_reachable("plan_subquery: no cheapest path"));
+    let mut top_plan = create_plan(&mut root, &best_path);
+    top_plan = crate::backend::optimizer::plan::createplan::build_upper_plan(&root, top_plan);
+
+    let top_plan = set_plan_references(&mut root, top_plan);
+
+    PlannedSubquery {
+        plan: top_plan,
+        rtable: root.glob.finalrtable.clone(),
+        perminfos: root.glob.finalrteperminfos.clone(),
+    }
 }
 
 /// PG `makeNode(PlannerInfo)` + the subquery_planner field initialization that

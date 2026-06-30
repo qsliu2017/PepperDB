@@ -79,6 +79,141 @@ pub fn add_range_table_entry_for_relation(
     build_ns_item_from_tuple_desc(rte_ref, rtindex, tupdesc)
 }
 
+/// PG `addRangeTableEntryForCTE`: build an `RTE_CTE` for a reference to the CTE
+/// `cte` (at scoping level `levelsup`), add it to the rangetable, and return a
+/// `ParseNamespaceItem` exposing its columns. The column names/types come from the
+/// CTE's already-determined `ctecolnames`/`ctecoltypes` (the recursive
+/// self-reference uses the column info set from the non-recursive term). SEARCH /
+/// CYCLE extra columns and the alias path are deferred.
+pub fn add_range_table_entry_for_cte(
+    pstate: &mut ParseState,
+    cte: &crate::nodes::parsenodes::CommonTableExpr,
+    levelsup: crate::c::Index,
+    rv: &crate::nodes::primnodes::RangeVar,
+    in_from_cl: bool,
+) -> ParseNamespaceItem {
+    if rv.alias.is_some() {
+        not_yet_reachable("addRangeTableEntryForCTE: alias clause");
+    }
+    let refname = cte.ctename.clone().unwrap_or_default();
+
+    // self_reference iff the CTE's analysis isn't completed yet (its ctequery is
+    // still a raw SelectStmt, not a Query).
+    let self_reference = !matches!(cte.ctequery, Some(Node::Query(_)));
+
+    // The CTE column names are stored as Node::String_; the alias eref wants String_.
+    let mut eref = makeAlias(&refname, Vec::new());
+    eref.colnames = cte
+        .ctecolnames
+        .iter()
+        .map(|n| match n {
+            Node::String_(s) => s.clone(),
+            _ => makeString(String::new()),
+        })
+        .collect();
+
+    let rte = make_cte_rte(
+        cte.ctename.clone(),
+        levelsup,
+        self_reference,
+        cte.ctecoltypes.clone(),
+        cte.ctecoltypmods.clone(),
+        cte.ctecolcollations.clone(),
+        eref,
+        in_from_cl,
+    );
+
+    pstate.p_rtable.push(rte);
+    let rtindex = pstate.p_rtable.len() as i32;
+    let rte_ref = &pstate.p_rtable[(rtindex - 1) as usize];
+    build_ns_item_from_coltypes(rte_ref, rtindex)
+}
+
+/// Build the `ParseNamespaceItem` for a CTE RTE from its coltypes/colcollations (a
+/// CTE has no tupdesc; its columns come from the determined CTE column info).
+fn build_ns_item_from_coltypes(rte: &RangeTblEntry, rtindex: i32) -> ParseNamespaceItem {
+    let nscolumns = (0..rte.coltypes.len())
+        .map(|i| {
+            let attno = (i + 1) as AttrNumber;
+            ParseNamespaceColumn {
+                varno: rtindex as crate::c::Index,
+                varattno: attno,
+                vartype: rte.coltypes[i],
+                vartypmod: *rte.coltypmods.get(i).unwrap_or(&-1),
+                varcollid: *rte.colcollations.get(i).unwrap_or(&InvalidOid),
+                varreturningtype: VarReturningType::DEFAULT,
+                varnosyn: rtindex as crate::c::Index,
+                varattnosyn: attno,
+                dontexpand: false,
+            }
+        })
+        .collect();
+
+    ParseNamespaceItem {
+        names: Box::new(
+            rte.eref.as_ref().unwrap_or_else(|| unreachable!("CTE RTE has an eref")).as_ref().clone(),
+        ),
+        rte: Box::new(rte.clone()),
+        rtindex,
+        perminfo: None,
+        nscolumns,
+        rel_visible: true,
+        cols_visible: true,
+        lateral_only: false,
+        lateral_ok: true,
+        returning_type: VarReturningType::DEFAULT,
+    }
+}
+
+/// `makeNode(RangeTblEntry)` for an `RTE_CTE` with the CTE-relevant fields set.
+#[allow(clippy::too_many_arguments, reason = "1:1 port: mirrors addRangeTableEntryForCTE's field set")]
+fn make_cte_rte(
+    ctename: Option<String>,
+    ctelevelsup: crate::c::Index,
+    self_reference: bool,
+    coltypes: Vec<Oid>,
+    coltypmods: Vec<i32>,
+    colcollations: Vec<Oid>,
+    eref: crate::nodes::primnodes::Alias,
+    in_from_cl: bool,
+) -> RangeTblEntry {
+    RangeTblEntry {
+        alias: None,
+        eref: Some(Box::new(eref)),
+        rtekind: RTEKind::CTE,
+        relid: InvalidOid,
+        inh: false,
+        relkind: 0,
+        rellockmode: 0,
+        perminfoindex: 0,
+        tablesample: None,
+        subquery: None,
+        security_barrier: false,
+        jointype: JoinType::INNER,
+        joinmergedcols: 0,
+        joinaliasvars: Vec::new(),
+        joinleftcols: Vec::new(),
+        joinrightcols: Vec::new(),
+        join_using_alias: None,
+        functions: Vec::new(),
+        funcordinality: false,
+        tablefunc: None,
+        values_lists: Vec::new(),
+        ctename,
+        ctelevelsup,
+        self_reference,
+        coltypes,
+        coltypmods,
+        colcollations,
+        enrname: None,
+        enrtuples: 0.0,
+        groupexprs: Vec::new(),
+        lateral: false,
+        inFromCl: in_from_cl,
+        securityQuals: Vec::new(),
+    }
+}
+
 /// PG `buildRelationAliases` (M2 subset): fill `eref->colnames` from the tupdesc's
 /// live (non-dropped) column names. The user-supplied-alias rebuild path is not
 /// reachable (no alias clause in M2); a dropped column gets an empty-string name.

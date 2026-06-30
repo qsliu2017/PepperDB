@@ -85,8 +85,116 @@ fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
         Node::Sort(s) => Node::Sort(Box::new(set_sort_refs(root, *s, rtoffset))),
         Node::Unique(u) => Node::Unique(Box::new(set_unique_refs(root, *u, rtoffset))),
         Node::Limit(l) => Node::Limit(Box::new(set_limit_refs(root, *l, rtoffset))),
+        Node::Material(m) => Node::Material(Box::new(set_material_refs(root, *m, rtoffset))),
+        Node::Append(a) => Node::Append(Box::new(set_append_refs(root, *a, rtoffset))),
+        Node::SetOp(s) => Node::SetOp(Box::new(set_setop_refs(root, *s, rtoffset))),
+        Node::CteScan(c) => Node::CteScan(Box::new(set_ctescan_refs(root, *c, rtoffset))),
+        Node::RecursiveUnion(r) => {
+            Node::RecursiveUnion(Box::new(set_recursiveunion_refs(root, *r, rtoffset)))
+        }
+        Node::WorkTableScan(w) => {
+            Node::WorkTableScan(Box::new(set_worktablescan_refs(root, *w, rtoffset)))
+        }
         other => not_yet_reachable(&format!("set_plan_refs: {other:?}")),
     }
+}
+
+/// PG `set_plan_refs` T_Append arm: assign the node id and recurse into each branch
+/// subplan. The Append projects nothing (it forwards child tuples), so its tlist's
+/// OUTER_VAR Vars are positional and need no further fixup. The branch subplans'
+/// scan nodes already carry their final (offset) RT indices (prepunion's
+/// offset_plan_rt_indices), so this recursion is identity on the Vars (rtoffset 0).
+fn set_append_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::Append,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::Append {
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    plan.appendplans = std::mem::take(&mut plan.appendplans)
+        .into_iter()
+        .map(|p| set_plan_refs(root, p, rtoffset))
+        .collect();
+    plan
+}
+
+/// PG `set_plan_refs` T_SetOp arm: assign the node id, recurse into the two child
+/// subplans (held in lefttree/righttree -- the executor counts per side). The SetOp
+/// forwards child tuples (no projection); its tlist is positional.
+fn set_setop_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::SetOp,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::SetOp {
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    if let Some(l) = plan.plan.lefttree.take() {
+        plan.plan.lefttree = Some(set_plan_refs(root, l, rtoffset));
+    }
+    if let Some(r) = plan.plan.righttree.take() {
+        plan.plan.righttree = Some(set_plan_refs(root, r, rtoffset));
+    }
+    plan
+}
+
+/// PG `set_plan_refs` T_Material arm: recurse into the child, assign id; passthrough
+/// tlist. Used as the materialize shield below a CteScan's embedded subplan.
+fn set_material_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::Material,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::Material {
+    if let Some(c) = plan.plan.lefttree.take() {
+        plan.plan.lefttree = Some(set_plan_refs(root, c, rtoffset));
+    }
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    plan
+}
+
+/// PG `set_plan_refs` T_CteScan arm: assign the node id and recurse into the CTE
+/// subplan embedded as the scan's lefttree (the port has no es_subplanstates
+/// registry; nodeCtescan reads the embedded subplan). The CteScan forwards the
+/// materialized rows (no projection); its tlist is positional.
+fn set_ctescan_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::CteScan,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::CteScan {
+    plan.scan.plan.plan_node_id = next_plan_node_id(root);
+    if let Some(sub) = plan.scan.plan.lefttree.take() {
+        plan.scan.plan.lefttree = Some(set_plan_refs(root, sub, rtoffset));
+    }
+    plan
+}
+
+/// PG `set_plan_refs` T_RecursiveUnion arm: assign the node id and recurse into the
+/// non-recursive (lefttree) + recursive (righttree) terms. The RecursiveUnion
+/// forwards child tuples; its tlist is positional.
+fn set_recursiveunion_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::RecursiveUnion,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::RecursiveUnion {
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    if let Some(l) = plan.plan.lefttree.take() {
+        plan.plan.lefttree = Some(set_plan_refs(root, l, rtoffset));
+    }
+    if let Some(r) = plan.plan.righttree.take() {
+        plan.plan.righttree = Some(set_plan_refs(root, r, rtoffset));
+    }
+    plan
+}
+
+/// PG `set_plan_refs` T_WorkTableScan arm: assign the node id and validate the scan
+/// tlist/qual. The recursive term's projection (`n+1`) and filter (`n<5`) reference
+/// the working-table rowtype (scan Vars); identity at rtoffset 0.
+fn set_worktablescan_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::WorkTableScan,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::WorkTableScan {
+    plan.scan.plan.plan_node_id = next_plan_node_id(root);
+    fix_scan_tlist_identity(&plan.scan.plan.targetlist, rtoffset);
+    fix_scan_qual_identity(&plan.scan.plan.qual, rtoffset);
+    plan
 }
 
 /// PG `set_plan_refs` T_Agg arm + `set_upper_references`: recurse into the child,
@@ -209,6 +317,13 @@ fn plan_tlist(plan: &Node) -> &[Node] {
         Node::MergeJoin(m) => &m.join.plan.targetlist,
         Node::HashJoin(h) => &h.join.plan.targetlist,
         Node::Hash(h) => &h.plan.targetlist,
+        Node::Append(a) => &a.plan.targetlist,
+        Node::SetOp(s) => &s.plan.targetlist,
+        Node::Material(m) => &m.plan.targetlist,
+        Node::Group(g) => &g.plan.targetlist,
+        Node::CteScan(c) => &c.scan.plan.targetlist,
+        Node::RecursiveUnion(r) => &r.plan.targetlist,
+        Node::WorkTableScan(w) => &w.scan.plan.targetlist,
         other => not_yet_reachable(&format!("set_plan_refs: child tlist of {other:?}")),
     }
 }

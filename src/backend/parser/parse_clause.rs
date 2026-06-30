@@ -59,11 +59,61 @@ async fn transform_from_clause_item(
     let Node::RangeVar(rv) = n else {
         not_yet_reachable("transformFromClauseItem: non-RangeVar FROM item (join/subquery/function)");
     };
-    let nsitem = transform_table_entry(shared, pstate, &rv).await;
+    // getRTEForSpecialRelationTypes: an unqualified RangeVar matching a visible CTE
+    // name becomes an RTE_CTE (the WITH-query reference), not a table open.
+    let nsitem = if let Some((cte, levelsup)) = scan_namespace_for_cte(pstate, &rv) {
+        let item = crate::backend::parser::parse_relation::add_range_table_entry_for_cte(
+            pstate, &cte, levelsup, &rv, true,
+        );
+        // Bump the CTE's refcount on a non-self reference (the body uses it).
+        if matches!(cte.ctequery, Some(Node::Query(_))) {
+            bump_cte_refcount(pstate, cte.ctename.as_deref());
+        }
+        item
+    } else {
+        transform_table_entry(shared, pstate, &rv).await
+    };
     let rtr = Node::RangeTblRef(Box::new(crate::nodes::primnodes::RangeTblRef {
         rtindex: nsitem.rtindex,
     }));
     (rtr, nsitem)
+}
+
+/// PG `scanNameSpaceForCTE`: find an unqualified RangeVar's name among the
+/// referenceable CTEs (`p_ctenamespace`, plus parent levels), returning the CTE and
+/// its `ctelevelsup`. A schema-qualified RangeVar never matches a CTE.
+fn scan_namespace_for_cte(
+    pstate: &ParseState,
+    rv: &RangeVar,
+) -> Option<(crate::nodes::parsenodes::CommonTableExpr, crate::c::Index)> {
+    if rv.schemaname.is_some() {
+        return None;
+    }
+    let refname = rv.relname.as_deref()?;
+    let mut levelsup = 0;
+    let mut ps: Option<&ParseState> = Some(pstate);
+    while let Some(p) = ps {
+        for cte in &p.p_ctenamespace {
+            if cte.ctename.as_deref() == Some(refname) {
+                return Some((cte.clone(), levelsup));
+            }
+        }
+        levelsup += 1;
+        ps = p.parent_parse_state.as_deref();
+    }
+    None
+}
+
+/// Bump the `cterefcount` of the named CTE in the (innermost matching) namespace.
+fn bump_cte_refcount(pstate: &mut ParseState, ctename: Option<&str>) {
+    let Some(name) = ctename else { return };
+    if let Some(cte) = pstate
+        .p_ctenamespace
+        .iter_mut()
+        .find(|c| c.ctename.as_deref() == Some(name))
+    {
+        cte.cterefcount += 1;
+    }
 }
 
 /// PG `transformTableEntry`: open the relation (AccessShareLock) and build its

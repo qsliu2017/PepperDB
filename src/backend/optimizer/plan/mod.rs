@@ -9,3 +9,6 @@ pub mod planmain;
 pub mod planner;
 pub mod setrefs;
 pub mod subselect;
+
+#[cfg(test)]
+mod setop_cte_tests;

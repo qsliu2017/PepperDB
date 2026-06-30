@@ -215,7 +215,7 @@ pub fn transformStmt(pstate: &mut ParseState, parse_tree: &Node) -> Box<Query> {
             } else if n.op == SetOperation::NONE {
                 transformSelectStmt(pstate, n)
             } else {
-                not_yet_reachable("transformStmt: set-operation SELECT");
+                transform_set_operation_stmt_sync(pstate, n)
             }
         }
         // InsertStmt / DeleteStmt / UpdateStmt / MergeStmt and the special-case
@@ -401,6 +401,46 @@ pub async fn parse_analyze_varparams_async(
 /// where needed. SELECT routes through `transform_select_stmt_async` (which handles
 /// FROM); INSERT through `transform_insert_stmt`. A table-less constant SELECT
 /// still works (its FROM clause is empty).
+/// Public re-export of `transform_stmt_async` for the CTE layer (parse_cte.rs),
+/// which analyzes a CTE body in a child ParseState.
+pub async fn transform_stmt_async_pub(
+    shared: &Arc<SharedState>,
+    pstate: &mut ParseState,
+    parse_tree: &Node,
+) -> Box<Query> {
+    transform_stmt_async(shared, pstate, parse_tree).await
+}
+
+/// Build a top-level set-op Query from an already-assembled SetOperationStmt + the
+/// leftmost leaf (for column names) + reconciled column types. Used by the
+/// recursive-CTE layer (parse_cte.rs) to wrap a recursive UNION. Mirrors the tlist /
+/// jointree construction at the tail of `finish_set_operation_stmt`.
+pub fn finish_set_operation_stmt_pub(
+    _pstate: &mut ParseState,
+    sostmt: crate::nodes::parsenodes::SetOperationStmt,
+    leftmost: &Query,
+    col_types: &[Oid],
+) -> Box<Query> {
+    let mut qry = make_query();
+    qry.commandType = CmdType::SELECT;
+    let mut target_list = Vec::new();
+    for (ci, ct) in col_types.iter().enumerate() {
+        let resname = tle_resname(&leftmost.targetList[ci]);
+        let var = crate::backend::nodes::makefuncs::make_var(0, (ci + 1) as i16, *ct, -1, crate::postgres_ext::InvalidOid, 0);
+        let tle = crate::backend::nodes::makefuncs::make_target_entry(
+            Some(Node::Var(Box::new(var))),
+            (ci + 1) as i16,
+            resname,
+            false,
+        );
+        target_list.push(Node::TargetEntry(Box::new(tle)));
+    }
+    qry.targetList = target_list;
+    qry.setOperations = Some(Node::SetOperationStmt(Box::new(sostmt)));
+    qry.jointree = Some(Node::FromExpr(Box::new(crate::nodes::makefuncs::makeFromExpr(Vec::new(), None))));
+    qry
+}
+
 async fn transform_stmt_async(
     shared: &Arc<SharedState>,
     pstate: &mut ParseState,
@@ -413,7 +453,7 @@ async fn transform_stmt_async(
             } else if n.op == SetOperation::NONE {
                 transform_select_stmt_async(shared, pstate, n).await
             } else {
-                not_yet_reachable("transformStmt: set-operation SELECT");
+                transform_set_operation_stmt_async(shared, pstate, n).await
             }
         }
         Node::InsertStmt(n) => transform_insert_stmt(shared, pstate, n).await,
@@ -432,6 +472,336 @@ async fn transform_stmt_async(
     result
 }
 
+/// PG `transformSetOperationStmt`: transform a UNION/INTERSECT/EXCEPT tree into a
+/// top-level `Query` whose `setOperations` holds the analyzed set-op tree (M12,
+/// step 43).
+///
+/// Port shortcuts vs PG: PG turns each leaf SELECT into a subquery RTE and the tree
+/// into RangeTblRef-based `SetOperationStmt` nodes; here the leaf Queries are
+/// embedded directly as `Node::Query` in the `SetOperationStmt.larg/rarg` and the
+/// planner consumes them (no subquery RTEs / sort-namespace join RTE). The top
+/// target list is built from the leftmost branch's column names with the reconciled
+/// per-column common types (`select_common_type`), each leaf coerced to match.
+/// Top-level ORDER BY / LIMIT over a set-op tree are staged (the columns-by-name
+/// sort namespace is not built yet).
+async fn transform_set_operation_stmt_async(
+    shared: &Arc<SharedState>,
+    pstate: &mut ParseState,
+    stmt: &SelectStmt,
+) -> Box<Query> {
+    use crate::nodes::nodeFuncs::exprType;
+    use crate::nodes::parsenodes::SetOperationStmt;
+
+    if !stmt.sortClause.is_empty() || stmt.limitOffset.is_some() || stmt.limitCount.is_some() {
+        not_yet_reachable("transformSetOperationStmt: ORDER BY / LIMIT over a set operation");
+    }
+    if !stmt.lockingClause.is_empty() {
+        not_yet_reachable("transformSetOperationStmt: FOR UPDATE/SHARE with a set operation");
+    }
+
+    let mut qry = make_query();
+    qry.commandType = CmdType::SELECT;
+
+    // A WITH clause over a set operation: transform the CTE list FIRST (setting up the
+    // CTE namespace), so each branch SELECT's `FROM cte` resolves. Recorded on the top
+    // set-op Query.
+    if let Some(with) = stmt.withClause.as_ref() {
+        qry.hasRecursive = with.recursive;
+        qry.cteList =
+            crate::backend::parser::parse_cte::transform_with_clause(shared, pstate, with).await;
+        qry.hasModifyingCTE = pstate.p_has_modifying_cte;
+    }
+
+    // Recursively transform the tree, collecting every leaf Query so the per-column
+    // common type can be reconciled across all branches.
+    let mut leaves: Vec<Query> = Vec::new();
+    let sostmt = Box::pin(transform_set_op_tree(shared, pstate, stmt, &mut leaves)).await;
+
+    finish_set_operation_stmt(pstate, &mut qry, sostmt, leaves);
+    qry
+}
+
+/// Shared finalizer for both the sync + async set-op transforms: reconcile the
+/// per-column common types across all leaf SELECTs, coerce each leaf, stamp the
+/// colTypes onto the tree, and build the top Query's Var target list.
+fn finish_set_operation_stmt(
+    pstate: &mut ParseState,
+    qry: &mut Query,
+    sostmt: crate::nodes::parsenodes::SetOperationStmt,
+    mut leaves: Vec<Query>,
+) {
+    crate::assert!(!leaves.is_empty());
+    let ncols = leaves[0].targetList.len();
+    for l in &leaves {
+        if l.targetList.len() != ncols {
+            set_op_arity_error();
+        }
+    }
+    let mut col_types: Vec<Oid> = Vec::with_capacity(ncols);
+    for ci in 0..ncols {
+        let exprs: Vec<Node> = leaves
+            .iter()
+            .filter_map(|l| tle_expr(&l.targetList[ci]))
+            .collect();
+        // Short-circuit when every branch already has the same type (PG's common
+        // case): no type-category lookup needed, so this also works without a warm
+        // catcache (the table-less const set-op path).
+        let first_type = crate::nodes::nodeFuncs::exprType(&exprs[0]);
+        let all_same = exprs
+            .iter()
+            .all(|e| crate::nodes::nodeFuncs::exprType(e) == first_type);
+        let ct = if all_same {
+            first_type
+        } else {
+            crate::backend::parser::parse_coerce::select_common_type(
+                pstate,
+                &exprs,
+                "UNION/INTERSECT/EXCEPT",
+            )
+            .0
+        };
+        col_types.push(ct);
+    }
+
+    // Coerce each leaf's target expressions to the common column types.
+    for l in &mut leaves {
+        for (ci, ct) in col_types.iter().enumerate() {
+            coerce_tle_to_type(pstate, &mut l.targetList[ci], *ct);
+        }
+    }
+
+    // Stamp the reconciled colTypes onto every SetOperationStmt node in the tree.
+    let mut sostmt = sostmt;
+    stamp_set_op_coltypes(&mut sostmt, &col_types);
+
+    // The top target list: a Var per output column over the leftmost leaf's column
+    // names + the reconciled types (varno 0 -- the planner reads the branch tlists).
+    let leftmost = &leaves[0];
+    let mut target_list = Vec::new();
+    for (ci, ct) in col_types.iter().enumerate() {
+        let resname = tle_resname(&leftmost.targetList[ci]);
+        let var = crate::backend::nodes::makefuncs::make_var(
+            0,
+            (ci + 1) as i16,
+            *ct,
+            -1,
+            crate::postgres_ext::InvalidOid,
+            0,
+        );
+        let tle = crate::backend::nodes::makefuncs::make_target_entry(
+            Some(Node::Var(Box::new(var))),
+            (ci + 1) as i16,
+            resname,
+            false,
+        );
+        target_list.push(Node::TargetEntry(Box::new(tle)));
+    }
+    qry.targetList = target_list;
+    qry.setOperations = Some(Node::SetOperationStmt(Box::new(sostmt)));
+    qry.jointree = Some(Node::FromExpr(Box::new(
+        crate::nodes::makefuncs::makeFromExpr(Vec::new(), None),
+    )));
+}
+
+/// Sync `transformSetOperationStmt` for the table-less const set-op path (the
+/// leaves are const SELECTs handled by the sync `transformSelectStmt`). Mirrors the
+/// async transform; the FROM-bearing branches go through the async path.
+fn transform_set_operation_stmt_sync(pstate: &mut ParseState, stmt: &SelectStmt) -> Box<Query> {
+    if stmt.withClause.is_some()
+        || !stmt.sortClause.is_empty()
+        || stmt.limitOffset.is_some()
+        || stmt.limitCount.is_some()
+        || !stmt.lockingClause.is_empty()
+    {
+        not_yet_reachable("transformSetOperationStmt: WITH/ORDER BY/LIMIT/locking over a set operation");
+    }
+    let mut qry = make_query();
+    qry.commandType = CmdType::SELECT;
+    let mut leaves: Vec<Query> = Vec::new();
+    let sostmt = transform_set_op_tree_sync(pstate, stmt, &mut leaves);
+    finish_set_operation_stmt(pstate, &mut qry, sostmt, leaves);
+    qry
+}
+
+/// Sync sibling of `transform_set_op_tree`.
+fn transform_set_op_tree_sync(
+    pstate: &mut ParseState,
+    stmt: &SelectStmt,
+    leaves: &mut Vec<Query>,
+) -> crate::nodes::parsenodes::SetOperationStmt {
+    use crate::nodes::parsenodes::SetOperationStmt;
+    let larg = stmt
+        .larg
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("transformSetOperationTree: missing left arm"));
+    let rarg = stmt
+        .rarg
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("transformSetOperationTree: missing right arm"));
+    let larg_node = transform_set_op_arm_sync(pstate, larg, leaves);
+    let rarg_node = transform_set_op_arm_sync(pstate, rarg, leaves);
+    SetOperationStmt {
+        op: stmt.op,
+        all: stmt.all,
+        larg: Some(larg_node),
+        rarg: Some(rarg_node),
+        colTypes: Vec::new(),
+        colTypmods: Vec::new(),
+        colCollations: Vec::new(),
+        groupClauses: Vec::new(),
+    }
+}
+
+/// Sync sibling of `transform_set_op_arm`.
+fn transform_set_op_arm_sync(
+    pstate: &mut ParseState,
+    arm: &SelectStmt,
+    leaves: &mut Vec<Query>,
+) -> Node {
+    if arm.op == SetOperation::NONE {
+        let mut child = crate::backend::parser::parse_node::make_child_parsestate(pstate);
+        let q = transformSelectStmt(&mut child, arm);
+        merge_child_pstate_flags(pstate, &child);
+        leaves.push((*q).clone());
+        Node::Query(q)
+    } else {
+        let so = transform_set_op_tree_sync(pstate, arm, leaves);
+        Node::SetOperationStmt(Box::new(so))
+    }
+}
+
+/// Recursively transform a set-op tree node. A leaf (op == NONE) is transformed into
+/// a Query (pushed to `leaves`) and returned as `Node::Query`; an internal node
+/// becomes a `SetOperationStmt` whose larg/rarg are the recursively transformed
+/// children. colTypes are filled in a later pass (`stamp_set_op_coltypes`).
+async fn transform_set_op_tree(
+    shared: &Arc<SharedState>,
+    pstate: &mut ParseState,
+    stmt: &SelectStmt,
+    leaves: &mut Vec<Query>,
+) -> crate::nodes::parsenodes::SetOperationStmt {
+    use crate::nodes::parsenodes::SetOperationStmt;
+
+    let larg = stmt
+        .larg
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("transformSetOperationTree: missing left arm"));
+    let rarg = stmt
+        .rarg
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("transformSetOperationTree: missing right arm"));
+
+    let larg_node = Box::pin(transform_set_op_arm(shared, pstate, larg, leaves)).await;
+    let rarg_node = Box::pin(transform_set_op_arm(shared, pstate, rarg, leaves)).await;
+
+    SetOperationStmt {
+        op: stmt.op,
+        all: stmt.all,
+        larg: Some(larg_node),
+        rarg: Some(rarg_node),
+        colTypes: Vec::new(),
+        colTypmods: Vec::new(),
+        colCollations: Vec::new(),
+        groupClauses: Vec::new(),
+    }
+}
+
+/// Transform one arm of a set-op tree: a leaf SELECT -> `Node::Query`; a nested
+/// set-op -> `Node::SetOperationStmt`.
+async fn transform_set_op_arm(
+    shared: &Arc<SharedState>,
+    pstate: &mut ParseState,
+    arm: &SelectStmt,
+    leaves: &mut Vec<Query>,
+) -> Node {
+    if arm.op == SetOperation::NONE {
+        // Analyze each leaf branch SELECT in its OWN child ParseState so the branch
+        // rangetables/namespaces don't collide (PG's parse_sub_analyze). The child
+        // inherits the enclosing WITH list + hooks; its has-aggs/sublink/modifying-CTE
+        // flags propagate back to the parent.
+        let mut child = crate::backend::parser::parse_node::make_child_parsestate(pstate);
+        let q = Box::pin(transform_select_stmt_async(shared, &mut child, arm)).await;
+        merge_child_pstate_flags(pstate, &child);
+        leaves.push((*q).clone());
+        Node::Query(q)
+    } else {
+        let so = Box::pin(transform_set_op_tree(shared, pstate, arm, leaves)).await;
+        Node::SetOperationStmt(Box::new(so))
+    }
+}
+
+/// Propagate the query-property flags a set-op leaf's child ParseState discovered
+/// (aggregates / window funcs / sublinks / modifying CTE) back to the enclosing
+/// parse state, so the top set-op Query records them.
+fn merge_child_pstate_flags(pstate: &mut ParseState, child: &ParseState) {
+    pstate.p_has_aggs |= child.p_has_aggs;
+    pstate.p_has_window_funcs |= child.p_has_window_funcs;
+    pstate.p_has_sub_links |= child.p_has_sub_links;
+    pstate.p_has_modifying_cte |= child.p_has_modifying_cte;
+}
+
+/// Set the reconciled `colTypes` on every SetOperationStmt node in the tree.
+fn stamp_set_op_coltypes(so: &mut crate::nodes::parsenodes::SetOperationStmt, col_types: &[Oid]) {
+    so.colTypes = col_types.to_vec();
+    so.colTypmods = vec![-1; col_types.len()];
+    so.colCollations = vec![crate::postgres_ext::InvalidOid; col_types.len()];
+    if let Some(Node::SetOperationStmt(l)) = so.larg.as_mut() {
+        stamp_set_op_coltypes(l, col_types);
+    }
+    if let Some(Node::SetOperationStmt(r)) = so.rarg.as_mut() {
+        stamp_set_op_coltypes(r, col_types);
+    }
+}
+
+/// The non-junk target expression of a TargetEntry node.
+fn tle_expr(node: &Node) -> Option<Node> {
+    if let Node::TargetEntry(t) = node
+        && !t.resjunk
+    {
+        return t.expr.clone();
+    }
+    None
+}
+
+/// The result name of a TargetEntry node.
+fn tle_resname(node: &Node) -> Option<String> {
+    if let Node::TargetEntry(t) = node {
+        return t.resname.clone();
+    }
+    None
+}
+
+/// Coerce a TargetEntry's expression to `target_type` in place (no-op if already
+/// that type or junk).
+fn coerce_tle_to_type(pstate: &mut ParseState, node: &mut Node, target_type: Oid) {
+    use crate::nodes::nodeFuncs::exprType;
+    let Node::TargetEntry(t) = node else { return };
+    if t.resjunk {
+        return;
+    }
+    let Some(expr) = t.expr.take() else { return };
+    t.expr = if exprType(&expr) == target_type {
+        Some(expr)
+    } else {
+        Some(crate::backend::parser::parse_coerce::coerce_to_common_type(
+            pstate,
+            expr,
+            target_type,
+            "UNION/INTERSECT/EXCEPT",
+        ))
+    };
+}
+
+/// PG: the "each leaf must have the same number of columns" error.
+#[cold]
+fn set_op_arity_error() -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_SYNTAX_ERROR)
+            .errmsg("each UNION/INTERSECT/EXCEPT query must have the same number of columns");
+    });
+    unreachable!("ereport(ERROR) diverges");
+}
+
 /// PG `transformSelectStmt` with FROM-clause handling. Processes the FROM clause
 /// (building the rangetable) before the target list, so `*` and column references
 /// resolve against the namespace. The remaining clauses (WHERE/GROUP/sort/...)
@@ -444,8 +814,13 @@ async fn transform_select_stmt_async(
     let mut qry = make_query();
     qry.commandType = CmdType::SELECT;
 
-    if stmt.withClause.is_some() {
-        not_yet_reachable("transformSelectStmt: WITH clause");
+    // WITH clause: transform the CTE list (analyzing each CTE body, setting up the
+    // CTE namespace so `FROM cte` resolves), and record it on the Query (M12, step 43).
+    if let Some(with) = stmt.withClause.as_ref() {
+        qry.hasRecursive = with.recursive;
+        qry.cteList =
+            crate::backend::parser::parse_cte::transform_with_clause(shared, pstate, with).await;
+        qry.hasModifyingCTE = pstate.p_has_modifying_cte;
     }
     if stmt.intoClause.is_some() {
         not_yet_reachable("transformSelectStmt: SELECT ... INTO");
@@ -1870,6 +2245,79 @@ mod tests {
         }));
         std::panic::set_hook(prev);
         assert!(res.is_err(), "JOIN ... USING must fail loudly, not flatten");
+    }
+
+    // -- M12 (step 43): set-operation transform over the const path ----------
+
+    fn setop(q: &Query) -> &crate::nodes::parsenodes::SetOperationStmt {
+        let Some(Node::SetOperationStmt(so)) = q.setOperations.as_ref() else {
+            panic!("Query has no setOperations");
+        };
+        so
+    }
+
+    #[test]
+    fn union_builds_setop_with_reconciled_coltypes() {
+        let q = analyze("SELECT 1 UNION SELECT 2");
+        let so = setop(&q);
+        assert_eq!(so.op, SetOperation::UNION);
+        assert!(!so.all, "UNION dedups");
+        assert_eq!(so.colTypes, vec![INT4OID], "one int4 output column");
+        // Both arms are leaf Queries.
+        assert!(matches!(so.larg.as_ref(), Some(Node::Query(_))));
+        assert!(matches!(so.rarg.as_ref(), Some(Node::Query(_))));
+        // Top target list: one Var of the common type.
+        assert_eq!(q.targetList.len(), 1);
+    }
+
+    #[test]
+    fn union_all_keeps_all_flag() {
+        let q = analyze("SELECT 1 UNION ALL SELECT 2");
+        assert!(setop(&q).all, "UNION ALL keeps duplicates");
+    }
+
+    #[test]
+    fn intersect_and_except_ops() {
+        assert_eq!(setop(&analyze("SELECT 1 INTERSECT SELECT 2")).op, SetOperation::INTERSECT);
+        assert_eq!(setop(&analyze("SELECT 1 EXCEPT SELECT 2")).op, SetOperation::EXCEPT);
+        assert!(setop(&analyze("SELECT 1 EXCEPT ALL SELECT 2")).all, "EXCEPT ALL");
+    }
+
+    #[test]
+    fn setop_precedence_intersect_binds_tighter() {
+        // `a UNION b INTERSECT c` == `a UNION (b INTERSECT c)`: the top op is UNION,
+        // and its right arm is the INTERSECT.
+        let q = analyze("SELECT 1 UNION SELECT 2 INTERSECT SELECT 3");
+        let top = setop(&q);
+        assert_eq!(top.op, SetOperation::UNION, "UNION is the looser, top operator");
+        let Some(Node::SetOperationStmt(rarg)) = top.rarg.as_ref() else {
+            panic!("UNION right arm must be the INTERSECT subtree");
+        };
+        assert_eq!(rarg.op, SetOperation::INTERSECT);
+        // The left arm of UNION is the leaf `SELECT 1`.
+        assert!(matches!(top.larg.as_ref(), Some(Node::Query(_))));
+    }
+
+    #[test]
+    fn setop_multicolumn_arity_and_types() {
+        // Two columns per branch: colTypes has one entry per output column, the top
+        // target list one Var per column. (Cross-type reconcile -- e.g. int4+int8 --
+        // exercises select_common_type, which needs a warm catcache and is covered on
+        // the async/wire path; the sync const path uses the same-type short-circuit.)
+        let q = analyze("SELECT 1, 2 UNION SELECT 3, 4");
+        assert_eq!(setop(&q).colTypes, vec![INT4OID, INT4OID]);
+        assert_eq!(q.targetList.len(), 2);
+    }
+
+    #[test]
+    fn setop_mismatched_arity_errors() {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            analyze("SELECT 1 UNION SELECT 2, 3")
+        }));
+        std::panic::set_hook(prev);
+        assert!(res.is_err(), "differing column counts must error");
     }
 }
 

@@ -38,6 +38,7 @@ use crate::backend::parser::parser::{
     make_ot_column_def, make_view_stmt, make_rule_stmt, make_string_value_node,
     make_create_trig_stmt, make_fk_constraint, make_column_fk_constraint, set_constraint_name,
     make_null_const, TrigTiming, TrigEvent,
+    make_set_op, set_select_with_clause, make_with_clause, make_common_table_expr,
     DropBehaviorTok, ObjType,
     attach_over_clause, make_window_ref, make_window_def, assemble_frame_options,
     frame_defaults, frameopt_range, frameopt_rows, frameopt_groups,
@@ -49,7 +50,7 @@ use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
 use crate::nodes::nodes::{CmdType, JoinType, Node};
 use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
 use crate::nodes::primnodes::MergeMatchKind;
-use crate::nodes::parsenodes::{LockingClause, ObjectType, ResTarget, SelectStmt, SortByDir, SortByNulls, TypeName};
+use crate::nodes::parsenodes::{LockingClause, ObjectType, ResTarget, SelectStmt, SetOperation, SortByDir, SortByNulls, TypeName};
 
 grammar;
 
@@ -281,6 +282,11 @@ extern {
         "OTHERS"     => Token::Keyword("others"),
         "BETWEEN"    => Token::Keyword("between"),
         "FILTER"     => Token::Keyword("filter"),
+        // M12 (step 43): set-operation keywords (WITH/RECURSIVE/ALL already exist).
+        "UNION"      => Token::Keyword("union"),
+        "INTERSECT"  => Token::Keyword("intersect"),
+        "EXCEPT"     => Token::Keyword("except"),
+        "MATERIALIZED" => Token::Keyword("materialized"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -1665,33 +1671,78 @@ SeqNumeric: i64 = {
 //  SELECT
 // ===========================================================================
 
-// gram.y `SelectStmt`: select_no_parens | select_with_parens. The paren form and
-// the with/sort/locking/limit wrappers in select_no_parens arrive at their
-// milestones (M5 sort/limit, M12 set ops).
+// gram.y `SelectStmt`: select_no_parens | select_with_parens. The parenthesized
+// form (`select_with_parens`, used to override the INTERSECT-binds-tighter
+// precedence via `(a UNION b) INTERSECT c`) shares the `(` prefix with the CTE body
+// `AS ( PreparableStmt )` and the expression `( a_expr )`, which lalrpop (LALR(1),
+// no %prec) cannot disambiguate. It is STAGED; the two-tier cascade below already
+// gives the spec precedence (`a UNION b INTERSECT c` == `a UNION (b INTERSECT c)`)
+// without parentheses.
 SelectStmt: Node = {
     SelectNoParens,
 };
 
-// gram.y `select_no_parens`: a `simple_select` optionally followed by ORDER BY and
-// LIMIT/OFFSET (the trailing `opt_sort_clause opt_select_limit` arm). The sort and
-// limit clauses are stamped onto the SelectStmt built by `simple_select` (PG's
-// insertSelectOptions). The WITH / FOR-locking wrappers grow at their milestones.
+// gram.y `select_no_parens`: an optional `with_clause`, a `select_clause` (the
+// set-operation tier), optionally followed by ORDER BY / LIMIT/OFFSET / FOR-locking
+// (PG's insertSelectOptions). The sort/limit/locking wrappers and the WITH clause
+// are OUTSIDE the set-op tier so `a UNION b ORDER BY c` binds the ORDER BY to the
+// whole union (gram.y's structure).
 SelectNoParens: Node = {
-    SimpleSelect,
-    <s:SimpleSelect> <sort:SortClause> => insert_select_options(s, sort, None, None),
-    <s:SimpleSelect> <lim:SelectLimit> =>
+    SelectClause,
+    <s:SelectClause> <sort:SortClause> => insert_select_options(s, sort, None, None),
+    <s:SelectClause> <lim:SelectLimit> =>
         insert_select_options(s, Vec::new(), lim.0, lim.1),
-    <s:SimpleSelect> <sort:SortClause> <lim:SelectLimit> =>
+    <s:SelectClause> <sort:SortClause> <lim:SelectLimit> =>
         insert_select_options(s, sort, lim.0, lim.1),
     // M8 (step 34): the `for_locking_clause` wrapper (`SELECT ... FOR UPDATE`).
     // The grammar allows it after an optional ORDER BY (PG's opt_sort_clause).
-    <s:SimpleSelect> <lock:ForLockingClause> => set_select_locking(s, lock),
-    <s:SimpleSelect> <sort:SortClause> <lock:ForLockingClause> =>
+    <s:SelectClause> <lock:ForLockingClause> => set_select_locking(s, lock),
+    <s:SelectClause> <sort:SortClause> <lock:ForLockingClause> =>
         set_select_locking(insert_select_options(s, sort, None, None), lock),
+    // WITH [RECURSIVE] cte_list prefixing the select (M12, step 43).
+    <w:WithClause> <s:SelectClause> => set_select_with_clause(s, w),
+    <w:WithClause> <s:SelectClause> <sort:SortClause> =>
+        set_select_with_clause(insert_select_options(s, sort, None, None), w),
+    <w:WithClause> <s:SelectClause> <lim:SelectLimit> =>
+        set_select_with_clause(insert_select_options(s, Vec::new(), lim.0, lim.1), w),
+    <w:WithClause> <s:SelectClause> <sort:SortClause> <lim:SelectLimit> =>
+        set_select_with_clause(insert_select_options(s, sort, lim.0, lim.1), w),
 };
 
+// gram.y `select_clause: simple_select | select_with_parens`, with the set-op
+// operators folded in. lalrpop has no %left/%nonassoc, so PG's
+// `%left UNION EXCEPT` / `%left INTERSECT` precedence is encoded as a two-tier
+// nonterminal cascade (the same idiom as OrExpr/AndExpr): the LOOSER UNION/EXCEPT
+// tier (`SelectClause`) is left-recursive over the TIGHTER INTERSECT tier
+// (`IntersectClause`), which is left-recursive over the select atom. Left-recursion
+// gives left-associativity; the tier nesting gives "INTERSECT binds tighter".
 SelectClause: Node = {
+    IntersectClause,
+    <l:SelectClause> "UNION" <q:SetQuantifier> <r:IntersectClause> =>
+        make_set_op(SetOperation::UNION, q, l, r),
+    <l:SelectClause> "EXCEPT" <q:SetQuantifier> <r:IntersectClause> =>
+        make_set_op(SetOperation::EXCEPT, q, l, r),
+};
+
+// The INTERSECT precedence tier (binds tighter than UNION/EXCEPT).
+IntersectClause: Node = {
+    SelectAtom,
+    <l:IntersectClause> "INTERSECT" <q:SetQuantifier> <r:SelectAtom> =>
+        make_set_op(SetOperation::INTERSECT, q, l, r),
+};
+
+// A set-op leaf: a `simple_select` (the parenthesized-select leaf is staged; see
+// the SelectStmt note above).
+SelectAtom: Node = {
     SimpleSelect,
+};
+
+// gram.y `set_quantifier: ALL | DISTINCT | /*EMPTY*/`. ALL -> keep duplicates;
+// DISTINCT or empty -> deduplicate (the bool is `all`).
+SetQuantifier: bool = {
+    "ALL"      => true,
+    "DISTINCT" => false,
+    =>           false,
 };
 
 // gram.y `simple_select`. M5 (step 26) reaches the `SELECT [DISTINCT] target_list
@@ -1724,6 +1775,47 @@ SimpleSelect: Node = {
         };
         Node::SelectStmt(Box::new(n))
     },
+};
+
+// ===========================================================================
+//  WITH [RECURSIVE] cte_list  (M12, step 43): gram.y `with_clause`, `cte_list`,
+//  `common_table_expr`.
+// ===========================================================================
+
+// gram.y `with_clause: WITH cte_list | WITH_LA cte_list | WITH RECURSIVE cte_list`.
+// The WITH_LA lookahead hack (so a CTE can be named after a bare-label keyword) is
+// not needed here -- there is a single WITH token.
+WithClause: Box<crate::nodes::parsenodes::WithClause> = {
+    "WITH" <l:CteList> <loc:@L> => make_with_clause(l, false, loc),
+    "WITH" "RECURSIVE" <l:CteList> <loc:@L> => make_with_clause(l, true, loc),
+};
+
+// gram.y `cte_list: common_table_expr (',' common_table_expr)*`.
+CteList: Vec<Node> = {
+    <c:CommonTableExpr> => vec![c],
+    <mut l:CteList> "," <c:CommonTableExpr> => { l.push(c); l },
+};
+
+// gram.y `common_table_expr: name opt_name_list AS opt_materialized
+// '(' PreparableStmt ')' opt_search_clause opt_cycle_clause`. SEARCH/CYCLE are
+// staged (deferred; they need the search/cycle rewrite). The body is any
+// PreparableStmt (SELECT/INSERT/UPDATE/DELETE).
+CommonTableExpr: Node = {
+    <n:ColId> <cols:OptCteColumnList> "AS" <m:OptMaterialized> "(" <q:PreparableStmt> ")" =>
+        make_common_table_expr(n, cols, m, q),
+};
+
+// gram.y `opt_name_list: '(' name_list ')' | /*EMPTY*/` (the CTE column aliases).
+OptCteColumnList: Vec<Node> = {
+    "(" <l:NameList> ")" => l.into_iter().map(make_string_value_node).collect(),
+    => Vec::new(),
+};
+
+// gram.y `opt_materialized: MATERIALIZED | NOT MATERIALIZED | /*EMPTY*/`.
+OptMaterialized: crate::nodes::parsenodes::CTEMaterialize = {
+    "MATERIALIZED"     => crate::nodes::parsenodes::CTEMaterialize::CTEMaterializeAlways,
+    "NOT" "MATERIALIZED" => crate::nodes::parsenodes::CTEMaterialize::CTEMaterializeNever,
+    =>                   crate::nodes::parsenodes::CTEMaterialize::CTEMaterializeDefault,
 };
 
 // gram.y `distinct_clause` / `opt_all_clause` (the `SELECT [ALL|DISTINCT]` prefix).

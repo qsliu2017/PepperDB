@@ -48,10 +48,12 @@ fn rewrite_query(
 ) -> Vec<Query> {
     let event = parsetree.commandType;
 
-    // PG first recursively rewrites data-modifying statements in WITH clauses.
-    // M1 has no CTEs; a non-empty cteList means a WITH query, not yet reachable.
-    if !parsetree.cteList.is_empty() {
-        not_yet_reachable("RewriteQuery: WITH clause");
+    // PG first recursively rewrites data-modifying statements in WITH clauses. The
+    // M12 (step 43) CTEs are plain SELECT bodies (no data-modifying WITH, no views
+    // inside CTE bodies for this milestone), so the WITH list passes through the
+    // rewrite untouched; the data-modifying-WITH recursion grows later.
+    if parsetree.hasModifyingCTE {
+        not_yet_reachable("RewriteQuery: data-modifying WITH clause");
     }
 
     // INSERT/UPDATE/DELETE/MERGE: PG also fires I/U/D rules and handles view
@@ -123,10 +125,29 @@ fn fire_rir_rules(mut parsetree: Query, active_rirs: &mut Vec<crate::postgres_ex
                     active_rirs.pop();
                 }
             }
-            RTEKind::RESULT => {}
+            // RESULT: planner placeholder, nothing to expand. CTE: the body is held
+            // in cteList (recursed below), not in this RTE; nothing to expand here.
+            RTEKind::RESULT | RTEKind::CTE => {}
             _ => not_yet_reachable("fireRIRrules: range-table / view / RLS expansion"),
         }
         rt_index += 1;
+    }
+
+    // Recurse into the WITH-list CTE bodies (each an analyzed Query), so a CTE that
+    // scans a view expands. M12 CTE bodies are plain SELECTs (pass-through).
+    if !parsetree.cteList.is_empty() {
+        parsetree.cteList = std::mem::take(&mut parsetree.cteList)
+            .into_iter()
+            .map(|n| match n {
+                Node::CommonTableExpr(mut cte) => {
+                    if let Some(Node::Query(q)) = cte.ctequery.take() {
+                        cte.ctequery = Some(Node::Query(Box::new(fire_rir_rules(*q, active_rirs))));
+                    }
+                    Node::CommonTableExpr(cte)
+                }
+                other => other,
+            })
+            .collect();
     }
 
     if parsetree.hasSubLinks {

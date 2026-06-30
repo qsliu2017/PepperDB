@@ -64,6 +64,21 @@ pub fn exec_rescan(shared: &Arc<SharedState>, node: &mut PlanStateNode) {
         PlanStateNode::WindowAgg(_) => {
             unimplemented!("ExecReScan: WindowAgg rescan not yet reachable")
         }
+        // M12 set-op / CTE nodes: rescan resets the buffered/materialized output.
+        PlanStateNode::Append(a) => {
+            for sub in &mut a.subplans {
+                exec_rescan(shared, sub);
+            }
+            a.which = 0;
+        }
+        PlanStateNode::WorkTableScan(w) => {
+            crate::backend::executor::nodeWorktablescan::exec_rescan_work_table_scan(w);
+        }
+        PlanStateNode::SetOp(_)
+        | PlanStateNode::CteScan(_)
+        | PlanStateNode::RecursiveUnion(_) => {
+            unimplemented!("ExecReScan: set-op/CTE/recursive-union rescan not yet reachable")
+        }
         // The M7 join nodes materialize their inner side once and are not rescanned
         // (no nestloop params / no join sits below a rescanning parent yet).
         PlanStateNode::NestLoop(_)

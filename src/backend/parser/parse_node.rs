@@ -30,6 +30,55 @@ use crate::postgres_ext::InvalidOid;
 /// starts at 1 and `p_resolve_unknowns` at true; everything else is the empty/
 /// null/false default. When a parent is supplied, the source text, the parser
 /// hooks, and the query environment are inherited.
+/// Build a fresh child `ParseState` that inherits the parent's source text, parser
+/// hooks, query environment, and CTE namespace, but has its OWN rangetable /
+/// namespace / join state. Unlike [`make_parsestate`] this does NOT move the parent
+/// into the stack link (the caller keeps `&mut parent`), so it is used where each
+/// sibling sub-Query must be analyzed against a clean namespace while still seeing
+/// the enclosing WITH list -- e.g. the per-branch SELECTs of a set operation (PG's
+/// `parse_sub_analyze` over a transient child ParseState). The caller is
+/// responsible for propagating the child's `p_has_aggs` / `p_has_sub_links` /
+/// `p_has_modifying_cte` flags back to the parent.
+pub fn make_child_parsestate(parent: &ParseState) -> Box<ParseState> {
+    Box::new(ParseState {
+        parent_parse_state: None,
+        p_sourcetext: parent.p_sourcetext.clone(),
+        p_rtable: Vec::new(),
+        p_rteperminfos: Vec::new(),
+        p_joinexprs: Vec::new(),
+        p_nullingrels: Vec::new(),
+        p_joinlist: Vec::new(),
+        p_namespace: Vec::new(),
+        p_lateral_active: false,
+        p_ctenamespace: parent.p_ctenamespace.clone(),
+        p_future_ctes: parent.p_future_ctes.clone(),
+        p_parent_cte: parent.p_parent_cte.clone(),
+        p_target_relation: None,
+        p_target_nsitem: None,
+        p_grouping_nsitem: None,
+        p_is_insert: false,
+        p_windowdefs: Vec::new(),
+        p_expr_kind: ParseExprKind::None,
+        p_next_resno: 1,
+        p_multiassign_exprs: Vec::new(),
+        p_locking_clause: Vec::new(),
+        p_locked_from_parent: false,
+        p_resolve_unknowns: true,
+        p_query_env: None,
+        p_has_aggs: false,
+        p_has_window_funcs: false,
+        p_has_target_srfs: false,
+        p_has_sub_links: false,
+        p_has_modifying_cte: false,
+        p_last_srf: None,
+        p_pre_columnref_hook: parent.p_pre_columnref_hook,
+        p_post_columnref_hook: parent.p_post_columnref_hook,
+        p_paramref_hook: parent.p_paramref_hook,
+        p_coerce_param_hook: parent.p_coerce_param_hook,
+        p_ref_hook_state: crate::backend::parser::parse_param::ParamRefHookState::None,
+    })
+}
+
 pub fn make_parsestate(parent_parse_state: Option<Box<ParseState>>) -> Box<ParseState> {
     // Inherited-from-parent fields (copied before the parent is moved into the
     // stack link). All None/default at top level. The query environment is shared

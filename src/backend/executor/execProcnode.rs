@@ -25,6 +25,19 @@ use crate::nodes::execnodes::{EState, ResultState, TupleTableSlot};
 use crate::nodes::nodes::Node;
 
 use crate::backend::executor::nodeAgg::{exec_agg, exec_end_agg, exec_init_agg, AggRun};
+use crate::backend::executor::nodeAppend::{exec_append, exec_end_append, exec_init_append, AppendRun};
+use crate::backend::executor::nodeCtescan::{
+    exec_cte_scan, exec_end_cte_scan, exec_init_cte_scan, CteScanRun,
+};
+use crate::backend::executor::nodeRecursiveunion::{
+    exec_end_recursive_union, exec_init_recursive_union, exec_recursive_union, make_worktable_ref,
+    RecursiveUnionRun,
+};
+use crate::backend::executor::nodeSetOp::{exec_end_setop, exec_init_setop, exec_setop, SetOpRun};
+use crate::backend::executor::nodeWorktablescan::{
+    exec_end_work_table_scan, exec_init_work_table_scan, exec_rescan_work_table_scan,
+    exec_work_table_scan, WorkTableScanRun,
+};
 use crate::backend::executor::nodeBitmapAnd::{
     exec_end_bitmap_and, exec_init_bitmap_and, multi_exec_bitmap_and, BitmapAndRun,
 };
@@ -136,6 +149,16 @@ pub enum PlanStateNode<'rel> {
     Agg(Box<AggRun<'rel>>),
     /// T_WindowAggState (+ child + per-window-function metadata + partition spool).
     WindowAgg(Box<WindowAggRun<'rel>>),
+    /// T_AppendState (+ ordered subplan states). UNION ALL concatenation.
+    Append(Box<AppendRun<'rel>>),
+    /// T_SetOpState (+ left/right children). INTERSECT/EXCEPT [ALL].
+    SetOp(Box<SetOpRun<'rel>>),
+    /// T_CteScanState (+ the CTE subplan). Materializes the CTE once.
+    CteScan(Box<CteScanRun<'rel>>),
+    /// T_RecursiveUnionState (+ non-recursive/recursive terms + working table).
+    RecursiveUnion(Box<RecursiveUnionRun<'rel>>),
+    /// T_WorkTableScanState (+ shared working table). The recursive term's scan.
+    WorkTableScan(Box<WorkTableScanRun>),
     /// T_NestLoopState (+ outer/inner children, joinqual, projection).
     NestLoop(Box<NestLoopRun<'rel>>),
     /// T_HashJoinState (+ outer child + Hash inner child, hashclauses, projection).
@@ -199,6 +222,11 @@ pub fn result_type_of(node: &PlanStateNode<'_>) -> Option<TupleDesc> {
         PlanStateNode::Group(g) => g.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Agg(a) => a.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::WindowAgg(w) => w.state.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::Append(a) => a.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::SetOp(s) => s.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::CteScan(c) => c.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::RecursiveUnion(r) => r.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::WorkTableScan(w) => w.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::NestLoop(n) => n.state.js.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::HashJoin(h) => h.state.js.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::MergeJoin(m) => m.state.js.ps.ps_result_tuple_desc.clone(),
@@ -213,6 +241,10 @@ pub fn result_type_of(node: &PlanStateNode<'_>) -> Option<TupleDesc> {
 /// lives the `T_Result`/`T_SeqScan`/`T_ModifyTable` arms + the M5 upper-plan arms;
 /// other tags grow per milestone. Upper nodes init their `lefttree` child first,
 /// then build the node over it.
+#[allow(
+    clippy::too_many_lines,
+    reason = "1:1 PG ExecInitNode nodeTag dispatch; one arm per node kind, grows per milestone"
+)]
 pub fn exec_init_node<'rel>(
     node: Option<&Node>,
     estate: &mut EState<'rel>,
@@ -305,6 +337,56 @@ pub fn exec_init_node<'rel>(
             let inner = init_child(m.join.plan.righttree.as_ref(), estate, eflags);
             Some(PlanStateNode::MergeJoin(exec_init_merge_join(m, estate, eflags, outer, inner)))
         }
+        Node::Append(a) => {
+            // The branch subplans live in `appendplans`; init each in order.
+            let children: Vec<PlanStateNode<'rel>> = a
+                .appendplans
+                .iter()
+                .map(|p| init_child(Some(p), estate, eflags))
+                .collect();
+            Some(PlanStateNode::Append(exec_init_append(a, estate, children)))
+        }
+        Node::SetOp(s) => {
+            // PG 18.4: two inputs via the plan's left/right tree (outer=left).
+            let left = init_child(s.plan.lefttree.as_ref(), estate, eflags);
+            let right = init_child(s.plan.righttree.as_ref(), estate, eflags);
+            Some(PlanStateNode::SetOp(exec_init_setop(s, estate, left, right)))
+        }
+        Node::CteScan(c) => {
+            // The CTE subplan is embedded as the CteScan's lefttree (the port has no
+            // es_subplanstates registry yet; see nodeCtescan.rs).
+            let cteplan = init_child(c.scan.plan.lefttree.as_ref(), estate, child_eflags(eflags));
+            Some(PlanStateNode::CteScan(exec_init_cte_scan(c, estate, cteplan)))
+        }
+        Node::RecursiveUnion(r) => {
+            // Init the non-recursive term first to learn the output rowtype; register
+            // the shared working table (keyed by wt_param) BEFORE the recursive term
+            // is initialized, so its WorkTableScan can pick the handle up.
+            let left = init_child(r.plan.lefttree.as_ref(), estate, child_eflags(eflags));
+            let desc = result_type_of(&left)
+                .unwrap_or_else(|| unimplemented!("ExecInitNode: RecursiveUnion non-recursive term has no rowtype"));
+            let wt = make_worktable_ref();
+            estate
+                .worktables
+                .push((r.wt_param, std::sync::Arc::clone(&wt), desc));
+            let right = init_child(r.plan.righttree.as_ref(), estate, child_eflags(eflags));
+            // The handle stays registered for the node's lifetime (rescans re-read it).
+            Some(PlanStateNode::RecursiveUnion(exec_init_recursive_union(
+                r, estate, left, right, wt,
+            )))
+        }
+        Node::WorkTableScan(w) => {
+            // Pick up the shared working table + rowtype the enclosing RecursiveUnion
+            // registered on the EState.
+            let Some((_, handle, desc)) =
+                estate.worktables.iter().find(|(p, _, _)| *p == w.wt_param)
+            else {
+                unimplemented!("ExecInitNode: WorkTableScan without a registered working table")
+            };
+            let wt = std::sync::Arc::clone(handle);
+            let desc = desc.clone();
+            Some(PlanStateNode::WorkTableScan(exec_init_work_table_scan(w, &desc, estate, wt)))
+        }
         other => unimplemented!("ExecInitNode: {other:?} not yet translated for this milestone"),
     }
 }
@@ -378,6 +460,11 @@ pub async fn exec_proc_node<'n>(
         PlanStateNode::Group(g) => exec_group(shared, g).await,
         PlanStateNode::Agg(a) => exec_agg(shared, a).await,
         PlanStateNode::WindowAgg(w) => exec_window_agg(shared, w).await,
+        PlanStateNode::Append(a) => Box::pin(exec_append(shared, a)).await,
+        PlanStateNode::SetOp(s) => Box::pin(exec_setop(shared, s)).await,
+        PlanStateNode::CteScan(c) => Box::pin(exec_cte_scan(shared, c)).await,
+        PlanStateNode::RecursiveUnion(r) => Box::pin(exec_recursive_union(shared, r)).await,
+        PlanStateNode::WorkTableScan(w) => Box::pin(exec_work_table_scan(w)).await,
         PlanStateNode::NestLoop(n) => exec_nest_loop(shared, n).await,
         PlanStateNode::HashJoin(h) => exec_hash_join(shared, h).await,
         PlanStateNode::MergeJoin(m) => exec_merge_join(shared, m).await,
@@ -447,11 +534,38 @@ pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode
         PlanStateNode::Group(g) => exec_end_group(shared, g),
         PlanStateNode::Agg(a) => exec_end_agg(shared, a),
         PlanStateNode::WindowAgg(w) => exec_end_window_agg(shared, w),
+        PlanStateNode::Append(a) => exec_end_append(shared, a),
+        PlanStateNode::SetOp(s) => exec_end_setop(shared, s),
+        PlanStateNode::CteScan(c) => exec_end_cte_scan(shared, c),
+        PlanStateNode::RecursiveUnion(r) => exec_end_recursive_union(shared, r),
+        PlanStateNode::WorkTableScan(w) => exec_end_work_table_scan(w),
         PlanStateNode::NestLoop(n) => exec_end_nest_loop(shared, n),
         PlanStateNode::HashJoin(h) => exec_end_hash_join(shared, h),
         PlanStateNode::MergeJoin(m) => exec_end_merge_join(shared, m),
         PlanStateNode::Hash(h) => exec_end_hash(shared, h),
         #[cfg(test)]
         PlanStateNode::TupleSource(_) => {}
+    }
+}
+
+/// PG `ExecReScan` (the subset the recursive-CTE term needs): reset a node subtree
+/// so the next `ExecProcNode` re-reads from the start. RecursiveUnion calls this on
+/// its recursive term after swapping the working table. The recursive term M12
+/// reaches is a `Result` (projection + qual over the working table) whose input is
+/// the WorkTableScan, threaded via the Result run-state's child; recurse into the
+/// handled wrappers down to the WorkTableScan, which reloads the swapped table.
+pub fn exec_rescan_node(node: &mut PlanStateNode<'_>) {
+    match node {
+        PlanStateNode::WorkTableScan(w) => exec_rescan_work_table_scan(w),
+        PlanStateNode::Append(a) => {
+            for sub in &mut a.subplans {
+                exec_rescan_node(sub);
+            }
+            a.which = 0;
+        }
+        other => {
+            let _ = other;
+            unimplemented!("ExecReScan: node kind not supported in a recursive term yet");
+        }
     }
 }

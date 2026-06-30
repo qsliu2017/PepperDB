@@ -6,6 +6,7 @@ pub mod parse_agg;
 pub mod parse_clause;
 pub mod parse_coerce;
 pub mod parse_collate;
+pub mod parse_cte;
 pub mod parse_expr;
 pub mod parse_func;
 pub mod parse_node;

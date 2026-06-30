@@ -12,9 +12,9 @@ use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
 use crate::nodes::parsenodes::{
     A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, DeleteStmt, IndexElem, IndexStmt,
     InsertStmt, LockingClause, MergeStmt, MergeWhenClause, RawStmt, ResTarget, ReturningClause,
-    RuleStmt, SelectStmt, SetOperation, SortByDir, SortByNulls, TransactionStmt,
-    TransactionStmtKind, TypeName, UpdateStmt, ValUnion, VariableSetKind, VariableSetStmt,
-    VariableShowStmt, ViewCheckOption, ViewStmt,
+    CTEMaterialize, CommonTableExpr, RuleStmt, SelectStmt, SetOperation, SortByDir, SortByNulls,
+    TransactionStmt, TransactionStmtKind, TypeName, UpdateStmt, ValUnion, VariableSetKind,
+    VariableSetStmt, VariableShowStmt, ViewCheckOption, ViewStmt, WithClause,
 };
 use crate::nodes::primnodes::{MergeMatchKind, OnCommitAction, OverridingKind, RangeVar};
 use crate::nodes::value::{makeFloat, makeInteger, makeString};
@@ -633,6 +633,63 @@ pub fn insert_select_options(
 /// empty for a VALUES SelectStmt.
 pub fn make_values_select(values_lists: Vec<Node>) -> Node {
     Node::SelectStmt(Box::new(empty_select_stmt(Vec::new(), Vec::new(), values_lists)))
+}
+
+/// gram.y `makeSetOp`: build the SetOperation SelectStmt node carrying the two
+/// branch selects (M12, step 43). `larg`/`rarg` are the boxed branch SelectStmts.
+pub fn make_set_op(op: SetOperation, all: bool, larg: Node, rarg: Node) -> Node {
+    let Node::SelectStmt(larg) = larg else {
+        unreachable!("make_set_op: larg is a SelectStmt");
+    };
+    let Node::SelectStmt(rarg) = rarg else {
+        unreachable!("make_set_op: rarg is a SelectStmt");
+    };
+    let mut n = empty_select_stmt(Vec::new(), Vec::new(), Vec::new());
+    n.op = op;
+    n.all = all;
+    n.larg = Some(larg);
+    n.rarg = Some(rarg);
+    Node::SelectStmt(Box::new(n))
+}
+
+/// gram.y `select_no_parens: with_clause select_clause ...`: stamp the WITH clause
+/// onto the (possibly set-op) SelectStmt (M12, step 43).
+pub fn set_select_with_clause(stmt: Node, with: Box<WithClause>) -> Node {
+    let Node::SelectStmt(mut sel) = stmt else {
+        unreachable!("set_select_with_clause over a SelectStmt");
+    };
+    sel.withClause = Some(with);
+    Node::SelectStmt(sel)
+}
+
+/// gram.y `with_clause`: build the WithClause from its CTE list + RECURSIVE flag.
+pub fn make_with_clause(ctes: Vec<Node>, recursive: bool, location: i32) -> Box<WithClause> {
+    Box::new(WithClause { ctes, recursive, location })
+}
+
+/// gram.y `common_table_expr`: build a CommonTableExpr (the post-analysis fields are
+/// zero-initialized; transformWithClause fills them). SEARCH/CYCLE are staged.
+pub fn make_common_table_expr(
+    name: String,
+    aliascolnames: Vec<Node>,
+    materialized: CTEMaterialize,
+    query: Node,
+) -> Node {
+    Node::CommonTableExpr(Box::new(CommonTableExpr {
+        ctename: Some(name),
+        aliascolnames,
+        ctematerialized: materialized,
+        ctequery: Some(query),
+        search_clause: None,
+        cycle_clause: None,
+        location: -1,
+        cterecursive: false,
+        cterefcount: 0,
+        ctecolnames: Vec::new(),
+        ctecoltypes: Vec::new(),
+        ctecoltypmods: Vec::new(),
+        ctecolcollations: Vec::new(),
+    }))
 }
 
 /// gram.y `InsertStmt`: build the raw InsertStmt node (M2 plain form). WITH / ON

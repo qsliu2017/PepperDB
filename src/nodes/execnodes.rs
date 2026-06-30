@@ -488,6 +488,16 @@ pub struct EState<'rel> {
     pub exprcontexts: Vec<Box<ExprContext>>,
     /// List of PlanState for SubPlans.
     pub subplanstates: Vec<Box<PlanState>>,
+    /// Recursive-CTE worktable registry (M12, step 43): maps a RecursiveUnion's
+    /// `wt_param` to the shared current working table its WorkTableScan reads. PG
+    /// threads this through `es_param_exec_vals[wtParam]` to the RecursiveUnionState;
+    /// this port has no live es_subplanstates, so the handle is registered here when
+    /// a RecursiveUnion inits and looked up when its WorkTableScan inits.
+    pub worktables: Vec<(
+        i32,
+        crate::backend::executor::nodeRecursiveunion::WorkTableRef,
+        crate::access::tupdesc::TupleDesc,
+    )>,
     pub auxmodifytables: Vec<Node>,
     pub per_tuple_exprcontext: Option<Box<ExprContext>>,
     pub epq_active: Option<Box<EPQState>>,
@@ -547,6 +557,7 @@ impl Default for EState<'_> {
             finished: bool::default(),
             exprcontexts: Vec::default(),
             subplanstates: Vec::default(),
+            worktables: Vec::default(),
             auxmodifytables: Vec::default(),
             per_tuple_exprcontext: Option::default(),
             epq_active: Option::default(),
