@@ -46,6 +46,7 @@ use crate::catalog::pg_attrdef::{AttrDefaultRelationId, AttrDefaultRelation_Rowt
 use crate::catalog::pg_constraint::{ConstraintRelationId, ConstraintRelation_Rowtype_Id};
 use crate::catalog::pg_rewrite::{RewriteRelationId, RewriteRelation_Rowtype_Id};
 use crate::catalog::pg_trigger::{TriggerRelationId, TriggerRelation_Rowtype_Id};
+use crate::catalog::pg_statistic::StatisticRelationId;
 use crate::catalog::pg_database::{DatabaseRelationId, DatabaseRelation_Rowtype_Id};
 use crate::catalog::pg_tablespace::TableSpaceRelationId;
 use crate::catalog::pg_collation::CollationRelationId;
@@ -190,6 +191,11 @@ pub static FORMRDESC_CATALOGS: &[BootstrapCatalog] = &[
     // M11 (step 41): pg_trigger is nailed so CREATE TRIGGER / ADD FOREIGN KEY can
     // write its rows and RelationBuildTriggers can read them. Starts empty.
     catalog!("pg_trigger", TriggerRelationId, TriggerRelation_Rowtype_Id, isshared => false, SCHEMA_PG_TRIGGER),
+    // M13 (step 46): pg_statistic is nailed so ANALYZE can write its stats rows and
+    // the planner (selfuncs / examine_variable) can read them via the STATRELATTINH
+    // syscache before pg_statistic has a pg_class self-row. Starts empty; filled by
+    // ANALYZE. No BKI_ROWTYPE_OID, so reltype = relid (non-load-bearing, single-db).
+    catalog!("pg_statistic", StatisticRelationId, StatisticRelationId, isshared => false, SCHEMA_PG_STATISTIC),
 ];
 
 /// Build the compiled-in `TupleDesc` for a nailed bootstrap catalog from its

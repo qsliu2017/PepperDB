@@ -186,6 +186,17 @@ pub async fn standard_process_utility(
             }
             crate::backend::access::transam::xact::CommandCounterIncrement();
         }
+        Node::VacuumStmt(stmt) => {
+            // Box::pin the (deep) VACUUM/ANALYZE future (heap scan + prune + index
+            // vacuum + catalog updates chains are large in debug builds).
+            Box::pin(crate::backend::commands::vacuum::exec_vacuum(shared, stmt)).await;
+            if let Some(qc) = qc {
+                qc.command_tag =
+                    if stmt.is_vacuumcmd { CommandTag::Vacuum } else { CommandTag::Analyze };
+                qc.nprocessed = 0;
+            }
+            crate::backend::access::transam::xact::CommandCounterIncrement();
+        }
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
     }
 }

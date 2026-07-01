@@ -37,7 +37,7 @@ use crate::backend::parser::parser::{
     make_create_conversion_stmt, make_create_tablespace_stmt, make_function_parameter,
     make_ot_column_def, make_view_stmt, make_rule_stmt, make_string_value_node,
     make_create_trig_stmt, make_fk_constraint, make_column_fk_constraint, set_constraint_name,
-    make_copy_stmt,
+    make_copy_stmt, make_vacuum_stmt, make_vacuum_relation,
     make_null_const, TrigTiming, TrigEvent,
     make_set_op, set_select_with_clause, make_with_clause, make_common_table_expr,
     DropBehaviorTok, ObjType,
@@ -306,6 +306,13 @@ extern {
         "QUOTE"      => Token::Keyword("quote"),
         "ESCAPE"     => Token::Keyword("escape"),
         "FORMAT"     => Token::Keyword("format"),
+        // M13 (step 46): VACUUM / ANALYZE keywords (TRUE/FALSE already exist; FULL
+        // at line 129).
+        "VACUUM"     => Token::Keyword("vacuum"),
+        "ANALYZE"    => Token::Keyword("analyze"),
+        "ANALYSE"    => Token::Keyword("analyse"),
+        "VERBOSE"    => Token::Keyword("verbose"),
+        "FREEZE"     => Token::Keyword("freeze"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -385,6 +392,8 @@ Stmt: Option<Node> = {
     <s:RuleStmt> => Some(s),
     <s:CreateTrigStmt> => Some(s),
     <s:CopyStmt> => Some(s),
+    <s:VacuumStmt> => Some(s),
+    <s:AnalyzeStmt> => Some(s),
     <s:InsertStmt> => Some(s),
     <s:UpdateStmt> => Some(s),
     <s:DeleteStmt> => Some(s),
@@ -848,6 +857,96 @@ CopyStmt: Node = {
     "COPY" "(" <q:PreparableStmt> ")" "TO" <prog:OptProgram> <file:CopyFileName>
         <opts:CopyOptions> =>
         make_copy_stmt(None, Some(q), Vec::new(), false, prog, file, opts, None),
+};
+
+// ===========================================================================
+//  VACUUM / ANALYZE  (M13, step 46). gram.y `VacuumStmt` / `AnalyzeStmt`.
+// ===========================================================================
+
+// gram.y `VacuumStmt`: the modern paren-option form and the legacy keyword form.
+//   VACUUM [(opt, ...)] [table [(cols)] [, ...]]
+//   VACUUM [FULL] [FREEZE] [VERBOSE] [ANALYZE] [table [(cols)] [, ...]]
+// The legacy option keywords are funneled through `VacLegacyOptList` (each maps to
+// a DefElem) to keep the LALR table conflict-free; the trailing optional relation
+// list reuses `VacuumRelationList`.
+VacuumStmt: Node = {
+    "VACUUM" "(" <opts:VacGenericOptList> ")" <rels:OptVacuumRelationList> =>
+        make_vacuum_stmt(opts, rels, true),
+    "VACUUM" <opts:VacLegacyOptList> <rels:OptVacuumRelationList> =>
+        make_vacuum_stmt(opts, rels, true),
+};
+
+// gram.y `AnalyzeStmt`: ANALYZE/ANALYSE [(opts)] | [VERBOSE], then opt relations.
+AnalyzeStmt: Node = {
+    <_kw:AnalyzeKeyword> "(" <opts:VacGenericOptList> ")" <rels:OptVacuumRelationList> =>
+        make_vacuum_stmt(opts, rels, false),
+    <_kw:AnalyzeKeyword> <verbose:OptVerbose> <rels:OptVacuumRelationList> => {
+        let mut opts = Vec::new();
+        if verbose { opts.push(make_generic_def_elem("verbose", None)); }
+        make_vacuum_stmt(opts, rels, false)
+    },
+};
+
+AnalyzeKeyword: () = {
+    "ANALYZE" => (),
+    "ANALYSE" => (),
+};
+
+OptVerbose: bool = {
+    "VERBOSE" => true,
+    => false,
+};
+
+// gram.y `utility_option_list` (the paren form): comma-separated option elems.
+VacGenericOptList: Vec<Node> = {
+    <e:VacGenericOptElem> => vec![e],
+    <mut l:VacGenericOptList> "," <e:VacGenericOptElem> => { l.push(e); l },
+};
+
+// gram.y `utility_option_elem`: option name (a keyword) with optional boolean arg.
+VacGenericOptElem: Node = {
+    "FULL"    <a:VacOptArg> => make_generic_def_elem("full", a),
+    "FREEZE"  <a:VacOptArg> => make_generic_def_elem("freeze", a),
+    "VERBOSE" <a:VacOptArg> => make_generic_def_elem("verbose", a),
+    "ANALYZE" <a:VacOptArg> => make_generic_def_elem("analyze", a),
+};
+
+// Optional boolean argument to a paren option (e.g. `VACUUM (FULL true) t`).
+VacOptArg: Option<Node> = {
+    "TRUE"  => Some(make_string_value_node("true".to_string())),
+    "FALSE" => Some(make_string_value_node("false".to_string())),
+    => None,
+};
+
+// gram.y legacy `VACUUM [FULL] [FREEZE] [VERBOSE] [ANALYZE]`: zero or more flags,
+// each a boolean DefElem. A left-recursive list with the empty base case (the
+// redundant single-element rule is omitted to avoid a reduce-reduce ambiguity).
+VacLegacyOptList: Vec<Node> = {
+    => Vec::new(),
+    <mut l:VacLegacyOptList> <e:VacLegacyOptElem> => { l.push(e); l },
+};
+
+VacLegacyOptElem: Node = {
+    "FULL"    => make_generic_def_elem("full", None),
+    "FREEZE"  => make_generic_def_elem("freeze", None),
+    "VERBOSE" => make_generic_def_elem("verbose", None),
+    "ANALYZE" => make_generic_def_elem("analyze", None),
+};
+
+// gram.y `opt_vacuum_relation_list`: empty (all tables) or a list of relations.
+OptVacuumRelationList: Vec<Node> = {
+    => Vec::new(),
+    VacuumRelationList,
+};
+
+VacuumRelationList: Vec<Node> = {
+    <e:VacuumRelation> => vec![e],
+    <mut l:VacuumRelationList> "," <e:VacuumRelation> => { l.push(e); l },
+};
+
+// gram.y `vacuum_relation`: qualified_name opt_name_list (the column list).
+VacuumRelation: Node = {
+    <rel:QualifiedName> <cols:OptColumnList> => make_vacuum_relation(rel, cols),
 };
 
 // gram.y `copy_from`: FROM (true) | TO (false).

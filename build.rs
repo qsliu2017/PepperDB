@@ -1379,6 +1379,10 @@ fn gen_bootstrap_schemas(
         // write pg_trigger rows and RelationBuildTriggers can read them back before
         // pg_trigger has a pg_class self-row. Starts empty; filled by the DDL.
         ("pg_trigger", "pg_trigger.h"),
+        // M13 (step 46): pg_statistic is nailed so ANALYZE can write its stats rows
+        // and the planner (selfuncs) can read them back before pg_statistic has a
+        // pg_class self-row. Starts empty; filled by ANALYZE.
+        ("pg_statistic", "pg_statistic.h"),
     ];
 
     for (cat, hdr) in catalogs {

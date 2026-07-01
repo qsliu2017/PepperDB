@@ -325,3 +325,28 @@ pub fn systable_tuple_is_valid(tup: Option<HeapTuple>) -> bool {
     // SAFETY: pointer validity is the caller's contract; mirror HeapTupleIsValid.
     HeapTupleIsValid(tup.map(|t| unsafe { &*t }))
 }
+
+/// `index_bulk_delete` (M13 AM-dispatch): remove `index`'s entries that point at
+/// the dead heap TIDs in `dead`, returning `(tuples_removed, tuples_remaining)`.
+/// This is the genam entry the executor/VACUUM calls; it dispatches to the index
+/// AM's `ambulkdelete`. Translated from the `index_bulk_delete` half of
+/// `access/index/genam.c` (`indexRelation->rd_indam->ambulkdelete`).
+///
+/// M13 supports the btree AM (relam 403 / `BTREE_AM_OID`); other AMs are grow
+/// guards. PG passes an `IndexBulkDeleteCallback` closure; the port passes the dead
+/// TID set directly (the btree scan checks membership), which is the same
+/// information without threading a sync callback through the async page walk.
+#[allow(clippy::implicit_hasher, reason = "internal caller builds the set with the default hasher")]
+pub async fn index_vacuum_bulk_delete(
+    shared: &Arc<SharedState>,
+    index: &RelationData,
+    dead: &std::collections::HashSet<crate::storage::itemptr::ItemPointerData>,
+) -> (u64, u64) {
+    const BTREE_AM_OID: u32 = 403;
+    let relam = index.form().relam;
+    if relam.get() == BTREE_AM_OID {
+        crate::backend::access::nbtree::nbtree::btbulkdelete(shared, index, dead).await
+    } else {
+        unimplemented!("index_vacuum_bulk_delete: only the btree AM (403) is supported at M13");
+    }
+}

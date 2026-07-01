@@ -382,6 +382,97 @@ pub async fn HeapTupleSatisfiesUpdate(
     TM_Result::Deleted // deleted by other
 }
 
+/// `HeapTupleSatisfiesVacuum`: classify `tuple` for VACUUM relative to the
+/// `oldest_xmin` horizon. Returns the `HTSV_Result` deciding whether the tuple can
+/// be removed (`Dead`), must be kept (`Live`/`RecentlyDead`), or belongs to an
+/// in-progress xact (`Insert`/`DeleteInProgress`). Translated from
+/// `HeapTupleSatisfiesVacuum` (via `HeapTupleSatisfiesVacuumHorizon`) in
+/// backend/access/heap/heapam_visibility.c.
+///
+/// A tuple is `Dead` (removable) when its inserting xact committed and its deleting
+/// xmax committed at an xid that precedes `oldest_xmin` -- no snapshot can see it.
+///
+/// Async (clog/procarray probes); the caller passes the header by value (copied out
+/// of the page), so no buffer content lock is held across the `.await`s.
+///
+/// Staged (rules.md s4): the `HEAP_XMAX_IS_MULTI` arms (a multixact xmax) require
+/// `MultiXactIdGetUpdateXid`/`MultiXactIdIsRunning`, not yet reachable, so they
+/// `unimplemented!()`. The single-xid insert/delete path (the M2 heap's only
+/// producer) is complete.
+#[allow(
+    clippy::too_many_lines,
+    clippy::if_not_else,
+    clippy::collapsible_if,
+    reason = "faithful 1:1 translation of HeapTupleSatisfiesVacuumHorizon's branch structure"
+)]
+pub async fn HeapTupleSatisfiesVacuum(
+    shared: &Arc<SharedState>,
+    tuple: &HeapTupleHeaderData,
+    oldest_xmin: TransactionId,
+) -> crate::access::heapam::HTSV_Result {
+    use crate::access::heapam::HTSV_Result;
+
+    // Has inserting transaction committed?
+    if !tuple.xmin_committed() {
+        if tuple.xmin_invalid() {
+            return HTSV_Result::Dead;
+        }
+        // Used by pre-9.0 binary upgrades -- staged (not produced by the M2 heap).
+        if (tuple.t_infomask & (HEAP_MOVED_OFF | HEAP_MOVED_IN)) != 0 {
+            unimplemented!("HeapTupleSatisfiesVacuum: HEAP_MOVED_* (pre-9.0 upgrade) not on the M13 path");
+        } else if TransactionIdIsCurrentTransactionId(tuple.get_raw_xmin()) {
+            return HTSV_Result::InsertInProgress;
+        } else if xid_is_in_progress(shared, tuple.get_raw_xmin()).await {
+            // xmin is in-progress; a delete by the same xact can't make it dead.
+            return HTSV_Result::InsertInProgress;
+        } else if did_commit(shared, tuple.get_raw_xmin()).await {
+            // inserting xact committed (hint bit deferred), fall through to xmax.
+        } else {
+            // inserting xact aborted (or crashed): the tuple is dead.
+            return HTSV_Result::Dead;
+        }
+    }
+
+    // Okay, the inserter committed, so it was good at some point. Now what about
+    // the deleting transaction?
+    if (tuple.t_infomask & HEAP_XMAX_INVALID) != 0 {
+        return HTSV_Result::Live;
+    }
+
+    if HEAP_XMAX_IS_LOCKED_ONLY(tuple.t_infomask) {
+        // A lock-only xmax (SELECT FOR UPDATE/SHARE) does not delete the tuple.
+        return HTSV_Result::Live;
+    }
+
+    if (tuple.t_infomask & HEAP_XMAX_IS_MULTI) != 0 {
+        unimplemented!("HeapTupleSatisfiesVacuum: multixact xmax -- staged with multixact (step 33)");
+    }
+
+    // "Deleting" xact is a plain xid.
+    let xmax = tuple.get_raw_xmax();
+    if !xmax.is_normal() {
+        return HTSV_Result::Live;
+    }
+
+    if TransactionIdIsCurrentTransactionId(xmax) {
+        return HTSV_Result::DeleteInProgress;
+    }
+    if xid_is_in_progress(shared, xmax).await {
+        return HTSV_Result::DeleteInProgress;
+    }
+    if !did_commit(shared, xmax).await {
+        // deleting xact aborted: the tuple is (still) live.
+        return HTSV_Result::Live;
+    }
+
+    // Deleter committed. The tuple is dead only once its xmax precedes the oldest
+    // xmin any live snapshot could see; until then it is RecentlyDead (kept).
+    if !xmax.precedes(oldest_xmin) {
+        return HTSV_Result::RecentlyDead;
+    }
+    HTSV_Result::Dead
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

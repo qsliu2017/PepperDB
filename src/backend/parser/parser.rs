@@ -1925,6 +1925,26 @@ pub fn make_copy_stmt(
     }))
 }
 
+/// Build a `VacuumStmt` node (VACUUM or ANALYZE). `is_vacuumcmd` distinguishes
+/// VACUUM (true) from ANALYZE (false). `rels` is the optional target list (empty =
+/// all relations); `options` is the parsed `DefElem` option list.
+pub fn make_vacuum_stmt(options: Vec<Node>, rels: Vec<Node>, is_vacuumcmd: bool) -> Node {
+    Node::VacuumStmt(Box::new(crate::nodes::parsenodes::VacuumStmt {
+        options,
+        rels,
+        is_vacuumcmd,
+    }))
+}
+
+/// Build a `VacuumRelation` node: one target table plus its optional column list.
+pub fn make_vacuum_relation(relation: crate::nodes::primnodes::RangeVar, cols: Vec<Node>) -> Node {
+    Node::VacuumRelation(Box::new(crate::nodes::parsenodes::VacuumRelation {
+        relation: Some(Box::new(relation)),
+        oid: crate::postgres_ext::InvalidOid,
+        va_cols: cols,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

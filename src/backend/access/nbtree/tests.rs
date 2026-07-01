@@ -592,6 +592,75 @@ fn zero_fmgr_info() -> crate::fmgr::FmgrInfo {
     }
 }
 
+/// btbulkdelete (step 46): build an index, remove a subset of heap TIDs via the
+/// genam bulk-delete entry, and verify the corresponding index entries are gone
+/// from a forward scan (and the surviving keys remain).
+#[tokio::test(flavor = "multi_thread")]
+async fn btbulkdelete_removes_dead_index_entries() {
+    let shared = new_shared();
+    in_all_scopes(shared, |shared| async move {
+        StartTransactionCommand(&shared).await;
+        crate::backend::utils::time::snapmgr::PushActiveSnapshot(GetTransactionSnapshot(&shared));
+        let hloc = rloc(7);
+        let iloc = rloc(107);
+        create_main_fork(&shared, hloc).await;
+        create_main_fork(&shared, iloc).await;
+        let heap = make_relation(hloc, one_int4_desc(), RELKIND_RELATION);
+        let mut index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
+        init_index_support(Arc::get_mut(&mut index).unwrap(), 1);
+
+        for v in [10, 20, 30, 40, 50] {
+            insert_row1(&shared, &heap, v).await;
+        }
+        crate::backend::access::transam::xact::CommandCounterIncrement();
+        crate::backend::utils::time::snapmgr::PushActiveSnapshot(txn_snapshot(&shared));
+        let ii = index_info(1);
+        crate::backend::access::nbtree::nbtree::btbuild(&shared, &heap, &index, &ii).await;
+
+        // Collect (key, heap TID) pairs from a forward index scan.
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut scan = index_beginscan(&heap, &index, &snap);
+        index_rescan(&mut scan, Vec::new());
+        let mut key_tid: Vec<(i32, crate::storage::itemptr::ItemPointerData)> = Vec::new();
+        while let Some(tid) = index_getnext_tid(&shared, &mut scan, ScanDirection::Forward).await {
+            let tup = index_fetch_heap(&shared, &mut scan).await.expect("heap tuple");
+            let desc = heap.rd_att.clone().unwrap();
+            let (vals, _n) =
+                unsafe { crate::backend::access::common::heaptuple::heap_deform_tuple(&tup, &desc) };
+            key_tid.push((DatumGetInt32(vals[0]), tid));
+        }
+        drop(scan);
+        assert_eq!(key_tid.len(), 5);
+
+        // Mark the TIDs for keys 20 and 40 dead, then bulk-delete them from the index.
+        let dead: std::collections::HashSet<crate::storage::itemptr::ItemPointerData> = key_tid
+            .iter()
+            .filter(|(k, _)| *k == 20 || *k == 40)
+            .map(|(_, t)| *t)
+            .collect();
+        assert_eq!(dead.len(), 2);
+        let (removed, _remaining) =
+            crate::backend::access::index::genam::index_vacuum_bulk_delete(&shared, &index, &dead)
+                .await;
+        assert_eq!(removed, 2, "two index entries removed");
+
+        // A fresh forward scan returns only the surviving keys.
+        let snap = txn_snapshot(&shared).expect("snapshot");
+        let mut scan = index_beginscan(&heap, &index, &snap);
+        index_rescan(&mut scan, Vec::new());
+        let mut surviving = Vec::new();
+        while let Some(_tid) = index_getnext_tid(&shared, &mut scan, ScanDirection::Forward).await {
+            let tup = index_fetch_heap(&shared, &mut scan).await.expect("heap tuple");
+            let desc = heap.rd_att.clone().unwrap();
+            let (vals, _n) =
+                unsafe { crate::backend::access::common::heaptuple::heap_deform_tuple(&tup, &desc) };
+            surviving.push(DatumGetInt32(vals[0]));
+        }
+        assert_eq!(surviving, vec![10, 30, 50], "keys 20,40 gone from the index");
+    })
+    .await;
+}
+
 // Keep IndexScanState referenced for clarity (the scan type used above).
 #[allow(dead_code)]
 fn _type_check(_s: &IndexScanState<'_, '_, '_>) {}

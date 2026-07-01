@@ -1,6 +1,7 @@
 //! Directory module: src/backend/commands
 
 pub mod alter;
+pub mod analyze;
 pub mod collationcmds;
 pub mod comment;
 pub mod conversioncmds;
@@ -21,8 +22,11 @@ pub mod tablecmds;
 pub mod tablespace;
 pub mod trigger;
 pub mod typecmds;
+pub mod vacuum;
 pub mod variable;
 pub mod view;
 
 #[cfg(test)]
 mod fk_tests;
+#[cfg(test)]
+mod vacuum_tests;

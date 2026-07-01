@@ -27,6 +27,7 @@ use crate::backend::utils::time::snapmgr::GetActiveSnapshot;
 use crate::nodes::execnodes::IndexInfo;
 use crate::postgres::Datum;
 use crate::shared_state::SharedState;
+use crate::storage::block::BlockNumber;
 use crate::storage::bufpage::Page;
 use crate::storage::itemptr::ItemPointerData;
 use crate::utils::rel::RelationData;
@@ -179,6 +180,119 @@ pub async fn btinsert(
     unsafe { pfree_index_tuple(itup) };
 
     crate::backend::access::nbtree::nbtinsert::bt_doinsert(shared, index, &bytes).await
+}
+
+/// `btbulkdelete`: remove index entries pointing at dead heap tuples. Translated
+/// from the M13-reachable core of `btbulkdelete` / `btvacuumscan` /
+/// `btvacuumpage` in nbtree.c.
+///
+/// `dead` is the set of dead heap TIDs collected by the heap prune pass (VACUUM's
+/// first pass). This does a physical block-order scan of the index (PG's
+/// `btvacuumscan`, which walks blocks linearly rather than via the tree so it visits
+/// every leaf), and on each leaf page deletes the line pointers whose index tuple
+/// references a dead heap TID (`PageIndexMultiDelete`). Returns the count of index
+/// tuples removed and the count remaining.
+///
+/// Async: reads/writes index pages via the buffer pool. Holds the exclusive content
+/// lock only for the synchronous page rewrite (no `.await` inside); VACUUM's
+/// ShareUpdateExclusive relation lock keeps concurrent writers out.
+///
+/// Staged (rules.md s4): page deletion / half-dead handling (empty leaf recycling),
+/// the pending-FSM pages, `btvacuumcleanup`'s page-count bookkeeping, and the
+/// `XLOG_BTREE_VACUUM` WAL record (the page image is rewritten, covered by the
+/// buffer's next full-page flush). The M2 btree never splits below one leaf in the
+/// tested sizes; the linear-scan delete is the correctness core.
+#[allow(clippy::implicit_hasher, reason = "internal caller builds the set with the default hasher")]
+pub async fn btbulkdelete(
+    shared: &Arc<SharedState>,
+    index: &RelationData,
+    dead: &std::collections::HashSet<ItemPointerData>,
+) -> (u64, u64) {
+    use crate::access::nbtree::{BTPageGetOpaque, P_FIRSTDATAKEY, P_IGNORE, P_ISLEAF};
+    use crate::backend::access::nbtree::nbtpage::{bt_read_buffer, bt_relbuf, bt_write_page};
+    use crate::storage::off::OffsetNumber;
+
+    let nblocks = index_nblocks(shared, index).await;
+    let mut num_removed: u64 = 0;
+    let mut num_remaining: u64 = 0;
+
+    // Block 0 is the meta page; data pages start at block 1.
+    for blkno in 1..nblocks {
+        let buffer = bt_read_buffer(shared, index, blkno).await;
+
+        // Read the leaf page's items under a brief share lock (a copy), decide the
+        // deletions, then rewrite under the exclusive lock. `.await`s only around
+        // the reads/writes, never under a held content lock.
+        let (to_delete, remaining): (Vec<OffsetNumber>, u64) = {
+            let pool = shared.buffers();
+            let _g = pool.content_share(buffer);
+            let page = pool.buffer_get_page(buffer);
+            // SAFETY: a formatted btree page has a BTPageOpaqueData special area.
+            let opaque = unsafe { &*BTPageGetOpaque(page) };
+            if !P_ISLEAF(opaque) || P_IGNORE(opaque) {
+                (Vec::new(), 0)
+            } else {
+                let firstoff = P_FIRSTDATAKEY(opaque);
+                let maxoff = page.get_max_offset_number();
+                let mut del = Vec::new();
+                let mut kept: u64 = 0;
+                let mut off = firstoff;
+                while off <= maxoff {
+                    let item_id = page.get_item_id(off);
+                    if item_id.is_normal() {
+                        let item = page.get_item(&item_id);
+                        // SAFETY: a normal btree leaf item begins with IndexTupleData.
+                        #[allow(
+                            clippy::cast_ptr_alignment,
+                            reason = "Page is align(8); items live at MAXALIGN offsets, so the IndexTupleData overlay is aligned (matches nbtsearch.rs)"
+                        )]
+                        let tid = unsafe {
+                            (*item.as_ptr().cast::<crate::access::itup::IndexTupleData>()).tid
+                        };
+                        if dead.contains(&tid) {
+                            del.push(off);
+                        } else {
+                            kept += 1;
+                        }
+                    }
+                    off += 1;
+                }
+                (del, kept)
+            }
+        };
+
+        num_remaining += remaining;
+
+        if to_delete.is_empty() {
+            bt_relbuf(shared, buffer);
+            continue;
+        }
+
+        // Rewrite the page with the dead items removed.
+        let mut page_copy = {
+            let pool = shared.buffers();
+            let _g = pool.content_share(buffer);
+            let src = pool.buffer_get_page(buffer);
+            let mut copy = crate::storage::bufpage::Page::boxed_zeroed();
+            copy.as_mut_bytes().copy_from_slice(src.as_bytes());
+            copy
+        };
+        page_copy.index_multi_delete(&to_delete);
+        num_removed += to_delete.len() as u64;
+        bt_write_page(shared, buffer, &page_copy, crate::access::xlogdefs::INVALID_XLOG_REC_PTR);
+        bt_relbuf(shared, buffer);
+    }
+
+    (num_removed, num_remaining)
+}
+
+/// The block count of an index's main fork.
+async fn index_nblocks(shared: &Arc<SharedState>, index: &RelationData) -> BlockNumber {
+    use crate::common::relpath::ForkNumber;
+    let smgr_ptr = index.smgr();
+    // SAFETY: relcache-owned smgr handle, valid while the index is open.
+    let smgr = unsafe { &mut *smgr_ptr };
+    smgr.nblocks(shared, ForkNumber::MAIN_FORKNUM).await
 }
 
 /// `btbuildempty`: write an empty btree (a meta page with no root). Used for

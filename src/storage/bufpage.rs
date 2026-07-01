@@ -207,6 +207,21 @@ impl Page {
         unsafe { *base.add(idx) }
     }
 
+    /// Overwrite the line pointer at `offset_number` (1-based). Used by the VACUUM
+    /// prune/mark passes (`heap_page_prune_execute` / `lazy_vacuum_heap_page`) to set
+    /// an item's flags to LP_DEAD or LP_UNUSED in place. Caller holds the buffer's
+    /// exclusive/cleanup content lock.
+    #[inline]
+    #[allow(
+        clippy::cast_ptr_alignment,
+        reason = "page buffer is MAXALIGN/8-byte aligned and SizeOfPageHeaderData is a multiple of 4, so the ItemIdData (4-byte) base is aligned"
+    )]
+    pub fn set_item_id(&mut self, offset_number: OffsetNumber, value: ItemIdData) {
+        let idx = (offset_number - 1) as usize;
+        let base = unsafe { self.0.as_mut_ptr().add(SizeOfPageHeaderData).cast::<ItemIdData>() };
+        unsafe { *base.add(idx) = value };
+    }
+
     /// Contents start, for pages with no line pointers. MAXALIGN'd.
     #[inline]
     pub fn get_contents(&self) -> &[u8] {
