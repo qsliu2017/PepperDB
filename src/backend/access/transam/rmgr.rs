@@ -81,21 +81,44 @@ macro_rules! builtin_rmgr {
         }
         const $konst: &'static dyn Rmgr = &$struct;
     };
+    // Variant that also wires the rmgr descriptor routines (rm_desc/rm_identify),
+    // for the rmgrs whose rmgrdesc bodies are ported (step 49).
+    ($struct:ident, $konst:ident, $id:expr, $desc:path, $identify:path) => {
+        pub struct $struct;
+        impl Rmgr for $struct {
+            fn name(&self) -> &'static str {
+                $id.name()
+            }
+            fn desc(&self, record: &DecodedXLogRecord) -> String {
+                $desc(record)
+            }
+            fn identify(&self, info: u8) -> Option<&'static str> {
+                $identify(info)
+            }
+        }
+        const $konst: &'static dyn Rmgr = &$struct;
+    };
 }
 
-// Mirrors the PG_RMGR(...) list in access/rmgrlist.h, in id order.
-builtin_rmgr!(XlogRmgr, XLOG_RMGR, BuiltinRmgrId::Xlog);
-builtin_rmgr!(XactRmgr, XACT_RMGR, BuiltinRmgrId::Xact);
-builtin_rmgr!(SmgrRmgr, SMGR_RMGR, BuiltinRmgrId::Smgr);
-builtin_rmgr!(ClogRmgr, CLOG_RMGR, BuiltinRmgrId::Clog);
-builtin_rmgr!(DbaseRmgr, DBASE_RMGR, BuiltinRmgrId::Dbase);
+use crate::backend::access::rmgrdesc::{
+    clogdesc, dbasedesc, heapdesc, nbtdesc, seqdesc, smgrdesc, xactdesc, xlogdesc,
+};
+
+// Mirrors the PG_RMGR(...) list in access/rmgrlist.h, in id order. The rmgrs with
+// ported descriptor bodies wire rm_desc/rm_identify; the rest inherit the inert
+// deferred defaults (empty desc, None identify) until their AMs land.
+builtin_rmgr!(XlogRmgr, XLOG_RMGR, BuiltinRmgrId::Xlog, xlogdesc::xlog_desc, xlogdesc::xlog_identify);
+builtin_rmgr!(XactRmgr, XACT_RMGR, BuiltinRmgrId::Xact, xactdesc::xact_desc, xactdesc::xact_identify);
+builtin_rmgr!(SmgrRmgr, SMGR_RMGR, BuiltinRmgrId::Smgr, smgrdesc::smgr_desc, smgrdesc::smgr_identify);
+builtin_rmgr!(ClogRmgr, CLOG_RMGR, BuiltinRmgrId::Clog, clogdesc::clog_desc, clogdesc::clog_identify);
+builtin_rmgr!(DbaseRmgr, DBASE_RMGR, BuiltinRmgrId::Dbase, dbasedesc::dbase_desc, dbasedesc::dbase_identify);
 builtin_rmgr!(TblspcRmgr, TBLSPC_RMGR, BuiltinRmgrId::Tblspc);
 builtin_rmgr!(MultixactRmgr, MULTIXACT_RMGR, BuiltinRmgrId::Multixact);
 builtin_rmgr!(RelmapRmgr, RELMAP_RMGR, BuiltinRmgrId::Relmap);
 builtin_rmgr!(StandbyRmgr, STANDBY_RMGR, BuiltinRmgrId::Standby);
-builtin_rmgr!(Heap2Rmgr, HEAP2_RMGR, BuiltinRmgrId::Heap2);
-builtin_rmgr!(HeapRmgr, HEAP_RMGR, BuiltinRmgrId::Heap);
-builtin_rmgr!(BtreeRmgr, BTREE_RMGR, BuiltinRmgrId::Btree);
+builtin_rmgr!(Heap2Rmgr, HEAP2_RMGR, BuiltinRmgrId::Heap2, heapdesc::heap2_desc, heapdesc::heap2_identify);
+builtin_rmgr!(HeapRmgr, HEAP_RMGR, BuiltinRmgrId::Heap, heapdesc::heap_desc, heapdesc::heap_identify);
+builtin_rmgr!(BtreeRmgr, BTREE_RMGR, BuiltinRmgrId::Btree, nbtdesc::btree_desc, nbtdesc::btree_identify);
 builtin_rmgr!(HashRmgr, HASH_RMGR, BuiltinRmgrId::Hash);
 builtin_rmgr!(GinRmgr, GIN_RMGR, BuiltinRmgrId::Gin);
 builtin_rmgr!(GistRmgr, GIST_RMGR, BuiltinRmgrId::Gist);
@@ -247,8 +270,18 @@ mod tests {
     #[test]
     fn deferred_defaults_are_inert() {
         // The deferred identify default returns None (not unimplemented!()):
-        // per-AM handlers land later, and an unfired record must not panic.
-        assert_eq!(GetRmgr(BuiltinRmgrId::Xlog as RmgrId).identify(0), None);
+        // per-AM handlers land later, and an unfired record must not panic. Hash
+        // has no ported rmgrdesc body yet, so it still uses the trait default.
+        assert_eq!(GetRmgr(BuiltinRmgrId::Hash as RmgrId).identify(0), None);
+    }
+
+    #[test]
+    fn ported_rmgr_identify_is_wired() {
+        // The rmgrs with ported rmgrdesc bodies (step 49) override identify.
+        assert_eq!(
+            GetRmgr(BuiltinRmgrId::Xact as RmgrId).identify(0),
+            Some("COMMIT")
+        );
     }
 
     #[test]
