@@ -1353,6 +1353,36 @@ pub fn boot_get_type_io_data(typid: Oid) -> BootTypeIoData {
     unimplemented!("boot_get_type_io_data: type I/O lookup lands with the adt milestone")
 }
 
+// --- initdb: fresh-cluster detection + version marker --------------------------
+//
+// PG's `initdb` binary runs once against an empty PGDATA to lay out the directory
+// tree and write the `PG_VERSION` marker (initdb.c `write_version_file`), after
+// which the postmaster refuses an un-initialized directory and never re-seeds an
+// initialized one. Under the single-process port there is no separate `initdb`
+// program: the supervisor runs `bootstrap_catalogs` in-process the first time it
+// starts against an empty datadir. These two helpers give it the initdb identity
+// check -- is this datadir already a cluster? -- and the marker to stamp after a
+// successful bootstrap so a restart skips it.
+
+/// PG initdb's top-level `PG_VERSION`: whether `data_dir` already holds an
+/// initialized cluster. A datadir with the version marker was bootstrapped by a
+/// prior run (or by initdb); one without it is fresh and must be seeded.
+#[must_use]
+pub fn data_directory_initialized(data_dir: &str) -> bool {
+    std::path::Path::new(data_dir)
+        .join(crate::backend::utils::init::miscinit::PG_VERSION_FILE)
+        .exists()
+}
+
+/// PG initdb `write_version_file(NULL)`: stamp the top-level `PG_VERSION` marker
+/// (the server major version, newline-terminated) so a later start recognizes the
+/// datadir as initialized. Called once, after `bootstrap_catalogs` succeeds.
+pub fn write_pg_version_file(data_dir: &str) -> std::io::Result<()> {
+    let path =
+        std::path::Path::new(data_dir).join(crate::backend::utils::init::miscinit::PG_VERSION_FILE);
+    std::fs::write(path, format!("{}\n", crate::pg_config::PG_MAJORVERSION))
+}
+
 // =============================================================================
 // TOMBSTONE: bootparse.y + bootscanner.l (the BKI flex/bison grammar).
 //
@@ -1551,5 +1581,17 @@ mod tests {
     #[test]
     fn bootstrap_catalogs_inventory() {
         assert_eq!(bootstrap_seed_inventory(), 6);
+    }
+
+    /// A fresh datadir is not initialized; stamping the marker makes it so.
+    #[test]
+    fn pg_version_marker_marks_datadir_initialized() {
+        let dir = std::env::temp_dir().join(format!("pepper-initdb-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_str().unwrap();
+        assert!(!data_directory_initialized(path), "fresh datadir is uninitialized");
+        write_pg_version_file(path).unwrap();
+        assert!(data_directory_initialized(path), "marker makes it initialized");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

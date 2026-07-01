@@ -178,12 +178,15 @@ pub struct Supervisor {
     pub shared: Arc<SharedState>,
 }
 
-/// PG `PostmasterMain`. Build shared state, bind the listener on the default
-/// port, and run to completion. Production entry: blocks until a shutdown signal
-/// drains all backends. This is the thin wrapper the bin calls.
-pub async fn postmaster_main(config: SharedStateConfig) {
+/// PG `PostmasterMain`. Build shared state, bind the listener on the chosen
+/// `host:port`, and run to completion. Production entry: blocks until a shutdown
+/// signal drains all backends. This is the thin wrapper the bin calls; `host` is
+/// PG's `listen_addresses` (a single address here) and `port` its `PostPortNumber`.
+pub async fn postmaster_main(config: SharedStateConfig, host: &str, port: u16) {
     let shared = SharedState::new(config);
-    let addr: SocketAddr = (std::net::Ipv4Addr::LOCALHOST, DEFAULT_PG_PORT).into();
+    // Resolve `host:port` the way PG's StreamServerPort does: a listen address plus
+    // the port. A single resolved socket address suffices (one listener task).
+    let addr = resolve_listen_addr(host, port);
     let listener = TcpListener::bind(addr)
         .await
         .unwrap_or_else(|e| panic!("could not bind {addr}: {e}"));
@@ -193,6 +196,21 @@ pub async fn postmaster_main(config: SharedStateConfig) {
     spawn_signal_shutdown(shutdown.clone());
 
     server_loop(listener, shared, shutdown, Arc::new(ChildRegistry::new())).await;
+}
+
+/// Resolve a `listen_addresses` entry + port to a bindable socket address (PG's
+/// `StreamServerPort` host handling, single-address subset). An empty host or `*`
+/// binds all interfaces (`0.0.0.0`); `localhost` and a literal IP resolve
+/// directly. An unrecognized host name falls back to loopback (name resolution
+/// beyond loopback is deferred).
+fn resolve_listen_addr(host: &str, port: u16) -> SocketAddr {
+    use std::net::{IpAddr, Ipv4Addr};
+    let ip = match host {
+        "" | "*" => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        "localhost" => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        h => h.parse::<IpAddr>().unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+    };
+    SocketAddr::new(ip, port)
 }
 
 /// Bind on `bind_addr` (use port 0 for an ephemeral test port) and start the
@@ -246,26 +264,44 @@ async fn server_loop(
 
     // initdb at server boot (PG runs initdb before the first postmaster start; the
     // cluster must have its catalogs seeded before any backend connects, since
-    // backends read on-disk catalogs). Ensure the cluster directory layout exists,
-    // then seed the catalogs ONCE here, before the accept loop admits connections.
-    // Gated on a configured data directory: a cluster has a DataDir, and the
-    // identity/accept-path supervisor tests (which never run a query) use the
-    // default config with no DataDir and must not pay for / write a bootstrap.
-    if shared.config().data_dir().is_some() {
-        ensure_cluster_dirs(&shared);
-        // Bootstrap's future is Send (like a backend's), but it nests the deep
-        // per-task scope stack; run it once on a dedicated current-thread runtime on
-        // its own spawn_blocking OS thread (full stack, isolated from the supervisor),
-        // joining before the accept loop starts (nothing connects until it returns).
-        let boot_shared = shared.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("bootstrap runtime");
-            rt.block_on(crate::backend::tcop::postgres::bootstrap_cluster(boot_shared));
-        })
-        .await;
+    // backends read on-disk catalogs). On a FRESH datadir, ensure the cluster
+    // directory layout exists and seed the catalogs ONCE here, before the accept
+    // loop admits connections, then stamp the `PG_VERSION` marker. An ALREADY
+    // initialized datadir (marker present) is left as-is -- like PG, we never
+    // re-seed an existing cluster. Gated on a configured data directory: the
+    // identity/accept-path supervisor tests use the default config with no DataDir
+    // and must not pay for / write a bootstrap.
+    if let Some(dir) = shared.config().data_dir() {
+        if crate::backend::bootstrap::bootstrap::data_directory_initialized(&dir) {
+            crate::elog!(
+                crate::utils::elog::LOG,
+                format!("postmaster: using existing data directory {dir}")
+            );
+        } else {
+            ensure_cluster_dirs(&shared);
+            // Bootstrap's future is Send (like a backend's), but it nests the deep
+            // per-task scope stack; run it once on a dedicated current-thread runtime
+            // on its own spawn_blocking OS thread (full stack, isolated from the
+            // supervisor), joining before the accept loop starts (nothing connects
+            // until it returns).
+            let boot_shared = shared.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("bootstrap runtime");
+                rt.block_on(crate::backend::tcop::postgres::bootstrap_cluster(boot_shared));
+            })
+            .await;
+            // Stamp the version marker so a restart recognizes the cluster and skips
+            // the seed above (initdb.c write_version_file, run after bootstrap).
+            if let Err(e) = crate::backend::bootstrap::bootstrap::write_pg_version_file(&dir) {
+                crate::elog!(
+                    crate::utils::elog::LOG,
+                    format!("postmaster: could not write PG_VERSION in {dir}: {e}")
+                );
+            }
+        }
     }
 
     // Start the long-lived auxiliary tasks (PG launches them right after shared

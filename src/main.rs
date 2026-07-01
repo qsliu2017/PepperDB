@@ -17,7 +17,7 @@
 //! check are minimal here, and the non-postmaster dispatch modes are not yet
 //! implemented.
 
-use pepperdb::backend::postmaster::postmaster::postmaster_main;
+use pepperdb::backend::postmaster::postmaster::{postmaster_main, DEFAULT_PG_PORT};
 use pepperdb::shared_state::SharedStateConfig;
 
 /// Special must-be-first options for dispatching to subprograms (PG's
@@ -42,6 +42,54 @@ fn parse_dispatch(args: &[String]) -> Dispatch {
     }
 }
 
+/// The postmaster's startup parameters gathered from the command line and the
+/// environment (PG's `PostmasterMain` getopt loop + the `PGDATA`/`PGPORT`
+/// fallbacks). The subset step 01 needs: data directory, listen host, and port.
+struct ServerOptions {
+    /// PG `-D` / `$PGDATA`: the cluster data directory. `None` runs with the
+    /// compiled-in relative paths (no on-disk cluster).
+    data_dir: Option<String>,
+    /// PG `-h` / `listen_addresses`: the single listen address (empty = all).
+    host: String,
+    /// PG `-p` / `$PGPORT`: the TCP port.
+    port: u16,
+}
+
+/// Parse the postmaster options (PG `PostmasterMain` getopt: `-D dir`, `-h host`,
+/// `-p port`), falling back to `$PGDATA` for the data directory and `$PGPORT`
+/// then the compiled-in default for the port -- the fallback order PG's guc.c
+/// uses. Only the flags step 01 needs are recognized; both `-D dir` and `-Ddir`
+/// spellings are accepted (getopt style).
+fn parse_server_options(args: &[String]) -> ServerOptions {
+    fn opt_value<'a>(args: &'a [String], i: &mut usize, flag: &str) -> Option<&'a str> {
+        let a = &args[*i];
+        if a == flag {
+            *i += 1;
+            args.get(*i).map(String::as_str)
+        } else {
+            a.strip_prefix(flag)
+        }
+    }
+
+    let mut data_dir = std::env::var("PGDATA").ok();
+    let mut host = String::new();
+    let mut port: Option<u16> = std::env::var("PGPORT").ok().and_then(|p| p.parse().ok());
+
+    let mut i = 1;
+    while i < args.len() {
+        if let Some(v) = opt_value(args, &mut i, "-D") {
+            data_dir = Some(v.to_string());
+        } else if let Some(v) = opt_value(args, &mut i, "-h") {
+            host = v.to_string();
+        } else if let Some(v) = opt_value(args, &mut i, "-p") {
+            port = v.parse().ok();
+        }
+        i += 1;
+    }
+
+    ServerOptions { data_dir, host, port: port.unwrap_or(DEFAULT_PG_PORT) }
+}
+
 fn main() {
     // PG's startup_hacks() / set_pglocale_pgservice() / check_root(): minimal.
     // TODO(startup): locale setup, env scrubbing, and the not-running-as-root
@@ -62,7 +110,12 @@ fn main() {
 
     match parse_dispatch(&args) {
         Dispatch::Postmaster => {
-            runtime.block_on(postmaster_main(SharedStateConfig::default()));
+            let opts = parse_server_options(&args);
+            let config = SharedStateConfig {
+                data_dir: opts.data_dir,
+                ..SharedStateConfig::default()
+            };
+            runtime.block_on(postmaster_main(config, &opts.host, opts.port));
         }
         // TODO(bootstrap): real implementations. Bootstrap/check/describe-config/
         // single-user modes are not yet ported.

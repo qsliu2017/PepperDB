@@ -33,6 +33,7 @@ use crate::catalog::pg_authid::BOOTSTRAP_SUPERUSERID;
 use crate::miscadmin::{is_bootstrap_processing_mode, BackendType, InitPgFlags};
 use crate::postgres_ext::Oid;
 use crate::session::{self, Session};
+use crate::shared_state::SharedState;
 use std::sync::Arc;
 
 /// Early per-task init: identity only, no catalog / auth / proc-array. Mirrors
@@ -74,6 +75,7 @@ pub fn base_init() {
 /// session at the end.
 #[allow(unused_variables)]
 pub async fn init_postgres(
+    shared: &Arc<SharedState>,
     backend_type: BackendType,
     in_dbname: Option<&str>,
     dboid: Oid,
@@ -82,6 +84,22 @@ pub async fn init_postgres(
     flags: InitPgFlags,
 ) -> String {
     let bootstrap = is_bootstrap_processing_mode();
+
+    // Validate the cluster the backend is connecting to (PG `InitPostgres` reads
+    // `ValidatePgVersion` against the datadir before touching catalogs). A backend
+    // must not attach to a datadir a different major version wrote. Skip when no
+    // datadir is configured (in-memory test clusters) or during bootstrap, which
+    // is what writes the marker in the first place.
+    if !bootstrap
+        && let Some(dir) = shared.config().data_dir()
+        && let Err(e) =
+            crate::backend::utils::init::miscinit::validate_pg_version(shared.io(), &dir).await
+    {
+        crate::ereport!(crate::utils::elog::FATAL, |ed: &mut crate::utils::elog::ErrorData| {
+            ed.errcode(crate::utils::errcodes::ERRCODE_INVALID_PARAMETER_VALUE)
+                .errmsg(e.to_string());
+        });
+    }
 
     // Early, catalog-free identity slice.
     let session = backend_task_init(backend_type).await;
