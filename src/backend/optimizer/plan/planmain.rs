@@ -83,6 +83,9 @@ pub fn query_planner(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback)
         crate::nodes::parsenodes::RTEKind::RELATION => {
             build_scan_rel_with_path(root, rti, reltarget)
         }
+        crate::nodes::parsenodes::RTEKind::VALUES => {
+            build_values_rel_with_path(root, rti, reltarget)
+        }
         other => not_yet_reachable(&format!("query_planner: FROM item RTE kind {other:?}")),
     };
 
@@ -206,6 +209,39 @@ fn build_scan_rel_with_path(
     distribute_jointree_quals_to_baserel(root, &mut rel);
 
     // Park the rel in the simple_rel_array so make_one_rel can find it by index.
+    root.simple_rel_array[rti] = Some(Box::new(rel));
+
+    let joinlist = jointree_fromlist(root);
+    crate::backend::optimizer::path::allpaths::make_one_rel(root, &joinlist)
+}
+
+/// Build the base RelOptInfo for a VALUES RTE at RT index `rti` and run
+/// `make_one_rel` to add its ValuesScan path. Unlike a plain relation there is no
+/// relcache lookup; PG's `set_values_size_estimates` sets `tuples = number of
+/// rows`, which `set_base_rel_sizes` turns into the row estimate.
+fn build_values_rel_with_path(
+    root: &mut PlannerInfo,
+    rti: usize,
+    reltarget: PathTarget,
+) -> RelOptInfo {
+    use crate::nodes::nodes::Node;
+
+    setup_simple_rel_arrays(root);
+
+    let nrows = {
+        let Node::RangeTblEntry(rte) = &root.parse.rtable[rti - 1] else {
+            not_yet_reachable("query_planner: rangetable entry is not an RTE");
+        };
+        rte.values_lists.len()
+    };
+
+    let mut rel = make_base_rel(rti, reltarget);
+    rel.rtekind = crate::nodes::parsenodes::RTEKind::VALUES;
+    // set_values_size_estimates: rel->tuples = list_length(values_lists).
+    rel.tuples = nrows as f64;
+
+    distribute_jointree_quals_to_baserel(root, &mut rel);
+
     root.simple_rel_array[rti] = Some(Box::new(rel));
 
     let joinlist = jointree_fromlist(root);
@@ -412,6 +448,7 @@ fn top_plan_tlist_mut(plan: &mut crate::nodes::nodes::Node) -> &mut Vec<crate::n
         Node::IndexScan(s) => &mut s.scan.plan.targetlist,
         Node::IndexOnlyScan(s) => &mut s.scan.plan.targetlist,
         Node::BitmapHeapScan(s) => &mut s.scan.plan.targetlist,
+        Node::ValuesScan(v) => &mut v.scan.plan.targetlist,
         Node::NestLoop(n) => &mut n.join.plan.targetlist,
         Node::MergeJoin(m) => &mut m.join.plan.targetlist,
         Node::HashJoin(h) => &mut h.join.plan.targetlist,

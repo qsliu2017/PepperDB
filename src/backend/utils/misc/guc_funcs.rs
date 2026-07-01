@@ -233,7 +233,12 @@ fn show_guc_config_option(name: &str) {
     send_text_data_row(&[Some(&value)]);
 }
 
-fn show_all_guc_config() {
-    // STAGED: SHOW ALL needs get_guc_variables() (the full registry walk).
-    unimplemented!("SHOW ALL: GUC registry walk not yet translated");
+fn show_all_guc_config() -> ! {
+    // STAGED: SHOW ALL needs get_guc_variables() (the full registry walk). Raise a
+    // catchable feature-not-supported ERROR so the session survives (error.md).
+    crate::ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+            .errmsg("SHOW ALL is not yet supported".to_string());
+    });
+    unreachable!("ereport(ERROR) diverges");
 }

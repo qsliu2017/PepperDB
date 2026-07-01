@@ -414,6 +414,27 @@ pub fn coerce_to_common_type(
     .unwrap_or_else(|| type_mismatch_error(context, target_type_id, input_type))
 }
 
+/// PG `select_common_typmod`: determine the common typmod of a list of input
+/// expressions (already coerced to `common_type`). If every expression has
+/// `common_type` and they all share one typmod, that typmod is returned; otherwise
+/// -1 (unspecified).
+pub fn select_common_typmod(_pstate: &ParseState, exprs: &[Node], common_type: Oid) -> i32 {
+    use crate::nodes::nodeFuncs::{exprType, exprTypmod};
+    let mut result = -1;
+    let mut first = true;
+    for expr in exprs {
+        if exprType(expr) != common_type {
+            return -1;
+        } else if first {
+            result = exprTypmod(expr);
+            first = false;
+        } else if result != exprTypmod(expr) {
+            return -1;
+        }
+    }
+    result
+}
+
 #[cold]
 fn type_mismatch_error(context: &str, t1: Oid, t2: Oid) -> ! {
     crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {

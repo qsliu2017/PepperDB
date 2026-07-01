@@ -37,6 +37,9 @@ pub fn create_plan_recurse(root: &mut PlannerInfo, best_path: &Path) -> Node {
             Node::Result(Box::new(create_group_result_plan(root, best_path)))
         }
         PathType::SeqScan => Node::SeqScan(Box::new(create_seqscan_plan(root, best_path))),
+        PathType::ValuesScan => {
+            Node::ValuesScan(Box::new(create_valuesscan_plan(root, best_path)))
+        }
         PathType::IndexScan => Node::IndexScan(Box::new(create_indexscan_plan(root, best_path))),
         PathType::BitmapHeapScan => {
             Node::BitmapHeapScan(Box::new(create_bitmap_scan_plan(root, best_path)))
@@ -582,6 +585,64 @@ fn make_seqscan(tlist: Vec<Node>, qual: Vec<Node>, scanrelid: crate::nodes::prim
             plan: empty_plan(tlist, qual),
             scanrelid,
         },
+    }
+}
+
+/// PG `create_valuesscan_plan`: build a `ValuesScan` plan from a valuesscan Path.
+/// The plan's `values_lists` come straight from the RTE (subquery_planner already
+/// processed them); the simple int/text-literal path just copies them. The scanrelid
+/// is the base rel's RT index; the tlist is the path's pathtarget; the qual is the
+/// rel's baserestrictinfo stripped of RestrictInfo wrappers.
+fn create_valuesscan_plan(
+    root: &mut PlannerInfo,
+    best_path: &Path,
+) -> crate::nodes::plannodes::ValuesScan {
+    use crate::nodes::nodes::Node;
+
+    let parent = best_path
+        .parent
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("create_valuesscan_plan: missing parent rel"));
+    let scan_relid = parent.relid;
+    crate::assert!(scan_relid > 0);
+
+    if best_path.param_info.is_some() {
+        not_yet_reachable("create_valuesscan_plan: parameterized VALUES (nestloop params)");
+    }
+
+    // rte = planner_rt_fetch(scan_relid, root); Assert(rte->rtekind == RTE_VALUES).
+    let Node::RangeTblEntry(rte) = &root.parse.rtable[scan_relid - 1] else {
+        not_yet_reachable("create_valuesscan_plan: rangetable entry is not an RTE");
+    };
+    crate::assert!(rte.rtekind == crate::nodes::parsenodes::RTEKind::VALUES);
+    let values_lists = rte.values_lists.clone();
+
+    let scan_clauses: Vec<crate::nodes::pathnodes::RestrictInfo> =
+        parent.baserestrictinfo.iter().map(|ri| (**ri).clone()).collect();
+    let qual = crate::backend::optimizer::util::restrictinfo::extract_actual_clauses(
+        &scan_clauses,
+        false,
+    );
+
+    let tlist = build_path_tlist(root, best_path);
+    let mut plan = make_valuesscan(tlist, qual, scan_relid, values_lists);
+    copy_generic_path_info(&mut plan.scan.plan, best_path);
+    plan
+}
+
+/// PG `make_valuesscan`: construct a `ValuesScan` plan node.
+fn make_valuesscan(
+    tlist: Vec<Node>,
+    qual: Vec<Node>,
+    scanrelid: crate::nodes::primnodes::Index,
+    values_lists: Vec<Node>,
+) -> crate::nodes::plannodes::ValuesScan {
+    crate::nodes::plannodes::ValuesScan {
+        scan: Scan {
+            plan: empty_plan(tlist, qual),
+            scanrelid,
+        },
+        values_lists,
     }
 }
 

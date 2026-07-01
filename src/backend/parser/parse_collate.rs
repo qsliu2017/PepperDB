@@ -21,13 +21,10 @@ use crate::nodes::parsenodes::Query;
 use crate::parser::parse_node::ParseState;
 use crate::postgres_ext::{InvalidOid, Oid};
 
-/// PG `CollateStrength`: how forcibly a collation propagates upward.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(
-    dead_code,
-    reason = "grow scaffold: only None is reached for M1 (uncollatable consts); \
-              Implicit/Conflict/Explicit are set by collation-bearing arms added later"
-)]
+/// PG `CollateStrength`: how forcibly a collation propagates upward. Ordered by
+/// increasing dominance (`None < Implicit < Conflict < Explicit`), matching the C
+/// enum's integer ordering used by `merge_collation_state`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CollateStrength {
     /// no collation has a strength yet
     None,
@@ -280,13 +277,83 @@ fn walk_args(pstate: &mut ParseState, node: &mut Node) {
     }
 }
 
-/// PG `select_common_collation`: choose the common collation of a set of
-/// expressions. Not reached for M1 (no multi-input collatable expression yet);
-/// grows with the operator/function transform paths.
-pub fn select_common_collation(
+/// PG `select_common_collation`: identify a common collation for a list of
+/// expressions (which should all share a datatype). `none_ok` permits returning
+/// `InvalidOid` for a conflict of implicit collations instead of raising.
+///
+/// PG runs `assign_collations_walker` over the whole list, merging each element's
+/// derived collation. The reachable VALUES exprs are already-collated leaves
+/// (`Const`/`Var`) and simple wrappers, whose node-level collation is `exprCollation`
+/// with `IMPLICIT` strength when the result type is collatable. We derive that
+/// per-expression state and fold it with `merge_collation_state`, matching PG's
+/// result for these cases. (An explicit `COLLATE` inside a VALUES row would need
+/// `EXPLICIT` strength; that path is not reached here.)
+pub fn select_common_collation(pstate: &mut ParseState, exprs: &[Node], none_ok: bool) -> Oid {
+    let mut context = AssignCollationsContext {
+        collation: InvalidOid,
+        strength: CollateStrength::None,
+        location: -1,
+    };
+    for expr in exprs {
+        let collation = exprCollation(expr);
+        let (ecoll, estrength) = if collation == InvalidOid {
+            (InvalidOid, CollateStrength::None)
+        } else {
+            (collation, CollateStrength::Implicit)
+        };
+        merge_collation_state(pstate, ecoll, estrength, &mut context);
+    }
+    if context.strength == CollateStrength::Conflict {
+        if none_ok {
+            return InvalidOid;
+        }
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_COLLATION_MISMATCH)
+                .errmsg("collation mismatch between implicit collations".to_string())
+                .errhint(
+                    "You can choose the collation by applying the COLLATE clause to one or both expressions."
+                        .to_string(),
+                );
+        });
+        unreachable!("ereport(ERROR) diverges");
+    }
+    context.collation
+}
+
+/// PG `merge_collation_state`: fold a subexpression's collation state into its
+/// parent context. The EXPLICIT-conflict branch (which raises immediately) is not
+/// reached by `select_common_collation`'s implicit-only callers.
+fn merge_collation_state(
     _pstate: &mut ParseState,
-    _exprs: &[Node],
-    _none_ok: bool,
-) -> Oid {
-    unimplemented!("select_common_collation: collatable multi-input expressions deferred");
+    collation: Oid,
+    strength: CollateStrength,
+    context: &mut AssignCollationsContext,
+) {
+    use crate::catalog::genbki::DEFAULT_COLLATION_OID;
+    if strength > context.strength {
+        context.collation = collation;
+        context.strength = strength;
+    } else if strength == context.strength {
+        match strength {
+            CollateStrength::None | CollateStrength::Conflict => {}
+            CollateStrength::Implicit => {
+                if collation != context.collation {
+                    if context.collation == DEFAULT_COLLATION_OID {
+                        context.collation = collation;
+                        context.strength = strength;
+                    } else if collation != DEFAULT_COLLATION_OID {
+                        context.strength = CollateStrength::Conflict;
+                    }
+                }
+            }
+            CollateStrength::Explicit => {
+                if collation != context.collation {
+                    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                        e.errcode(crate::utils::errcodes::ERRCODE_COLLATION_MISMATCH)
+                            .errmsg("collation mismatch between explicit collations".to_string());
+                    });
+                }
+            }
+        }
+    }
 }

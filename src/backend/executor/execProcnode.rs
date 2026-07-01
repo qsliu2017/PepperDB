@@ -29,6 +29,9 @@ use crate::backend::executor::nodeAppend::{exec_append, exec_end_append, exec_in
 use crate::backend::executor::nodeCtescan::{
     exec_cte_scan, exec_end_cte_scan, exec_init_cte_scan, CteScanRun,
 };
+use crate::backend::executor::nodeValuesscan::{
+    exec_end_values_scan, exec_init_values_scan, exec_values_scan,
+};
 use crate::backend::executor::nodeRecursiveunion::{
     exec_end_recursive_union, exec_init_recursive_union, exec_recursive_union, make_worktable_ref,
     RecursiveUnionRun,
@@ -153,6 +156,8 @@ pub enum PlanStateNode<'rel> {
     Append(Box<AppendRun<'rel>>),
     /// T_SetOpState (+ left/right children). INTERSECT/EXCEPT [ALL].
     SetOp(Box<SetOpRun<'rel>>),
+    /// T_ValuesScanState (+ per-row compiled expression lists). Owns no borrow.
+    ValuesScan(Box<crate::backend::executor::nodeValuesscan::ValuesScanRun>),
     /// T_CteScanState (+ the CTE subplan). Materializes the CTE once.
     CteScan(Box<CteScanRun<'rel>>),
     /// T_RecursiveUnionState (+ non-recursive/recursive terms + working table).
@@ -224,6 +229,7 @@ pub fn result_type_of(node: &PlanStateNode<'_>) -> Option<TupleDesc> {
         PlanStateNode::WindowAgg(w) => w.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Append(a) => a.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::SetOp(s) => s.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::ValuesScan(v) => v.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::CteScan(c) => c.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::RecursiveUnion(r) => r.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::WorkTableScan(w) => w.ss.ps.ps_result_tuple_desc.clone(),
@@ -352,6 +358,9 @@ pub fn exec_init_node<'rel>(
             let right = init_child(s.plan.righttree.as_ref(), estate, eflags);
             Some(PlanStateNode::SetOp(exec_init_setop(s, estate, left, right)))
         }
+        Node::ValuesScan(v) => {
+            Some(PlanStateNode::ValuesScan(exec_init_values_scan(v, estate)))
+        }
         Node::CteScan(c) => {
             // The CTE subplan is embedded as the CteScan's lefttree (the port has no
             // es_subplanstates registry yet; see nodeCtescan.rs).
@@ -462,6 +471,7 @@ pub async fn exec_proc_node<'n>(
         PlanStateNode::WindowAgg(w) => exec_window_agg(shared, w).await,
         PlanStateNode::Append(a) => Box::pin(exec_append(shared, a)).await,
         PlanStateNode::SetOp(s) => Box::pin(exec_setop(shared, s)).await,
+        PlanStateNode::ValuesScan(v) => exec_values_scan(v).await,
         PlanStateNode::CteScan(c) => Box::pin(exec_cte_scan(shared, c)).await,
         PlanStateNode::RecursiveUnion(r) => Box::pin(exec_recursive_union(shared, r)).await,
         PlanStateNode::WorkTableScan(w) => Box::pin(exec_work_table_scan(w)).await,
@@ -536,6 +546,7 @@ pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode
         PlanStateNode::WindowAgg(w) => exec_end_window_agg(shared, w),
         PlanStateNode::Append(a) => exec_end_append(shared, a),
         PlanStateNode::SetOp(s) => exec_end_setop(shared, s),
+        PlanStateNode::ValuesScan(v) => exec_end_values_scan(v),
         PlanStateNode::CteScan(c) => exec_end_cte_scan(shared, c),
         PlanStateNode::RecursiveUnion(r) => exec_end_recursive_union(shared, r),
         PlanStateNode::WorkTableScan(w) => exec_end_work_table_scan(w),

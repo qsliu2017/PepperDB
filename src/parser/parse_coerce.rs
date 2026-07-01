@@ -118,13 +118,8 @@ pub fn verify_common_type(_common_type: Oid, _exprs: &[Node]) -> bool {
     unimplemented!()
 }
 
-pub fn select_common_typmod(
-    _pstate: &mut ParseState,
-    _exprs: &[Node],
-    _common_type: Oid,
-) -> i32 {
-    unimplemented!()
-}
+/// PG `select_common_typmod`. See `crate::backend::parser::parse_coerce`.
+pub use crate::backend::parser::parse_coerce::select_common_typmod;
 
 pub fn check_generic_type_consistency(
     _actual_arg_types: &[Oid],

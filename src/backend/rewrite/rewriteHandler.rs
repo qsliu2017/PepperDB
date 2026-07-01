@@ -127,7 +127,8 @@ fn fire_rir_rules(mut parsetree: Query, active_rirs: &mut Vec<crate::postgres_ex
             }
             // RESULT: planner placeholder, nothing to expand. CTE: the body is held
             // in cteList (recursed below), not in this RTE; nothing to expand here.
-            RTEKind::RESULT | RTEKind::CTE => {}
+            // VALUES: an in-line row list with no ON SELECT rule; nothing to expand.
+            RTEKind::RESULT | RTEKind::CTE | RTEKind::VALUES => {}
             _ => not_yet_reachable("fireRIRrules: range-table / view / RLS expansion"),
         }
         rt_index += 1;

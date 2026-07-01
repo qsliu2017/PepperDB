@@ -55,6 +55,20 @@ fn assigned_expr_type_mismatch(colname: &str, col_type: Oid, expr_type: Oid) -> 
     unreachable!("ereport(ERROR) diverges");
 }
 
+/// A catchable `feature_not_supported` error for a VALUES sub-clause that ordinary
+/// SQL can reach but this milestone does not translate (ORDER BY / LIMIT / OFFSET /
+/// FOR UPDATE / WITH on a bare VALUES, and the CREATE RULE LATERAL case). Unlike
+/// `not_yet_reachable` (a bug-panic), this unwinds as an ordinary ERROR the session
+/// survives.
+#[cold]
+fn values_feature_not_supported(what: &str) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+            .errmsg(format!("{what} is not supported"));
+    });
+    unreachable!("ereport(ERROR) diverges");
+}
+
 /// A sync, non-panicking stand-in for PG `format_type_be` for the error message
 /// above: name the common base types, falling back to `oid N` for the rest (the real
 /// `format_type_be` reaches the typecache, which is async; the message only needs to
@@ -211,7 +225,7 @@ pub fn transformStmt(pstate: &mut ParseState, parse_tree: &Node) -> Box<Query> {
     let mut result = match parse_tree {
         Node::SelectStmt(n) => {
             if !n.valuesLists.is_empty() {
-                not_yet_reachable("transformStmt: VALUES clause");
+                transform_values_clause(pstate, n)
             } else if n.op == SetOperation::NONE {
                 transformSelectStmt(pstate, n)
             } else {
@@ -449,7 +463,7 @@ async fn transform_stmt_async(
     let mut result = match parse_tree {
         Node::SelectStmt(n) => {
             if !n.valuesLists.is_empty() {
-                not_yet_reachable("transformStmt: bare VALUES statement");
+                transform_values_clause_async(shared, pstate, n).await
             } else if n.op == SetOperation::NONE {
                 transform_select_stmt_async(shared, pstate, n).await
             } else {
@@ -1546,6 +1560,217 @@ fn collect_expr_names(node: Option<&Node>, ops: &mut Vec<String>, funcs: &mut Ve
     }
 }
 
+/// Async-warm the TYPEOID cache for every distinct type appearing in a VALUES
+/// clause's transformed cells, so the SYNC common-type/typmod/collation resolution
+/// (hit-only `search_sys_cache`) resolves them over the cold wire-backend catcache.
+async fn warm_values_type_caches(shared: &Arc<SharedState>, colexprs: &[Vec<Node>]) {
+    use crate::backend::nodes::nodeFuncs::exprType;
+    use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+    use crate::postgres::ObjectIdGetDatum;
+    use crate::utils::syscache::SysCacheIdentifier as Sc;
+
+    let mut types: Vec<Oid> = Vec::new();
+    for col in colexprs {
+        for cell in col {
+            let t = exprType(cell);
+            if t != Oid::new(0) && !types.contains(&t) {
+                types.push(t);
+            }
+        }
+    }
+    for t in types {
+        if let Some(tuple) =
+            search_sys_cache_populate(shared, Sc::TYPEOID, &[ObjectIdGetDatum(t)]).await
+        {
+            release_sys_cache(tuple);
+        }
+    }
+}
+
+/// PG `transformValuesClause`: transform a bare `VALUES (...), ...` used as a
+/// standalone SELECT, building a `Query` whose single `RTE_VALUES` holds the
+/// row-organized coerced expression lists, with a `*`-expanded targetlist of Vars
+/// over that RTE (as if `SELECT * FROM (VALUES ...) AS "*VALUES*"`).
+///
+/// The intermediate representation is column-organized (a per-column list of
+/// expressions) so the common type / typmod / collation of each column resolves
+/// cleanly, then rearranged back into row-organized lists for the RTE. ORDER BY /
+/// LIMIT / OFFSET / FOR UPDATE / WITH attached to a bare VALUES, and the CREATE RULE
+/// LATERAL case, raise a catchable `feature_not_supported` (not reached by the target
+/// tests).
+/// The wire (async) entry: warm the TYPEOID cache the SYNC resolution reads, then
+/// run the transform. The bare-VALUES arm of `transform_stmt_async` uses this.
+async fn transform_values_clause_async(
+    shared: &Arc<SharedState>,
+    pstate: &mut ParseState,
+    stmt: &SelectStmt,
+) -> Box<Query> {
+    // Pre-transform each row's cells so we know their concrete types, warm the
+    // TYPEOID cache for those types, then run the resolution over the same cells.
+    let mut colexprs: Vec<Vec<Node>> = Vec::new();
+    for row in &stmt.valuesLists {
+        let Node::RowExpr(row) = row else {
+            not_yet_reachable("transformValuesClause: VALUES row is not a RowExpr carrier");
+        };
+        let sublist = transform_expression_list(pstate, &row.args, ParseExprKind::Values);
+        for (i, col) in sublist.into_iter().enumerate() {
+            if i == colexprs.len() {
+                colexprs.push(Vec::new());
+            }
+            if let Some(c) = colexprs.get_mut(i) {
+                c.push(col);
+            }
+        }
+    }
+    warm_values_type_caches(shared, &colexprs).await;
+    transform_values_clause(pstate, stmt)
+}
+
+#[allow(clippy::too_many_lines, reason = "faithful transformValuesClause: per-column type/typmod/collation resolution + RTE + tlist")]
+fn transform_values_clause(pstate: &mut ParseState, stmt: &SelectStmt) -> Box<Query> {
+    use crate::backend::parser::parse_coerce::{
+        coerce_to_common_type, select_common_type, select_common_typmod,
+    };
+    use crate::backend::parser::parse_collate::select_common_collation;
+
+    let mut qry = make_query();
+    qry.commandType = CmdType::SELECT;
+
+    if stmt.withClause.is_some() {
+        values_feature_not_supported("WITH on a bare VALUES clause");
+    }
+
+    // Transform each row's expressions (EXPR_KIND_VALUES); build the column-organized
+    // per-column expression lists. All rows must be the same length post-transform.
+    let mut colexprs: Vec<Vec<Node>> = Vec::new();
+    let mut sublist_length: Option<usize> = None;
+    for row in &stmt.valuesLists {
+        let Node::RowExpr(row) = row else {
+            not_yet_reachable("transformValuesClause: VALUES row is not a RowExpr carrier");
+        };
+        let sublist = transform_expression_list(pstate, &row.args, ParseExprKind::Values);
+        match sublist_length {
+            None => {
+                sublist_length = Some(sublist.len());
+                colexprs = (0..sublist.len()).map(|_| Vec::new()).collect();
+            }
+            Some(len) if len != sublist.len() => {
+                crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                    e.errcode(crate::utils::errcodes::ERRCODE_SYNTAX_ERROR)
+                        .errmsg("VALUES lists must all be the same length".to_string());
+                });
+                unreachable!("ereport(ERROR) diverges");
+            }
+            Some(_) => {}
+        }
+        for (i, col) in sublist.into_iter().enumerate() {
+            colexprs[i].push(col);
+        }
+    }
+    let sublist_length = sublist_length.unwrap_or_else(|| {
+        not_yet_reachable("transformValuesClause: empty VALUES list");
+    });
+
+    // Resolve each column's common type, coerce every cell to it, and record the
+    // column's common typmod and collation for the RTE.
+    let mut coltypes: Vec<Oid> = Vec::with_capacity(sublist_length);
+    let mut coltypmods: Vec<i32> = Vec::with_capacity(sublist_length);
+    let mut colcollations: Vec<Oid> = Vec::with_capacity(sublist_length);
+    for col in &mut colexprs {
+        let (coltype, _) = select_common_type(pstate, col, "VALUES");
+        for cell in col.iter_mut() {
+            let coerced = coerce_to_common_type(pstate, cell.clone(), coltype, "VALUES");
+            *cell = coerced;
+        }
+        let coltypmod = select_common_typmod(pstate, col, coltype);
+        let colcoll = select_common_collation(pstate, col, true);
+        coltypes.push(coltype);
+        coltypmods.push(coltypmod);
+        colcollations.push(colcoll);
+    }
+
+    // Rearrange the coerced column-organized lists back into row-organized RowExpr
+    // carriers (one per VALUES row), the form the VALUES RTE stores.
+    let num_rows = colexprs.first().map_or(0, Vec::len);
+    let mut exprs_lists: Vec<Node> = (0..num_rows)
+        .map(|_| {
+            Node::RowExpr(Box::new(crate::nodes::primnodes::RowExpr {
+                args: Vec::with_capacity(sublist_length),
+                row_typeid: crate::postgres_ext::InvalidOid,
+                row_format: crate::nodes::primnodes::CoercionForm::IMPLICIT_CAST,
+                colnames: Vec::new(),
+                location: -1,
+            }))
+        })
+        .collect();
+    for col in colexprs {
+        for (r, cell) in col.into_iter().enumerate() {
+            let Node::RowExpr(row) = &mut exprs_lists[r] else { unreachable!() };
+            row.args.push(cell);
+        }
+    }
+
+    // A bare VALUES has an empty namespace, so ordinarily no current-level Vars can
+    // appear; the CREATE RULE NEW/OLD (LATERAL) case is not reached here.
+    if !pstate.p_rtable.is_empty()
+        && exprs_lists.iter().any(|row| {
+            crate::backend::optimizer::util::var::contain_vars_of_level(Some(row.clone()), 0)
+        })
+    {
+        values_feature_not_supported("VALUES with outer-level column references (CREATE RULE)");
+    }
+
+    // Generate the VALUES RTE, expose it, and build the `*`-expanded targetlist.
+    let nsitem = crate::backend::parser::parse_relation::add_range_table_entry_for_values(
+        pstate,
+        exprs_lists,
+        coltypes,
+        coltypmods,
+        colcollations,
+        None,
+        false,
+        true,
+    );
+    let nsitem_for_tlist = nsitem.clone();
+    crate::backend::parser::parse_relation::add_ns_item_to_query(pstate, nsitem, true, true, true);
+
+    crate::assert!(pstate.p_next_resno == 1);
+    qry.targetList = crate::backend::parser::parse_target::expand_ns_item_attrs_direct(
+        pstate,
+        &nsitem_for_tlist,
+        -1,
+    );
+
+    if !stmt.sortClause.is_empty() {
+        values_feature_not_supported("ORDER BY on a bare VALUES clause");
+    }
+    if stmt.limitOffset.is_some() {
+        values_feature_not_supported("OFFSET on a bare VALUES clause");
+    }
+    if stmt.limitCount.is_some() {
+        values_feature_not_supported("LIMIT on a bare VALUES clause");
+    }
+    if !stmt.lockingClause.is_empty() {
+        values_feature_not_supported("row locking (FOR UPDATE/SHARE) on a bare VALUES clause");
+    }
+
+    qry.rtable = std::mem::take(&mut pstate.p_rtable)
+        .into_iter()
+        .map(|rte| Node::RangeTblEntry(Box::new(rte)))
+        .collect();
+    qry.rteperminfos = std::mem::take(&mut pstate.p_rteperminfos)
+        .into_iter()
+        .map(|pi| Node::RTEPermissionInfo(Box::new(pi)))
+        .collect();
+    let joinlist = std::mem::take(&mut pstate.p_joinlist);
+    qry.jointree =
+        Some(Node::FromExpr(Box::new(crate::nodes::makefuncs::makeFromExpr(joinlist, None))));
+    qry.hasSubLinks = pstate.p_has_sub_links;
+
+    assign_query_collations(pstate, &mut qry);
+    qry
+}
+
 /// PG `transformInsertStmt` (M2 subset): `INSERT INTO t [(cols)] VALUES (row)` and
 /// the general `INSERT ... SELECT`. The single-row VALUES path computes the row
 /// directly as the query targetlist (PG: "works just like a SELECT without FROM");
@@ -1593,36 +1818,6 @@ async fn transform_insert_stmt(
     // Validate stmt->cols, or build the default ordered column list.
     let (icolumns, attrnos) = check_insert_targets(pstate, &stmt.cols);
 
-    // Determine the INSERT variant and compute the row expression list.
-    let expr_list: Vec<Node> = if select_stmt.is_none() {
-        not_yet_reachable("transformInsertStmt: INSERT ... DEFAULT VALUES");
-    } else if is_general_select {
-        not_yet_reachable("transformInsertStmt: INSERT ... SELECT (general select source)");
-    } else {
-        // VALUES source.
-        let Some(Node::SelectStmt(sel)) = select_stmt else {
-            not_yet_reachable("transformInsertStmt: non-SelectStmt VALUES source");
-        };
-        if sel.valuesLists.len() != 1 {
-            not_yet_reachable("transformInsertStmt: multi-row VALUES (VALUES RTE)");
-        }
-        let Node::RowExpr(row) = &sel.valuesLists[0] else {
-            not_yet_reachable("transformInsertStmt: VALUES row is not a RowExpr carrier");
-        };
-        transform_expression_list(pstate, &row.args, ParseExprKind::ValuesSingle)
-    };
-
-    // Generate the query targetlist: each expr keyed to its target attno, coerced to
-    // the target column's type (PG transformInsertRow -> transformAssignedExpr). The
-    // coercion retypes an UNKNOWN literal/NULL to the column type (e.g. `NULL` -> the
-    // int4 FK column's null).
-    crate::assert!(expr_list.len() <= icolumns.len());
-    let perminfo_index = pstate
-        .p_target_nsitem
-        .as_ref()
-        .unwrap_or_else(|| not_yet_reachable("transformInsertStmt: no target nsitem"))
-        .rte
-        .perminfoindex;
     // Column (atttypid, atttypmod) for each target attno, read from the target rel.
     let col_types: Vec<(Oid, i32)> = {
         let rel = pstate
@@ -1641,6 +1836,42 @@ async fn transform_insert_stmt(
             })
             .collect()
     };
+
+    // Determine the INSERT variant and compute the row expression list.
+    let expr_list: Vec<Node> = if select_stmt.is_none() {
+        not_yet_reachable("transformInsertStmt: INSERT ... DEFAULT VALUES");
+    } else if is_general_select {
+        not_yet_reachable("transformInsertStmt: INSERT ... SELECT (general select source)");
+    } else {
+        // VALUES source.
+        let Some(Node::SelectStmt(sel)) = select_stmt else {
+            not_yet_reachable("transformInsertStmt: non-SelectStmt VALUES source");
+        };
+        if sel.valuesLists.len() > 1 {
+            // Multi-row VALUES: build a VALUES RTE holding each row's cells (coerced to
+            // the target column types), then produce Vars referencing that RTE. The
+            // targetlist-building loop below wraps each Var in a TargetEntry (no
+            // re-coercion: the Var's type already equals the column type).
+            transform_insert_multirow_values(pstate, sel, &icolumns, &col_types)
+        } else {
+            let Node::RowExpr(row) = &sel.valuesLists[0] else {
+                not_yet_reachable("transformInsertStmt: VALUES row is not a RowExpr carrier");
+            };
+            transform_expression_list(pstate, &row.args, ParseExprKind::ValuesSingle)
+        }
+    };
+
+    // Generate the query targetlist: each expr keyed to its target attno, coerced to
+    // the target column's type (PG transformInsertRow -> transformAssignedExpr). The
+    // coercion retypes an UNKNOWN literal/NULL to the column type (e.g. `NULL` -> the
+    // int4 FK column's null).
+    crate::assert!(expr_list.len() <= icolumns.len());
+    let perminfo_index = pstate
+        .p_target_nsitem
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("transformInsertStmt: no target nsitem"))
+        .rte
+        .perminfoindex;
     qry.targetList = expr_list
         .into_iter()
         .zip(icolumns.iter().zip(attrnos.iter()))
@@ -1680,6 +1911,113 @@ async fn transform_insert_stmt(
     // transformed separately).
     finish_query(pstate, &mut qry, None);
     qry
+}
+
+/// PG `transformInsertStmt`'s multi-row VALUES branch: transform each VALUES row's
+/// expressions (EXPR_KIND_VALUES), coerce every cell to its target column's type
+/// (PG `transformInsertRow`), build a `RTE_VALUES` holding the coerced row-organized
+/// lists, and return the list of Vars referencing that RTE (PG `expandNSItemVars`).
+///
+/// The VALUES RTE's coltypes/coltypmods come from the first row's coerced cells;
+/// colcollations are all `InvalidOid` (the outer INSERT doesn't care about VALUES
+/// column collations, matching PG). Indirection on target columns is not translated;
+/// `strip_indirection` is a no-op here.
+fn transform_insert_multirow_values(
+    pstate: &mut ParseState,
+    sel: &SelectStmt,
+    icolumns: &[Node],
+    target_types: &[(Oid, i32)],
+) -> Vec<Node> {
+    use crate::nodes::nodeFuncs::{exprType, exprTypmod};
+
+    let mut exprs_lists: Vec<Node> = Vec::with_capacity(sel.valuesLists.len());
+    let mut sublist_length: Option<usize> = None;
+    for row in &sel.valuesLists {
+        let Node::RowExpr(row) = row else {
+            not_yet_reachable("transformInsertStmt: VALUES row is not a RowExpr carrier");
+        };
+        let sublist = transform_expression_list(pstate, &row.args, ParseExprKind::Values);
+        match sublist_length {
+            None => sublist_length = Some(sublist.len()),
+            Some(len) if len != sublist.len() => {
+                crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                    e.errcode(crate::utils::errcodes::ERRCODE_SYNTAX_ERROR)
+                        .errmsg("VALUES lists must all be the same length".to_string());
+                });
+                unreachable!("ereport(ERROR) diverges");
+            }
+            Some(_) => {}
+        }
+        // transformInsertRow: coerce each cell to its target column's type.
+        if sublist.len() > icolumns.len() {
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_SYNTAX_ERROR)
+                    .errmsg("INSERT has more expressions than target columns".to_string());
+            });
+            unreachable!("ereport(ERROR) diverges");
+        }
+        let coerced: Vec<Node> = sublist
+            .into_iter()
+            .enumerate()
+            .map(|(i, expr)| {
+                let (atttypid, atttypmod) = target_types[i];
+                let colname = col_name(&icolumns[i]);
+                let exprtype = exprType(&expr);
+                if exprtype == atttypid {
+                    expr
+                } else {
+                    crate::backend::parser::parse_coerce::coerce_to_target_type(
+                        pstate,
+                        Some(expr),
+                        exprtype,
+                        atttypid,
+                        atttypmod,
+                        crate::nodes::primnodes::CoercionContext::ASSIGNMENT,
+                        crate::nodes::primnodes::CoercionForm::IMPLICIT_CAST,
+                        -1,
+                    )
+                    .unwrap_or_else(|| {
+                        assigned_expr_type_mismatch(colname.as_deref().unwrap_or(""), atttypid, exprtype)
+                    })
+                }
+            })
+            .collect();
+        // assign_list_collations: label collations per row (independent of vertical
+        // consistency, matching PG).
+        let mut coerced = coerced;
+        crate::backend::parser::parse_collate::assign_list_collations(pstate, &mut coerced);
+        exprs_lists.push(Node::RowExpr(Box::new(crate::nodes::primnodes::RowExpr {
+            args: coerced,
+            row_typeid: crate::postgres_ext::InvalidOid,
+            row_format: crate::nodes::primnodes::CoercionForm::IMPLICIT_CAST,
+            colnames: Vec::new(),
+            location: -1,
+        })));
+    }
+
+    // Column type/typmod/collation lists from the first coerced row.
+    let Node::RowExpr(first) = &exprs_lists[0] else { unreachable!() };
+    let coltypes: Vec<Oid> = first.args.iter().map(exprType).collect();
+    let coltypmods: Vec<i32> = first.args.iter().map(exprTypmod).collect();
+    let colcollations: Vec<Oid> = vec![crate::postgres_ext::InvalidOid; coltypes.len()];
+
+    // Generate the VALUES RTE and add it to the joinlist (not the namespace: an
+    // INSERT's VALUES columns are referenced positionally, not by name).
+    let nsitem = crate::backend::parser::parse_relation::add_range_table_entry_for_values(
+        pstate,
+        exprs_lists,
+        coltypes,
+        coltypmods,
+        colcollations,
+        None,
+        false,
+        true,
+    );
+    let nsitem_for_vars = nsitem.clone();
+    crate::backend::parser::parse_relation::add_ns_item_to_query(pstate, nsitem, true, false, false);
+
+    // List of Vars referencing the RTE (PG expandNSItemVars).
+    crate::backend::parser::parse_target::expand_ns_item_vars_direct(&nsitem_for_vars, 0, -1)
 }
 
 /// PG `transformUpdateStmt`: build a `Query` for `UPDATE t SET ... [FROM ...]
@@ -2591,6 +2929,102 @@ mod relation_tests {
     /// The single result relation RT index recorded on the planned statement.
     fn q_result_relation(stmt: &crate::nodes::plannodes::PlannedStmt) -> i32 {
         stmt.result_relations[0]
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bare_values_analyzes_to_values_rte() {
+        use crate::catalog::genbki::INT4OID;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+
+            let q = analyze(&shared, "VALUES (1),(2),(3)").await;
+            assert_eq!(q.commandType, CmdType::SELECT);
+
+            // Exactly one RTE, an RTE_VALUES with three rows and one int4 column.
+            assert_eq!(q.rtable.len(), 1);
+            let Node::RangeTblEntry(rte) = &q.rtable[0] else { panic!("not an RTE") };
+            assert_eq!(rte.rtekind, crate::nodes::parsenodes::RTEKind::VALUES);
+            assert_eq!(rte.values_lists.len(), 3, "three VALUES rows");
+            assert_eq!(rte.coltypes, vec![INT4OID]);
+            assert_eq!(rte.coltypmods, vec![-1]);
+            assert!(rte.inFromCl);
+            // eref default column name is "column1".
+            assert_eq!(rte.eref.as_ref().unwrap().colnames[0].sval, "column1");
+
+            // Each stored row is a RowExpr carrier with one coerced cell.
+            for row in &rte.values_lists {
+                let Node::RowExpr(r) = row else { panic!("VALUES row not a RowExpr") };
+                assert_eq!(r.args.len(), 1);
+            }
+
+            // Targetlist: one TargetEntry over a Var (varattno 1) referencing the RTE.
+            assert_eq!(q.targetList.len(), 1);
+            let Node::TargetEntry(te) = &q.targetList[0] else { panic!("not a TargetEntry") };
+            assert_eq!(te.resno, 1);
+            let Node::Var(v) = te.expr.as_ref().unwrap() else { panic!("tlist not a Var") };
+            assert_eq!(v.varno, 1, "Var refers to the VALUES RTE at RT index 1");
+            assert_eq!(v.varattno, 1);
+            assert_eq!(v.vartype, INT4OID);
+
+            // Jointree references the VALUES RTE.
+            let Node::FromExpr(f) = q.jointree.as_ref().unwrap() else { panic!("not FromExpr") };
+            assert_eq!(f.fromlist.len(), 1);
+        }))
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn insert_multirow_values_builds_values_rte() {
+        use crate::catalog::genbki::INT4OID;
+        let shared = new_shared();
+        Box::pin(in_scopes(shared.clone(), |shared| async move {
+            init_db(&shared).await;
+            let relid = create_table_t(&shared).await;
+
+            let q = analyze(&shared, "INSERT INTO t VALUES (1),(2)").await;
+            assert_eq!(q.commandType, CmdType::INSERT);
+            assert!(q.resultRelation > 0);
+
+            // Rangetable holds the target RELATION plus the VALUES RTE.
+            let kinds: Vec<_> = q
+                .rtable
+                .iter()
+                .map(|n| {
+                    let Node::RangeTblEntry(rte) = n else { panic!("not an RTE") };
+                    rte.rtekind
+                })
+                .collect();
+            assert!(kinds.contains(&crate::nodes::parsenodes::RTEKind::RELATION));
+            assert!(kinds.contains(&crate::nodes::parsenodes::RTEKind::VALUES));
+
+            // The VALUES RTE has two rows, one int4 column.
+            let values_rte = q
+                .rtable
+                .iter()
+                .find_map(|n| {
+                    let Node::RangeTblEntry(rte) = n else { return None };
+                    (rte.rtekind == crate::nodes::parsenodes::RTEKind::VALUES).then_some(rte)
+                })
+                .expect("a VALUES RTE");
+            assert_eq!(values_rte.values_lists.len(), 2);
+            assert_eq!(values_rte.coltypes, vec![INT4OID]);
+
+            // The result-relation RTE points at t.
+            let Node::RangeTblEntry(target) = &q.rtable[(q.resultRelation - 1) as usize] else {
+                panic!("result relation RTE missing");
+            };
+            assert_eq!(target.relid, relid);
+
+            // One target entry keyed to attno 1, a Var referencing the VALUES RTE.
+            assert_eq!(q.targetList.len(), 1);
+            let Node::TargetEntry(te) = &q.targetList[0] else { panic!("not a TargetEntry") };
+            assert_eq!(te.resno, 1);
+            let Node::Var(v) = te.expr.as_ref().unwrap() else { panic!("tlist not a Var") };
+            assert_eq!(v.varattno, 1);
+            assert_eq!(v.vartype, INT4OID);
+        }))
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

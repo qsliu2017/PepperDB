@@ -448,39 +448,72 @@ async fn dispatch_command(shared: &Arc<SharedState>, firstchar: u8, body: &[u8])
 /// STAGED (rules.md s4): empty query string -> NullCommand; multi-statement strings,
 /// RETURNING, ON CONFLICT, extended protocol. An empty query is handled below.
 async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
-    use crate::backend::parser::analyze::parse_analyze_fixedparams_async;
     use crate::backend::parser::parser::raw_parser;
-    use crate::backend::optimizer::plan::planner::standard_planner;
-    use crate::backend::rewrite::rewriteHandler::query_rewrite;
-    use crate::nodes::nodes::{CmdType, Node};
+    use crate::nodes::nodes::Node;
     use crate::nodes::parsenodes::RawStmt;
     use crate::parser::parser::RawParseMode;
 
     let dest = WHERE_TO_SEND_OUTPUT;
 
-    // start_xact_command(): open the per-statement transaction (autocommit). Inside
-    // an explicit transaction block this is a no-op (the block stays open); the
-    // active snapshot is pushed below, after the aborted-block guard.
-    start_xact_command_async(shared).await;
+    // pg_parse_query: raw parse (safe even in aborted transaction state).
+    let parsetrees = raw_parser(query_string, RawParseMode::Default);
 
-    // pg_parse_query: raw parse.
-    let mut parsetrees = raw_parser(query_string, RawParseMode::Default);
-
-    // Empty query string: tell the frontend and finish.
+    // Empty query string: open+close a transaction command and tell the frontend.
     if parsetrees.is_empty() {
+        start_xact_command_async(shared).await;
         finish_xact_command_async(shared).await;
         crate::backend::tcop::dest::null_command(dest);
         return;
     }
 
-    // M2 handles a single statement; multi-statement strings grow.
-    if parsetrees.len() != 1 {
-        unimplemented!("exec_simple_query: multi-statement query strings deferred");
+    // For historical reasons, multiple statements in one simple-Query message run
+    // as a single (implicit) transaction unless the list includes explicit
+    // transaction-control commands. Grouping is forced by an implicit block.
+    let use_implicit_block = parsetrees.len() > 1;
+    let last = parsetrees.len() - 1;
+
+    for (i, tree) in parsetrees.into_iter().enumerate() {
+        let Node::RawStmt(raw) = tree else {
+            unreachable!("raw_parser yields RawStmt nodes");
+        };
+        let raw: RawStmt = *raw;
+        let is_transaction_stmt = matches!(
+            raw.stmt.as_ref(),
+            Some(crate::nodes::nodes::Node::TransactionStmt(_))
+        );
+
+        exec_one_query(shared, &raw, query_string, dest, use_implicit_block).await;
+
+        // Close the transaction command after the LAST statement, or after a
+        // transaction-control statement (which commits so a new command starts for
+        // the next statement). Otherwise leave the (implicit) block open so the
+        // following statements group with this one.
+        if i == last {
+            if use_implicit_block {
+                crate::backend::access::transam::xact::EndImplicitTransactionBlock();
+            }
+            finish_and_publish(shared).await;
+        } else if is_transaction_stmt {
+            finish_and_publish(shared).await;
+        }
     }
-    let Node::RawStmt(raw) = parsetrees.remove(0) else {
-        unreachable!("raw_parser yields RawStmt nodes");
-    };
-    let raw: RawStmt = *raw;
+}
+
+/// One statement of a simple-Query string (PG `exec_simple_query`'s per-parsetree
+/// loop body): start the transaction command, reject in an aborted block, run
+/// analyze/rewrite/plan, run the portal, and report CommandComplete. The outer
+/// loop owns closing the transaction command.
+async fn exec_one_query(
+    shared: &Arc<SharedState>,
+    raw: &crate::nodes::parsenodes::RawStmt,
+    query_string: &str,
+    dest: CommandDest,
+    use_implicit_block: bool,
+) {
+    use crate::backend::parser::analyze::parse_analyze_fixedparams_async;
+    use crate::backend::optimizer::plan::planner::standard_planner;
+    use crate::backend::rewrite::rewriteHandler::query_rewrite;
+    use crate::nodes::nodes::CmdType;
 
     // If we are in an aborted transaction block, reject every command except the
     // ones that end the block (COMMIT/ROLLBACK/PREPARE/ROLLBACK TO). PG raises this
@@ -497,14 +530,24 @@ async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
         });
     }
 
+    // start_xact_command(): open the per-statement transaction (autocommit). Inside
+    // an explicit transaction block this is a no-op (the block stays open).
+    start_xact_command_async(shared).await;
+
+    // Start an implicit block (once per statement) so a multi-statement string runs
+    // as one transaction unless it contains explicit transaction control.
+    if use_implicit_block {
+        crate::backend::access::transam::xact::BeginImplicitTransactionBlock();
+    }
+
+    // If we got a cancel signal in parsing or a prior command, quit.
+    crate::miscadmin::check_for_interrupts();
+
     // Push the active snapshot the analyze/plan/executor read under, with curcid set
     // to the current command id so the statement sees its own prior commands.
     push_statement_snapshot(shared);
 
     crate::backend::tcop::dest::begin_command(CommandTag::Unknown, dest);
-
-    // If we got a cancel signal in parsing, quit.
-    crate::miscadmin::check_for_interrupts();
 
     // pg_analyze_and_rewrite_fixedparams: parse analysis (ASYNC -- opens relations
     // for SELECT/INSERT/UPDATE/DELETE) + rewrite. The rewriter's data-modifying
@@ -513,7 +556,7 @@ async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
     // (INSERT tlist, UPDATE SET tlist + preptlist expansion, DELETE row identity), so a
     // plain data-modifying statement is passed straight to the planner without the
     // rewrite pass. SELECT (and UTILITY) go through QueryRewrite as usual.
-    let analyzed = parse_analyze_fixedparams_async(shared, &raw, query_string, &[], 0).await;
+    let analyzed = parse_analyze_fixedparams_async(shared, raw, query_string, &[], 0).await;
     let mut query = if matches!(
         analyzed.commandType,
         CmdType::INSERT | CmdType::UPDATE | CmdType::DELETE | CmdType::MERGE
@@ -522,7 +565,9 @@ async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
     } else {
         let mut rewritten = query_rewrite(*analyzed);
         if rewritten.len() != 1 {
-            unimplemented!("exec_simple_query: query rewrite producing multiple queries deferred");
+            // A query rewrite producing several queries (rules) is not yet reachable;
+            // reject cleanly rather than dropping the connection.
+            unsupported_query_feature("query rewrite producing multiple queries");
         }
         rewritten.remove(0)
     };
@@ -560,30 +605,42 @@ async fn exec_simple_query(shared: &Arc<SharedState>, query_string: &str) {
         CmdType::SELECT | CmdType::INSERT | CmdType::UPDATE | CmdType::DELETE | CmdType::MERGE => {
             run_plan_over_wire(shared, &plan, query_string, command_tag, dest, &mut qc).await;
         }
-        other => unimplemented!("exec_simple_query: command type {other:?} deferred"),
+        other => unsupported_query_feature(&format!("command type {other:?}")),
     }
 
     crate::backend::utils::time::snapmgr::PopActiveSnapshot();
 
-    // CommandComplete, then commit the autocommit transaction. Capture the xid the
-    // transaction may have assigned (a writing INSERT/CREATE) before committing, then
-    // advance the shared latestCompletedXid so the NEXT statement's snapshot sees it.
-    //
-    // Inside an explicit transaction block CommitTransactionCommand does NOT commit
-    // (it just advances the command counter and stays in the block), so the xid must
-    // NOT be published yet -- it would make uncommitted rows visible to other
-    // snapshots. Only publish once the block has actually closed (block_state back to
-    // Default after finish_xact_command); on COMMIT the just-assigned xid is still
-    // live at capture time and is published then.
+    // CommandComplete for this statement. The transaction command is closed by the
+    // outer loop (after the last statement, or after a transaction-control one).
     crate::backend::tcop::dest::end_command(&qc, dest, false);
-    // The TOP transaction id (subtransaction xids roll up to it at subcommit); a
-    // statement run inside a block leaves the current frame on a subxact, so capture
-    // the top frame, not the current one.
+}
+
+/// Close the current transaction command (autocommit commit) and, once the block
+/// has actually closed, advance the shared `latestCompletedXid` past any xid this
+/// transaction assigned so the NEXT statement's snapshot sees its writes.
+///
+/// Inside an explicit transaction block `finish_xact_command` does NOT commit (it
+/// just advances the command counter), so the xid must not be published yet -- it
+/// would make uncommitted rows visible to other snapshots. The TOP transaction id
+/// is captured (subtransaction xids roll up to it at subcommit).
+async fn finish_and_publish(shared: &Arc<SharedState>) {
     let committed = crate::backend::access::transam::xact::GetTopTransactionIdIfAny();
     finish_xact_command_async(shared).await;
     if !crate::backend::access::transam::xact::IsTransactionOrTransactionBlock() {
         publish_committed_xid(shared, committed);
     }
+}
+
+/// A catchable "feature not supported" ERROR for a query-path statement/feature not
+/// yet translated (error.md): the backend reports it and the session survives, in
+/// contrast to a bug-panic that would drop the connection.
+#[cold]
+fn unsupported_query_feature(what: &str) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+            .errmsg(format!("{what} is not yet supported"));
+    });
+    unreachable!("ereport(ERROR) diverges");
 }
 
 // ---------------------------------------------------------------------------
@@ -1275,7 +1332,7 @@ fn command_tag_for(plan: &crate::nodes::plannodes::PlannedStmt) -> CommandTag {
             });
             crate::backend::tcop::utility::create_command_tag(stmt)
         }
-        other => unimplemented!("command_tag_for: {other:?} deferred"),
+        other => unsupported_query_feature(&format!("command tag for command type {other:?}")),
     }
 }
 
@@ -3097,6 +3154,66 @@ mod wire_tests {
             b"I",
             "stray COMMIT leaves the session idle, not failed"
         );
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// STEP 04 (plan 004) -- the P0 exit gate over the wire: multi-row VALUES,
+    /// multi-statement simple-query strings, SHOW, and a failing query that keeps
+    /// the session alive never drop the connection.
+    ///   - `VALUES (1),(2),(3)` -> 3 DataRows, one CommandComplete, connection alive.
+    ///   - `SELECT 1; SELECT 2;` -> two CommandCompletes + one final ReadyForQuery.
+    ///   - a failing query -> the session survives and a later query still works.
+    ///   - `SHOW datestyle` -> a one-column row.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn p0_exit_multistatement_values_show_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+        let c = &mut client;
+        let b = &mut buf;
+
+        // --- Multi-row VALUES returns 3 rows. ----------------------------------
+        let vals = simple_query(c, b, "VALUES (1),(2),(3)").await;
+        assert_eq!(reply_single_col(&vals), vec!["1", "2", "3"], "VALUES yields 3 rows");
+        assert_eq!(complete_tag(&vals), "SELECT 3", "VALUES completion tag");
+        assert_eq!(vals.iter().find(|m| m.ty == b'Z').unwrap().body, b"I", "session idle after VALUES");
+
+        // --- Multi-statement simple query: two results, one final RFQ. ---------
+        let multi = simple_query(c, b, "SELECT 1; SELECT 2;").await;
+        let tags: Vec<String> = multi
+            .iter()
+            .filter(|m| m.ty == b'C')
+            .map(|m| {
+                let end = m.body.iter().position(|&x| x == 0).unwrap_or(m.body.len());
+                String::from_utf8_lossy(&m.body[..end]).into_owned()
+            })
+            .collect();
+        assert_eq!(tags, vec!["SELECT 1", "SELECT 1"], "two CommandCompletes, one per statement");
+        assert_eq!(reply_single_col(&multi), vec!["1", "2"], "both statement results returned");
+        assert_eq!(
+            multi.iter().filter(|m| m.ty == b'Z').count(),
+            1,
+            "exactly one final ReadyForQuery for the whole string"
+        );
+
+        // --- A failing query keeps the session usable. -------------------------
+        let fail = simple_query(c, b, "SELECT * FROM nosuchtable").await;
+        assert!(fail.iter().any(|m| m.ty == b'E'), "failing query returns ErrorResponse");
+        let ok = simple_query(c, b, "SELECT 42").await;
+        assert_eq!(reply_single_col(&ok), vec!["42"], "session survives the error");
+
+        // --- SHOW returns its value as a row. ----------------------------------
+        let show = simple_query(c, b, "SHOW datestyle").await;
+        assert!(show.iter().any(|m| m.ty == b'T'), "SHOW emits a RowDescription");
+        assert_eq!(reply_single_col(&show).len(), 1, "SHOW returns one value row");
 
         drop(client);
         sup.shutdown.trigger();

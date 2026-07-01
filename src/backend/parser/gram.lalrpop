@@ -507,11 +507,10 @@ InsertStmt: Node = {
     },
 };
 
-// gram.y `insert_rest`: the source after the target. M2 supports a `VALUES (...)`
-// list (wrapped as a SelectStmt with valuesLists, exactly as gram.y does) and a
-// general SelectStmt; the `DEFAULT VALUES` and column-list+SELECT forms grow.
+// gram.y `insert_rest`: the source after the target. The `VALUES (...)` list is
+// reached through `SelectStmt` (its `simple_select: values_clause` production), as
+// in gram.y; the `DEFAULT VALUES` and column-list+SELECT forms grow.
 InsertRest: Option<Node> = {
-    "VALUES" <rows:ValuesLists> => Some(make_values_select(rows)),
     <s:SelectStmt> => Some(s),
 };
 
@@ -2000,8 +1999,8 @@ SetQuantifier: bool = {
 };
 
 // gram.y `simple_select`. M5 (step 26) reaches the `SELECT [DISTINCT] target_list
-// FROM ... WHERE ... GROUP BY ...` shape; HAVING/WINDOW/VALUES/TABLE and the set
-// operations are added at their milestones.
+// FROM ... WHERE ... GROUP BY ...` shape and the bare `values_clause`; HAVING/WINDOW/
+// TABLE and the set operations are added at their milestones.
 SimpleSelect: Node = {
     "SELECT" <distinct:OptDistinctClause> <targets:OptTargetList> <frm:FromClause>
         <whr:WhereClause> <grp:GroupClause> <win:WindowClause> => {
@@ -2029,6 +2028,10 @@ SimpleSelect: Node = {
         };
         Node::SelectStmt(Box::new(n))
     },
+    // gram.y `simple_select: values_clause`. A bare `VALUES (...), ...` used as a
+    // standalone SELECT (transformValuesClause). `make_values_select` builds the
+    // SelectStmt with `valuesLists` set and every other clause defaulted.
+    "VALUES" <rows:ValuesLists> => make_values_select(rows),
 };
 
 // ===========================================================================

@@ -108,8 +108,11 @@ fn pull_up_subqueries_recurse(root: &mut PlannerInfo, jtnode: Node, in_outer_joi
             {
                 return pull_up_simple_union_all(root, jtnode);
             }
-            // VALUES / FUNCTION inlining are staged too; M7 reaches neither.
-            if rte.rtekind == RTEKind::VALUES && !in_outer_join {
+            // A single-row VALUES with no volatile/SRF exprs is pulled up into a
+            // RESULT; a multi-row VALUES (the common `VALUES (..),(..),..` case)
+            // stays a VALUES RTE scanned by a ValuesScan. `pull_up_simple_values`
+            // (the single-row substitution) is staged.
+            if rte.rtekind == RTEKind::VALUES && !in_outer_join && is_simple_values(root, rte) {
                 not_yet_reachable("pull_up_subqueries_recurse: simple VALUES pullup");
             }
             if rte.rtekind == RTEKind::FUNCTION {
@@ -393,6 +396,28 @@ fn is_simple_union_all(subquery: &Query) -> bool {
     // (correct, unoptimized) path.
     // TODO(union-all): is_simple_union_all_recurse leaf-type comparison.
     false
+}
+
+/// PG `is_simple_values`: is `rte` a pull-up-able VALUES? Only a single-row VALUES
+/// that is the sole RTE of its query and contains no set-returning/volatile
+/// functions qualifies (a RESULT can then substitute the row's exprs). A multi-row
+/// VALUES fails the single-row test and stays a VALUES scan.
+fn is_simple_values(root: &PlannerInfo, rte: &RangeTblEntry) -> bool {
+    crate::assert!(rte.rtekind == RTEKind::VALUES);
+
+    // Exactly one VALUES list, else the RESULT substitution has no unique row.
+    if rte.values_lists.len() != 1 {
+        return false;
+    }
+
+    // No set-returning or volatile functions in the row exprs (same restrictions as
+    // a pull-able subquery targetlist). The single-row literal case reaching here
+    // has none; the general volatility scan is staged.
+    // TODO(values-pullup): expression_returns_set / contain_volatile_functions scan.
+
+    // The VALUES must be the only RTE in its parent query (the only shape the parser
+    // generates, per PG).
+    root.parse.rtable.len() == 1
 }
 
 /// `makeNode(RangeTblEntry)` for an `RTE_RESULT` (eref `*RESULT*`).

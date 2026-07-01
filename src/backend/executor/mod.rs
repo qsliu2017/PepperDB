@@ -44,6 +44,7 @@ pub mod nodeSort;
 pub mod nodeSubplan;
 pub mod nodeTidscan;
 pub mod nodeUnique;
+pub mod nodeValuesscan;
 pub mod nodeWindowAgg;
 pub mod nodeWorktablescan;
 pub mod spi;

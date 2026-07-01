@@ -387,6 +387,21 @@ pub static CONFIGURE_NAMES_STRING: &[ConfigVarDef] = &[
             show: None,
         }
     ),
+    // A preset (read-only) reporting GUC: INTERNAL context forbids SET, so its value
+    // stays the compiled-in version string; SHOW reads the boot value.
+    def_generic!(
+        "server_version",
+        INTERNAL,
+        PRESET_OPTIONS,
+        "Shows the server version.",
+        GucFlags::REPORT.union(GucFlags::NOT_IN_SAMPLE).union(GucFlags::DISALLOW_IN_FILE),
+        ConfigKind::Str {
+            boot: Some(crate::pg_config::PG_VERSION),
+            check: None,
+            assign: None,
+            show: None,
+        }
+    ),
 ];
 
 /// PG `ConfigureNamesEnum`: the enum variables (reachable subset).

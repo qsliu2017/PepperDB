@@ -129,6 +129,94 @@ pub fn add_range_table_entry_for_cte(
     build_ns_item_from_coltypes(rte_ref, rtindex)
 }
 
+/// PG `addRangeTableEntryForValues`: build an `RTE_VALUES` holding the transformed,
+/// row-organized expression lists, add it to the rangetable, and return a
+/// `ParseNamespaceItem` exposing its columns (from the per-column
+/// coltypes/coltypmods/colcollations). The eref column names default to
+/// `column1`, `column2`, ... The user-alias path is deferred (M2 VALUES has no alias).
+#[allow(clippy::too_many_arguments, reason = "1:1 port of addRangeTableEntryForValues' arg set")]
+pub fn add_range_table_entry_for_values(
+    pstate: &mut ParseState,
+    exprs: Vec<Node>,
+    coltypes: Vec<Oid>,
+    coltypmods: Vec<i32>,
+    colcollations: Vec<Oid>,
+    alias: Option<&crate::nodes::primnodes::Alias>,
+    lateral: bool,
+    in_from_cl: bool,
+) -> ParseNamespaceItem {
+    if alias.is_some() {
+        not_yet_reachable("addRangeTableEntryForValues: alias clause");
+    }
+    let refname = "*VALUES*";
+
+    // Column count = length of the first row's expr list. Each row is a RowExpr
+    // carrier (its `args` are the row's per-column expressions).
+    let numcolumns = match exprs.first() {
+        Some(Node::RowExpr(row)) => row.args.len(),
+        _ => unreachable!("VALUES RTE first row is a RowExpr carrier"),
+    };
+
+    // Default eref column names: column1, column2, ...
+    let mut eref = makeAlias(refname, Vec::new());
+    eref.colnames = (1..=numcolumns).map(|i| makeString(format!("column{i}"))).collect();
+
+    let rte = make_values_rte(exprs, coltypes, coltypmods, colcollations, eref, lateral, in_from_cl);
+
+    pstate.p_rtable.push(rte);
+    let rtindex = pstate.p_rtable.len() as i32;
+    let rte_ref = &pstate.p_rtable[(rtindex - 1) as usize];
+    build_ns_item_from_coltypes(rte_ref, rtindex)
+}
+
+/// `makeNode(RangeTblEntry)` for an `RTE_VALUES` with the VALUES-relevant fields set.
+#[allow(clippy::too_many_arguments, reason = "1:1 port: mirrors addRangeTableEntryForValues' field set")]
+fn make_values_rte(
+    values_lists: Vec<Node>,
+    coltypes: Vec<Oid>,
+    coltypmods: Vec<i32>,
+    colcollations: Vec<Oid>,
+    eref: crate::nodes::primnodes::Alias,
+    lateral: bool,
+    in_from_cl: bool,
+) -> RangeTblEntry {
+    RangeTblEntry {
+        alias: None,
+        eref: Some(Box::new(eref)),
+        rtekind: RTEKind::VALUES,
+        relid: InvalidOid,
+        inh: false,
+        relkind: 0,
+        rellockmode: 0,
+        perminfoindex: 0,
+        tablesample: None,
+        subquery: None,
+        security_barrier: false,
+        jointype: JoinType::INNER,
+        joinmergedcols: 0,
+        joinaliasvars: Vec::new(),
+        joinleftcols: Vec::new(),
+        joinrightcols: Vec::new(),
+        join_using_alias: None,
+        functions: Vec::new(),
+        funcordinality: false,
+        tablefunc: None,
+        values_lists,
+        ctename: None,
+        ctelevelsup: 0,
+        self_reference: false,
+        coltypes,
+        coltypmods,
+        colcollations,
+        enrname: None,
+        enrtuples: 0.0,
+        groupexprs: Vec::new(),
+        lateral,
+        inFromCl: in_from_cl,
+        securityQuals: Vec::new(),
+    }
+}
+
 /// Build the `ParseNamespaceItem` for a CTE RTE from its coltypes/colcollations (a
 /// CTE has no tupdesc; its columns come from the determined CTE column info).
 fn build_ns_item_from_coltypes(rte: &RangeTblEntry, rtindex: i32) -> ParseNamespaceItem {

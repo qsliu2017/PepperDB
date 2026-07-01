@@ -604,7 +604,9 @@ pub fn subquery_planner(
         };
         match rte.rtekind {
             crate::nodes::parsenodes::RTEKind::RELATION => rte.inh = false,
-            crate::nodes::parsenodes::RTEKind::RESULT => {}
+            // RESULT needs no inh; a VALUES RTE carries no inheritance and is scanned
+            // as-is by a ValuesScan.
+            crate::nodes::parsenodes::RTEKind::RESULT | crate::nodes::parsenodes::RTEKind::VALUES => {}
             // A subquery RTE flattened by pull_up_subqueries: dead (subquery = None),
             // no RangeTblRef left in the jointree, nothing references its varno.
             crate::nodes::parsenodes::RTEKind::SUBQUERY if rte.subquery.is_none() => {}

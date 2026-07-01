@@ -88,6 +88,7 @@ fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
         Node::Material(m) => Node::Material(Box::new(set_material_refs(root, *m, rtoffset))),
         Node::Append(a) => Node::Append(Box::new(set_append_refs(root, *a, rtoffset))),
         Node::SetOp(s) => Node::SetOp(Box::new(set_setop_refs(root, *s, rtoffset))),
+        Node::ValuesScan(v) => Node::ValuesScan(Box::new(set_valuesscan_refs(root, *v, rtoffset))),
         Node::CteScan(c) => Node::CteScan(Box::new(set_ctescan_refs(root, *c, rtoffset))),
         Node::RecursiveUnion(r) => {
             Node::RecursiveUnion(Box::new(set_recursiveunion_refs(root, *r, rtoffset)))
@@ -146,6 +147,26 @@ fn set_material_refs(
         plan.plan.lefttree = Some(set_plan_refs(root, c, rtoffset));
     }
     plan.plan.plan_node_id = next_plan_node_id(root);
+    plan
+}
+
+/// PG `set_plan_refs` T_ValuesScan arm: offset the scanrelid, assign the node id,
+/// and identity-validate the tlist/qual/values_lists Var references. With rtoffset 0
+/// (single query) the scanrelid and Var varnos are unchanged; the values_lists hold
+/// the per-row RowExpr(Const) exprs (no Vars to offset on the literal path).
+fn set_valuesscan_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::ValuesScan,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::ValuesScan {
+    plan.scan.scanrelid += rtoffset as crate::nodes::primnodes::Index;
+    plan.scan.plan.plan_node_id = next_plan_node_id(root);
+
+    fix_scan_tlist_identity(&plan.scan.plan.targetlist, rtoffset);
+    fix_scan_qual_identity(&plan.scan.plan.qual, rtoffset);
+    for row in &plan.values_lists {
+        fix_scan_expr_identity(Some(row));
+    }
     plan
 }
 
@@ -321,6 +342,7 @@ fn plan_tlist(plan: &Node) -> &[Node] {
         Node::SetOp(s) => &s.plan.targetlist,
         Node::Material(m) => &m.plan.targetlist,
         Node::Group(g) => &g.plan.targetlist,
+        Node::ValuesScan(v) => &v.scan.plan.targetlist,
         Node::CteScan(c) => &c.scan.plan.targetlist,
         Node::RecursiveUnion(r) => &r.plan.targetlist,
         Node::WorkTableScan(w) => &w.scan.plan.targetlist,
@@ -858,6 +880,8 @@ fn fix_scan_expr_identity(expr: Option<&Node>) {
         }
         Node::CoalesceExpr(c) => c.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
         Node::MinMaxExpr(m) => m.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
+        // A VALUES row's per-column exprs (the values_lists entries of a ValuesScan).
+        Node::RowExpr(r) => r.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
         other => not_yet_reachable(&format!("set_plan_refs: unexpected scan expr {other:?}")),
     }
 }

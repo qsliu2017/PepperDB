@@ -136,6 +136,27 @@ fn expand_all_tables(pstate: &mut ParseState, location: i32) -> Vec<Node> {
     target
 }
 
+/// PG `expandNSItemAttrs` operating on an nsitem held by the caller (not looked up
+/// in `p_namespace`). Used by `transformValuesClause`, which expands the just-built
+/// VALUES nsitem into the query's targetlist. A VALUES nsitem is never
+/// `RTE_RELATION`, so there is no perminfo to mark.
+pub(crate) fn expand_ns_item_attrs_direct(
+    pstate: &mut ParseState,
+    nsitem: &ParseNamespaceItem,
+    location: i32,
+) -> Vec<Node> {
+    crate::assert!(nsitem.rte.rtekind != RTEKind::RELATION);
+    let (vars, names) = expand_ns_item_vars(nsitem, 0, location);
+    vars.into_iter()
+        .zip(names)
+        .map(|(var, label)| {
+            let resno = pstate.p_next_resno as AttrNumber;
+            pstate.p_next_resno += 1;
+            Node::TargetEntry(Box::new(makeTargetEntry(Some(var), resno, Some(label), false)))
+        })
+        .collect()
+}
+
 /// PG `expandNSItemAttrs`: build a `TargetEntry` per live column of the nsitem,
 /// each over a `Var` (from `expandNSItemVars`), assigning sequential resnos. Marks
 /// the relation's perminfo as needing SELECT. (`markVarForSelectPriv` per-column
@@ -158,6 +179,17 @@ fn expand_ns_item_attrs(pstate: &mut ParseState, ns_idx: usize, location: i32) -
             Node::TargetEntry(Box::new(makeTargetEntry(Some(var), resno, Some(label), false)))
         })
         .collect()
+}
+
+/// PG `expandNSItemVars` (public): build a bare `Var` per live column of the nsitem.
+/// Used by `transformInsertStmt`'s multi-row VALUES branch, which needs the Vars
+/// (not TargetEntries) referencing the VALUES RTE.
+pub(crate) fn expand_ns_item_vars_direct(
+    nsitem: &ParseNamespaceItem,
+    sublevels_up: crate::c::Index,
+    location: i32,
+) -> Vec<Node> {
+    expand_ns_item_vars(nsitem, sublevels_up, location).0
 }
 
 /// PG `expandNSItemVars`: build a `Var` for each live (non-dropped) column of the

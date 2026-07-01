@@ -187,6 +187,47 @@ pub fn create_seqscan_path(
     Box::new(path)
 }
 
+/// PG `create_valuesscan_path`: build the single `Path` for a VALUES-list RTE. The
+/// result is always unordered; there is no parameterization on the core int/text
+/// multi-row path (LATERAL refs in the VALUES exprs would set `required_outer`,
+/// guarded below). `cost.c`'s `cost_valuesscan` is not translated; fill the cost
+/// with the same lightweight default the other single-path builders use (a single
+/// path's cost does not affect plan choice).
+pub fn create_valuesscan_path(
+    _root: &mut PlannerInfo,
+    rel: &RelOptInfo,
+    required_outer: &Option<crate::nodes::pathnodes::Relids>,
+) -> Box<Path> {
+    if required_outer.is_some() {
+        not_yet_reachable("create_valuesscan_path: parameterized VALUES (LATERAL refs)");
+    }
+    let Some(target) = rel.reltarget.as_ref().map(|t| (**t).clone()) else {
+        not_yet_reachable("create_valuesscan_path: missing reltarget");
+    };
+
+    // cost_valuesscan: rows = rel->rows; startup = 0; per-row = cpu_tuple_cost +
+    // cpu_operator_cost (the qual/expr eval). We only need a plausible total here.
+    let per_tuple = DEFAULT_CPU_TUPLE_COST + target.cost.per_tuple;
+    let path = Path {
+        pathtype: PathType::ValuesScan,
+        parent: Some(Box::new(rel.parent_snapshot())),
+        pathtarget: Some(Box::new(target)),
+        param_info: None,
+        parallel_aware: false,
+        parallel_safe: rel.consider_parallel,
+        parallel_workers: 0,
+        rows: rel.rows,
+        disabled_nodes: 0,
+        startup_cost: 0.0,
+        total_cost: rel.rows * per_tuple,
+        pathkeys: Vec::new(),
+        index_detail: None,
+        join_detail: None,
+    };
+
+    Box::new(path)
+}
+
 /// PG `create_index_path`: build an `IndexPath` over `index` for the base relation
 /// `rel`, with the matched `indexclauses`. The path's selectivity is the product of
 /// the clause selectivities; `cost_index` fills its costs. M6 has no
