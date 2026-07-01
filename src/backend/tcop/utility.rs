@@ -207,6 +207,19 @@ pub async fn standard_process_utility(
             }
             crate::backend::access::transam::xact::CommandCounterIncrement();
         }
+        // CREATE TABLE AS / SELECT INTO (plan 004, step 09): create the target
+        // relation from the query's rowtype and fill it. Box::pin the deep future
+        // (plan + run + heap create + per-row insert).
+        Node::CreateTableAsStmt(stmt) => {
+            Box::pin(crate::backend::commands::createas::ExecCreateTableAs(
+                shared,
+                stmt,
+                query_string,
+                qc,
+            ))
+            .await;
+            crate::backend::access::transam::xact::CommandCounterIncrement();
+        }
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
     }
 }
@@ -560,6 +573,16 @@ pub fn create_command_tag(parsetree: &Node) -> CommandTag {
             }
         }
         Node::CopyStmt(_) => CommandTag::Copy,
+        // PG `CreateCommandTag`: SELECT INTO -> CMDTAG_SELECT_INTO, plain CTAS ->
+        // CMDTAG_CREATE_TABLE_AS. (ExecCreateTableAs then overrides the *completion*
+        // tag to CMDTAG_SELECT with the rowcount for the legacy SELECT-INTO behavior.)
+        Node::CreateTableAsStmt(stmt) => {
+            if stmt.is_select_into {
+                CommandTag::SelectInto
+            } else {
+                CommandTag::CreateTableAs
+            }
+        }
         other => not_yet_reachable(&format!("CreateCommandTag: {other:?}")),
     }
 }

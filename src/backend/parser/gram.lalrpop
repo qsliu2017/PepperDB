@@ -50,6 +50,7 @@ use crate::backend::parser::parser::{
     FrameBoundTok,
     make_expr_sublink, make_exists_sublink, make_in_sublink, make_any_all_sublink,
     make_in_list,
+    make_create_or_ctas, make_into_clause, set_rangevar_persistence, make_simple_select,
 };
 use crate::nodes::parsenodes::{CursorOptions, FetchDirection, FETCH_ALL};
 use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
@@ -323,6 +324,11 @@ extern {
         "UNKNOWN"    => Token::Keyword("unknown"),
         "ERROR"      => Token::Keyword("error"),
         "OFF"        => Token::Keyword("off"),
+        // Plan 004 (step 09): CREATE TABLE AS / SELECT INTO keywords (WITH / NO /
+        // TABLE / TEMP / TEMPORARY / LOCAL / INTO already exist above).
+        "DATA"       => Token::Keyword("data"),
+        "UNLOGGED"   => Token::Keyword("unlogged"),
+        "GLOBAL"     => Token::Keyword("global"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -381,7 +387,7 @@ TopLevelStmt: Option<Node> = {
 // statement type per milestone; an empty statement yields None (dropped above).
 Stmt: Option<Node> = {
     <s:SelectStmt> => Some(s),
-    <s:CreateStmt> => Some(s),
+    <s:CreateStmt> => Some(s),          // CREATE TABLE + CREATE TABLE AS (unified)
     <s:IndexStmt> => Some(s),
     <s:AlterTableStmt> => Some(s),
     <s:RenameStmt> => Some(s),
@@ -577,10 +583,51 @@ ExprList: Vec<Node> = {
 // gram.y `CreateStmt`. M2 reaches the plain `CREATE TABLE name ( elts )` form;
 // IF NOT EXISTS, OF type, PARTITION OF, inheritance, partition spec, WITH options,
 // ON COMMIT, tablespace and access-method clauses arrive at their milestones.
+// CREATE TABLE and CREATE TABLE AS share the `CREATE OptTemp TABLE QualifiedName`
+// prefix. Keeping them as separate top-level productions makes lalrpop's LALR(1)
+// table blow up (after `CREATE TABLE name (` it cannot cheaply distinguish a
+// `TableElementList` from a CTAS `columnList`). So they are UNIFIED under one
+// `CreateStmt` whose tail (`CreateStmtTail`) is either the parenthesized element
+// list (plain table) or `AS SelectStmt opt_with_data` (CTAS). The optional CTAS
+// column-name list `( cols )` -- which is what collides with `( elts )` -- is
+// DEFERRED (create_ctas_nodata / intorel accept "too few column names"; the
+// column-name-list forms are a later refinement, and every regress test that needs
+// them is gated on other modules anyway).
 CreateStmt: Node = {
-    "CREATE" "TABLE" <name:QualifiedName> "(" <elts:OptTableElementList> ")" => {
-        make_create_stmt(name, elts)
-    },
+    "CREATE" <persist:CreateOptTemp> "TABLE" <name:QualifiedName>
+        <tail:CreateStmtTail> => make_create_or_ctas(persist, name, false, tail),
+    "CREATE" <persist:CreateOptTemp> "TABLE" "IF" "NOT" "EXISTS" <name:QualifiedName>
+        <tail:CreateStmtTail> => make_create_or_ctas(persist, name, true, tail),
+};
+
+// The two CREATE TABLE tails: `( elts )` (plain table) or `AS SelectStmt
+// opt_with_data` (CTAS). Wrapped in `CreateTail` so one production covers both.
+CreateStmtTail: crate::backend::parser::parser::CreateTail = {
+    "(" <elts:OptTableElementList> ")" =>
+        crate::backend::parser::parser::CreateTail::Plain(elts),
+    "AS" <query:SelectStmt> <with_data:OptWithData> =>
+        crate::backend::parser::parser::CreateTail::As { query, with_data },
+};
+
+// gram.y `opt_with_data`: WITH DATA | WITH NO DATA | /*EMPTY*/. Returns whether the
+// query's data is materialized (true = WITH DATA / default; false = WITH NO DATA).
+OptWithData: bool = {
+    "WITH" "DATA"      => true,
+    "WITH" "NO" "DATA" => false,
+    =>                    true,
+};
+
+// gram.y `OptTemp`: the persistence marker before TABLE. Returns the relpersistence
+// char. GLOBAL is accepted (deprecated) like PG; the empty arm is PERMANENT.
+CreateOptTemp: i8 = {
+    "TEMP"                => crate::catalog::pg_class::RELPERSISTENCE_TEMP,
+    "TEMPORARY"           => crate::catalog::pg_class::RELPERSISTENCE_TEMP,
+    "LOCAL" "TEMP"        => crate::catalog::pg_class::RELPERSISTENCE_TEMP,
+    "LOCAL" "TEMPORARY"   => crate::catalog::pg_class::RELPERSISTENCE_TEMP,
+    "GLOBAL" "TEMP"       => crate::catalog::pg_class::RELPERSISTENCE_TEMP,
+    "GLOBAL" "TEMPORARY"  => crate::catalog::pg_class::RELPERSISTENCE_TEMP,
+    "UNLOGGED"            => crate::catalog::pg_class::RELPERSISTENCE_UNLOGGED,
+    =>                       crate::catalog::pg_class::RELPERSISTENCE_PERMANENT,
 };
 
 // gram.y `qualified_name`: ColId | ColId indirection. M2 supports the bare and
@@ -2247,36 +2294,44 @@ SetQuantifier: bool = {
 // FROM ... WHERE ... GROUP BY ...` shape and the bare `values_clause`; HAVING/WINDOW/
 // TABLE and the set operations are added at their milestones.
 SimpleSelect: Node = {
-    "SELECT" <distinct:OptDistinctClause> <targets:OptTargetList> <frm:FromClause>
-        <whr:WhereClause> <grp:GroupClause> <win:WindowClause> => {
-        let n = SelectStmt {
-            distinctClause: distinct,
-            intoClause: None,
-            targetList: targets,
-            fromClause: frm,
-            whereClause: whr,
-            groupClause: grp,
-            groupDistinct: false,
-            havingClause: None,
-            windowClause: win,
-            valuesLists: Vec::new(),
-            sortClause: Vec::new(),
-            limitOffset: None,
-            limitCount: None,
-            limitOption: crate::nodes::nodes::LimitOption::COUNT,  // makeNode zero default
-            lockingClause: Vec::new(),
-            withClause: None,
-            op: crate::nodes::parsenodes::SetOperation::NONE,
-            all: false,
-            larg: None,
-            rarg: None,
-        };
-        Node::SelectStmt(Box::new(n))
-    },
+    // No INTO: the plain SELECT (the common case).
+    "SELECT" <distinct:OptDistinctClause> <targets:OptTargetList>
+        <frm:FromClause>
+        <whr:WhereClause> <grp:GroupClause> <win:WindowClause> =>
+        make_simple_select(distinct, None, targets, frm, whr, grp, win),
+    // SELECT ... INTO target: `intoClause` set (transformOptionalSelectInto rewrites
+    // it into a CREATE TABLE AS). Separate arm (not a nullable mid-rule `into_clause`)
+    // to keep the LALR(1) table small.
+    "SELECT" <distinct:OptDistinctClause> <targets:OptTargetList>
+        "INTO" <rel:OptTempTableName>
+        <frm:FromClause>
+        <whr:WhereClause> <grp:GroupClause> <win:WindowClause> =>
+        make_simple_select(distinct, Some(make_into_clause(rel, Vec::new())), targets, frm, whr, grp, win),
     // gram.y `simple_select: values_clause`. A bare `VALUES (...), ...` used as a
     // standalone SELECT (transformValuesClause). `make_values_select` builds the
     // SelectStmt with `valuesLists` set and every other clause defaulted.
     "VALUES" <rows:ValuesLists> => make_values_select(rows),
+};
+
+// gram.y `OptTempTableName`: the SELECT INTO target's optional persistence prefix +
+// optional TABLE noise word, then the name. Returns the RangeVar with relpersistence
+// set. (GLOBAL is deprecated in PG but accepted.)
+OptTempTableName: crate::nodes::primnodes::RangeVar = {
+    "TEMPORARY" <r:OptTableQualifiedName> => set_rangevar_persistence(r, crate::catalog::pg_class::RELPERSISTENCE_TEMP),
+    "TEMP" <r:OptTableQualifiedName> => set_rangevar_persistence(r, crate::catalog::pg_class::RELPERSISTENCE_TEMP),
+    "LOCAL" "TEMPORARY" <r:OptTableQualifiedName> => set_rangevar_persistence(r, crate::catalog::pg_class::RELPERSISTENCE_TEMP),
+    "LOCAL" "TEMP" <r:OptTableQualifiedName> => set_rangevar_persistence(r, crate::catalog::pg_class::RELPERSISTENCE_TEMP),
+    "GLOBAL" "TEMPORARY" <r:OptTableQualifiedName> => set_rangevar_persistence(r, crate::catalog::pg_class::RELPERSISTENCE_TEMP),
+    "GLOBAL" "TEMP" <r:OptTableQualifiedName> => set_rangevar_persistence(r, crate::catalog::pg_class::RELPERSISTENCE_TEMP),
+    "UNLOGGED" <r:OptTableQualifiedName> => set_rangevar_persistence(r, crate::catalog::pg_class::RELPERSISTENCE_UNLOGGED),
+    "TABLE" <r:QualifiedName> => set_rangevar_persistence(r, crate::catalog::pg_class::RELPERSISTENCE_PERMANENT),
+    <r:QualifiedName> => set_rangevar_persistence(r, crate::catalog::pg_class::RELPERSISTENCE_PERMANENT),
+};
+
+// gram.y `opt_table qualified_name`: an optional TABLE noise word before the name.
+OptTableQualifiedName: crate::nodes::primnodes::RangeVar = {
+    "TABLE" <r:QualifiedName> => r,
+    <r:QualifiedName> => r,
 };
 
 // ===========================================================================

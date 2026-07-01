@@ -1,38 +1,11 @@
 //! Translated from PostgreSQL src/include/commands/createas.h
+//!
+//! The bodies live in `crate::backend::commands::createas`; this header rewires the
+//! public entry points to `pub use` so `crate::commands::createas::<Name>` call sites
+//! resolve (rules.md s3).
 
-#![allow(
-    clippy::boxed_local,
-    reason = "TODO(stub): drop when implemented; hollow stubs mirror PG signatures 1:1; real impl consumes params"
-)]
+/// PG `ExecCreateTableAs`: execute a CREATE TABLE AS / SELECT INTO command.
+pub use crate::backend::commands::createas::ExecCreateTableAs;
 
-use crate::catalog::objectaddress::ObjectAddress;
-use crate::nodes::params::ParamListInfo;
-use crate::nodes::parsenodes::CreateTableAsStmt;
-use crate::nodes::primnodes::IntoClause;
-use crate::parser::parse_node::ParseState;
-use crate::tcop::cmdtag::QueryCompletion;
-use crate::tcop::dest::DestReceiver;
-use crate::utils::queryenvironment::QueryEnvironment;
-
-pub fn ExecCreateTableAs(
-    _pstate: &mut ParseState,
-    _stmt: &CreateTableAsStmt,
-    _params: ParamListInfo,
-    _queryEnv: &mut QueryEnvironment,
-    _qc: &mut QueryCompletion,
-) -> ObjectAddress {
-    unimplemented!()
-}
-
-pub fn GetIntoRelEFlags(_intoClause: &IntoClause) -> i32 {
-    unimplemented!()
-}
-
-// TODO(ptr): the concrete receiver type is chosen at runtime; revisit ownership.
-pub fn CreateIntoRelDestReceiver(_intoClause: &IntoClause) -> Box<dyn DestReceiver> {
-    unimplemented!()
-}
-
-pub fn CreateTableAsRelExists(_ctas: &CreateTableAsStmt) -> bool {
-    unimplemented!()
-}
+/// PG `GetIntoRelEFlags`: executor flags needed for CREATE TABLE AS.
+pub use crate::backend::commands::createas::GetIntoRelEFlags;

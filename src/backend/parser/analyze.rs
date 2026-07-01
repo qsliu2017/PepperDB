@@ -368,7 +368,9 @@ pub async fn parse_analyze_fixedparams_async(
     let stmt = parse_tree.stmt.as_ref().unwrap_or_else(|| {
         not_yet_reachable("transformTopLevelStmt: empty RawStmt");
     });
-    let mut query = transform_stmt_async(shared, &mut pstate, stmt).await;
+    // transformOptionalSelectInto: rewrite a top-level SELECT ... INTO into CTAS.
+    let stmt = transform_optional_select_into(stmt);
+    let mut query = transform_stmt_async(shared, &mut pstate, &stmt).await;
     query.stmt_location = parse_tree.stmt_location;
     query.stmt_len = parse_tree.stmt_len;
 
@@ -474,6 +476,7 @@ async fn transform_stmt_async(
         Node::UpdateStmt(n) => transform_update_stmt(shared, pstate, n).await,
         Node::DeleteStmt(n) => transform_delete_stmt(shared, pstate, n).await,
         Node::MergeStmt(n) => transform_merge_stmt(shared, pstate, n).await,
+        Node::CreateTableAsStmt(n) => transform_create_table_as_stmt(shared, pstate, n).await,
         other => {
             let mut q = make_query();
             q.commandType = CmdType::UTILITY;
@@ -483,6 +486,92 @@ async fn transform_stmt_async(
     };
     result.querySource = QuerySource::ORIGINAL;
     result.canSetTag = true;
+    result
+}
+
+/// PG `transformOptionalSelectInto`: if the top-level statement is a `SELECT ... INTO`,
+/// rewrite it into a `CreateTableAsStmt` (is_select_into = true). Drills to the leftmost
+/// SELECT leaf of a set-op tree to find the `intoClause`, moves it onto the CTAS node,
+/// and strips it from the SELECT (so `transform_select_stmt_async`'s disallowed-INTO
+/// check fires only when INTO appears in a truly illegal place). Non-SELECT statements
+/// pass through unchanged. Returns the (possibly rewritten) node to dispatch.
+fn transform_optional_select_into(parse_tree: &Node) -> std::borrow::Cow<'_, Node> {
+    use crate::nodes::parsenodes::{CreateTableAsStmt, ObjectType};
+    use std::borrow::Cow;
+
+    let Node::SelectStmt(top) = parse_tree else {
+        return Cow::Borrowed(parse_tree);
+    };
+
+    // Drill down to the leftmost SelectStmt leaf (a set-op tree carries the INTO on
+    // its leftmost branch).
+    let mut leaf: &SelectStmt = top;
+    while leaf.op != SetOperation::NONE {
+        match leaf.larg.as_deref() {
+            Some(l) => leaf = l,
+            None => break,
+        }
+    }
+
+    if leaf.intoClause.is_none() {
+        return Cow::Borrowed(parse_tree);
+    }
+
+    // Rebuild the SELECT tree with the leftmost leaf's intoClause removed, and wrap
+    // the whole thing in a CreateTableAsStmt. (PG scribbles on the tree in place; we
+    // clone the top node and clear the leaf's intoClause to keep the borrow clean.)
+    let mut new_top = (**top).clone();
+    let into = clear_leftmost_into(&mut new_top).unwrap_or_else(|| {
+        unreachable!("leftmost leaf carried an intoClause")
+    });
+
+    let ctas = CreateTableAsStmt {
+        query: Some(Node::SelectStmt(Box::new(new_top))),
+        into: Some(into),
+        objtype: ObjectType::TABLE,
+        is_select_into: true,
+        if_not_exists: false,
+    };
+    Cow::Owned(Node::CreateTableAsStmt(Box::new(ctas)))
+}
+
+/// Remove and return the `intoClause` from the leftmost SELECT leaf of a (possibly
+/// set-op) SELECT tree.
+fn clear_leftmost_into(stmt: &mut SelectStmt) -> Option<Box<crate::nodes::primnodes::IntoClause>> {
+    if stmt.op != SetOperation::NONE
+        && let Some(l) = stmt.larg.as_deref_mut()
+    {
+        return clear_leftmost_into(l);
+    }
+    stmt.intoClause.take()
+}
+
+/// PG `transformCreateTableAsStmt`: transform the CTAS/SELECT-INTO contained query
+/// (not allowing a further SELECT INTO inside it) and represent the command as a
+/// CMD_UTILITY `Query` carrying the `CreateTableAsStmt`. The MATERIALIZED VIEW
+/// variant (viewQuery stash + temp/param checks) grows with matviews.
+async fn transform_create_table_as_stmt(
+    shared: &Arc<SharedState>,
+    pstate: &mut ParseState,
+    stmt: &crate::nodes::parsenodes::CreateTableAsStmt,
+) -> Box<Query> {
+    let mut stmt = stmt.clone();
+
+    // transform contained query. The EXECUTE source (CMD_UTILITY ExecuteStmt) is not
+    // reachable yet; a plain SELECT is.
+    let inner = stmt.query.as_ref().unwrap_or_else(|| {
+        unreachable!("CreateTableAsStmt carries its source query")
+    });
+    if !matches!(inner, Node::SelectStmt(_)) {
+        not_yet_reachable("transformCreateTableAsStmt: non-SELECT CTAS source (EXECUTE)");
+    }
+    let query = Box::pin(transform_stmt_async(shared, pstate, inner)).await;
+    stmt.query = Some(Node::Query(Box::new(*query)));
+
+    // represent the command as a utility Query.
+    let mut result = make_query();
+    result.commandType = CmdType::UTILITY;
+    result.utilityStmt = Some(Node::CreateTableAsStmt(Box::new(stmt)));
     result
 }
 
@@ -905,8 +994,23 @@ async fn transform_select_stmt_async(
             crate::backend::parser::parse_cte::transform_with_clause(shared, pstate, with).await;
         qry.hasModifyingCTE = pstate.p_has_modifying_cte;
     }
+    // A leftover intoClause here means INTO appeared in a disallowed place (a
+    // sub-SELECT, a CREATE VIEW body, ...); transformOptionalSelectInto strips it
+    // from the top-level statement, so anything reaching here is an error (PG
+    // parse_analyze's `transformSelectStmt` errcode SYNTAX_ERROR).
     if stmt.intoClause.is_some() {
-        not_yet_reachable("transformSelectStmt: SELECT ... INTO");
+        let loc = stmt
+            .intoClause
+            .as_ref()
+            .and_then(|i| i.rel.as_ref())
+            .map_or(-1, |r| r.location);
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_SYNTAX_ERROR)
+                .errmsg("SELECT ... INTO is not allowed here".to_string());
+            if loc >= 0 {
+                e.errposition(loc + 1); // PG parser_errposition: 1-based
+            }
+        });
     }
 
     // M7 (step 32): an INNER `joined_table` (`a JOIN b ON q` / `a CROSS JOIN b`) is

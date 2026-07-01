@@ -13,10 +13,11 @@ use crate::nodes::parsenodes::{
     A_Const, A_Star, ColumnRef, ColumnRefField, CreateStmt, DeleteStmt, IndexElem, IndexStmt,
     InsertStmt, LockingClause, MergeStmt, MergeWhenClause, RawStmt, ResTarget, ReturningClause,
     CTEMaterialize, CommonTableExpr, RuleStmt, SelectStmt, SetOperation, SortByDir, SortByNulls,
+    CreateTableAsStmt,
     TransactionStmt, TransactionStmtKind, TypeName, UpdateStmt, ValUnion, VariableSetKind,
     VariableSetStmt, VariableShowStmt, ViewCheckOption, ViewStmt, WithClause,
 };
-use crate::nodes::primnodes::{MergeMatchKind, OnCommitAction, OverridingKind, RangeVar};
+use crate::nodes::primnodes::{IntoClause, MergeMatchKind, OnCommitAction, OverridingKind, RangeVar};
 use crate::nodes::value::{makeFloat, makeInteger, makeString};
 use crate::parser::parser::RawParseMode;
 
@@ -1057,6 +1058,110 @@ pub fn make_create_stmt(relation: RangeVar, table_elts: Vec<Node>) -> Node {
         accessMethod: None,
         if_not_exists: false,
     }))
+}
+
+/// gram.y `simple_select` assembly: build a non-set-op, non-VALUES `SelectStmt` from
+/// its clauses (with an optional `intoClause` for SELECT ... INTO). Factored out of
+/// the grammar action so the two SimpleSelect arms (with/without INTO) share it.
+#[allow(clippy::too_many_arguments, reason = "mirrors gram.y simple_select's clause set 1:1")]
+pub fn make_simple_select(
+    distinct: Vec<Node>,
+    into: Option<Box<IntoClause>>,
+    targets: Vec<Node>,
+    from: Vec<Node>,
+    where_clause: Option<Node>,
+    group: Vec<Node>,
+    window: Vec<Node>,
+) -> Node {
+    Node::SelectStmt(Box::new(SelectStmt {
+        distinctClause: distinct,
+        intoClause: into,
+        targetList: targets,
+        fromClause: from,
+        whereClause: where_clause,
+        groupClause: group,
+        groupDistinct: false,
+        havingClause: None,
+        windowClause: window,
+        valuesLists: Vec::new(),
+        sortClause: Vec::new(),
+        limitOffset: None,
+        limitCount: None,
+        limitOption: crate::nodes::nodes::LimitOption::COUNT,
+        lockingClause: Vec::new(),
+        withClause: None,
+        op: SetOperation::NONE,
+        all: false,
+        larg: None,
+        rarg: None,
+    }))
+}
+
+/// gram.y `create_as_target` / `into_clause`: build an `IntoClause` naming the CTAS /
+/// SELECT INTO target relation and its optional column-name overrides. The
+/// access-method / WITH options / ON COMMIT / tablespace tails default to empty and
+/// grow with their features; `viewQuery`/`skipData` are set later (analyze / grammar).
+pub fn make_into_clause(rel: RangeVar, col_names: Vec<Node>) -> Box<IntoClause> {
+    Box::new(IntoClause {
+        rel: Some(Box::new(rel)),
+        colNames: col_names,
+        accessMethod: None,
+        options: Vec::new(),
+        onCommit: OnCommitAction::NOOP,
+        tableSpaceName: None,
+        viewQuery: None,
+        skipData: false,
+    })
+}
+
+/// Set a RangeVar's relpersistence char (gram.y crams the OptTemp/OptTempTableName
+/// persistence marker onto the target RangeVar).
+pub fn set_rangevar_persistence(mut rel: RangeVar, relpersistence: i8) -> RangeVar {
+    rel.relpersistence = relpersistence;
+    rel
+}
+
+/// The tail of a unified `CREATE [temp] TABLE name ...` production: either the
+/// parenthesized table-element list (a plain CREATE TABLE) or `AS SelectStmt
+/// opt_with_data` (a CREATE TABLE AS). `make_create_or_ctas` dispatches on it.
+pub enum CreateTail {
+    Plain(Vec<Node>),
+    As { query: Node, with_data: bool },
+}
+
+/// gram.y `CreateStmt` / `CreateAsStmt` (unified): build either a plain `CreateStmt`
+/// or a `CreateTableAsStmt` from the shared `CREATE [temp] TABLE [IF NOT EXISTS] name`
+/// prefix and the branch tail. The OptTemp persistence is crammed onto the RangeVar;
+/// for CTAS, `opt_with_data` sets `skipData` (WITH NO DATA -> skipData = true),
+/// `objtype` is OBJECT_TABLE, and `is_select_into` is false (the SELECT INTO rewrite
+/// sets it true in analyze).
+pub fn make_create_or_ctas(
+    relpersistence: i8,
+    mut name: RangeVar,
+    if_not_exists: bool,
+    tail: CreateTail,
+) -> Node {
+    name.relpersistence = relpersistence;
+    match tail {
+        CreateTail::Plain(elts) => {
+            let mut node = make_create_stmt(name, elts);
+            if let Node::CreateStmt(cs) = &mut node {
+                cs.if_not_exists = if_not_exists;
+            }
+            node
+        }
+        CreateTail::As { query, with_data } => {
+            let mut into = make_into_clause(name, Vec::new());
+            into.skipData = !with_data;
+            Node::CreateTableAsStmt(Box::new(CreateTableAsStmt {
+                query: Some(query),
+                into: Some(into),
+                objtype: ObjectType::TABLE,
+                is_select_into: false,
+                if_not_exists,
+            }))
+        }
+    }
 }
 
 /// gram.y `IndexStmt: CREATE [UNIQUE] INDEX [name] ON qualified_name
@@ -2911,5 +3016,65 @@ mod tests {
 
         let list = parse("DROP DATABASE mydb");
         let Node::DropdbStmt(_) = one_stmt(&list) else { panic!("not a DropdbStmt") };
+    }
+
+    #[test]
+    fn create_table_as_parses() {
+        use crate::catalog::pg_class::{RELPERSISTENCE_PERMANENT, RELPERSISTENCE_TEMP};
+
+        // Plain CREATE TABLE still parses (the unified production preserves it).
+        let list = parse("CREATE TABLE t (a int)");
+        let Node::CreateStmt(_) = one_stmt(&list) else { panic!("not a CreateStmt") };
+
+        // CREATE TABLE AS -> CreateTableAsStmt, WITH DATA by default (skipData=false).
+        let list = parse("CREATE TABLE t AS SELECT 1");
+        let Node::CreateTableAsStmt(c) = one_stmt(&list) else { panic!("not a CreateTableAsStmt") };
+        assert!(!c.is_select_into);
+        assert!(!c.if_not_exists);
+        let into = c.into.as_ref().expect("CTAS has an IntoClause");
+        assert!(!into.skipData, "WITH DATA default");
+        assert_eq!(into.rel.as_ref().unwrap().relname.as_deref(), Some("t"));
+        assert_eq!(into.rel.as_ref().unwrap().relpersistence, RELPERSISTENCE_PERMANENT);
+        assert!(matches!(c.query.as_ref(), Some(Node::SelectStmt(_))));
+
+        // WITH NO DATA -> skipData = true.
+        let list = parse("CREATE TABLE t AS SELECT 1 WITH NO DATA");
+        let Node::CreateTableAsStmt(c) = one_stmt(&list) else { panic!("not a CreateTableAsStmt") };
+        assert!(c.into.as_ref().unwrap().skipData);
+
+        // IF NOT EXISTS.
+        let list = parse("CREATE TABLE IF NOT EXISTS t AS SELECT 1");
+        let Node::CreateTableAsStmt(c) = one_stmt(&list) else { panic!("not a CreateTableAsStmt") };
+        assert!(c.if_not_exists);
+
+        // TEMP marker sets the target's relpersistence.
+        let list = parse("CREATE TEMP TABLE t AS SELECT 1");
+        let Node::CreateTableAsStmt(c) = one_stmt(&list) else { panic!("not a CreateTableAsStmt") };
+        assert_eq!(
+            c.into.as_ref().unwrap().rel.as_ref().unwrap().relpersistence,
+            RELPERSISTENCE_TEMP
+        );
+    }
+
+    #[test]
+    fn select_into_parses() {
+        // SELECT ... INTO sets the SelectStmt's intoClause (analyze rewrites it to CTAS).
+        let list = parse("SELECT * INTO t FROM src");
+        let Node::SelectStmt(s) = one_stmt(&list) else { panic!("not a SelectStmt") };
+        let into = s.intoClause.as_ref().expect("SELECT INTO sets intoClause");
+        assert_eq!(into.rel.as_ref().unwrap().relname.as_deref(), Some("t"));
+
+        // INTO TABLE <name> (the noise TABLE word).
+        let list = parse("SELECT * INTO TABLE t FROM src");
+        let Node::SelectStmt(s) = one_stmt(&list) else { panic!("not a SelectStmt") };
+        assert!(s.intoClause.is_some());
+
+        // INTO TEMP <name>.
+        let list = parse("SELECT 1 INTO TEMP t");
+        let Node::SelectStmt(s) = one_stmt(&list) else { panic!("not a SelectStmt") };
+        assert_eq!(
+            s.intoClause.as_ref().unwrap().rel.as_ref().unwrap().relpersistence,
+            crate::catalog::pg_class::RELPERSISTENCE_TEMP
+        );
     }
 }

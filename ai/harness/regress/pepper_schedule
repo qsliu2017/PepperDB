@@ -31,10 +31,27 @@ test: boolean
 # gcd/lcm(int8), and the funcapi SRF ValuePerCall machinery. The step's remaining
 # target tests are STILL blocked by other modules and are left OUT (not KNOWN-DIFF)
 # per plan policy:
-#   select_distinct     [needs the `onek` fixture (COPY-loaded) + INSERT ... SELECT
-#                        FROM generate_series -- step 09 CTAS/INSERT-SELECT]
 #   select_distinct_on  [needs DISTINCT ON grammar + the `onek` fixture]
 #   int8                [needs the INT8_TBL table + int8 typmod/`::int8` casts]
+#
+# Step 09 landed CREATE TABLE AS / SELECT INTO (the DR_intorel receiver: create the
+# target from the query rowtype + insert the materialized rows; WITH [NO] DATA;
+# SELECT ... INTO rewrite; IF NOT EXISTS with NOTICE-skip; "already exists" error).
+# Verified via psql: CTAS/SELECT-INTO over a TABLE source works end-to-end. Its target
+# tests still need LATER modules and stay OUT (verified NEW-DIFF), each blocker below:
+#   select_into      [needs, in combination: SRF-in-target-list execution
+#                     (`SELECT generate_series(1,3)` w/o FROM -> ProjectSet, a
+#                     PRE-EXISTING executor gap, not this step), EXPLAIN ANALYZE
+#                     (step 14), roles + SET SESSION AUTHORIZATION + ALTER DEFAULT
+#                     PRIVILEGES (step 18), executable SQL functions + DO/PL (step 23),
+#                     the int8_tbl fixture, and the CTAS explicit column-name list
+#                     `(a) AS` (DEFERRED here to keep the LALR(1) table from blowing up
+#                     -- CreateStmt/CTAS are unified; the `( cols )` list collides with
+#                     the `( elts )` element list). Left OUT until those land.]
+#   select_distinct  [needs the `onek` fixture (COPY-from-file, still unloadable) AND
+#                     SRF-in-target-list execution (its CTAS lines are
+#                     `CREATE TABLE distinct_group_N AS SELECT DISTINCT g%1000 FROM
+#                     generate_series(...)`). onek-gated -- left OUT.]
 #
 # --------------------------------------------------------------------------
 # BLOCKED -- verified NEW-DIFF against the current server (2026-07-01), each

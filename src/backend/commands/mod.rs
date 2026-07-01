@@ -10,6 +10,7 @@ pub mod copy;
 pub mod copyfrom;
 pub mod copyfromparse;
 pub mod copyto;
+pub mod createas;
 pub mod dbcommands;
 pub mod define;
 pub mod dropcmds;
