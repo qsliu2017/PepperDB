@@ -49,6 +49,9 @@ pub const MAX_CATALOG_MULTI_INSERT_BYTES: usize = 65535;
 struct RegisteredIndex {
     index: Arc<RelationData>,
     info: IndexInfo,
+    /// pg_index.indisclustered stand-in (CLUSTER marks the clustered index here;
+    /// pg_index is not an on-disk catalog in this port).
+    indisclustered: bool,
 }
 
 tokio::task_local! {
@@ -78,7 +81,20 @@ pub fn register_catalog_index(heap_relid: Oid, index: Arc<RelationData>, info: I
         cell.borrow_mut()
             .entry(heap_relid.get())
             .or_default()
-            .push(RegisteredIndex { index, info });
+            .push(RegisteredIndex { index, info, indisclustered: false });
+    });
+}
+
+/// `mark_index_clustered`'s persistence (pg_index.indisclustered stand-in): set the
+/// clustered flag on `index_oid` and clear it on the heap's other indexes (a table
+/// has at most one clustered index). No-op if the registry is absent.
+pub fn set_index_clustered(heap_relid: Oid, index_oid: Oid) {
+    let _ = CATALOG_INDEXES.try_with(|cell| {
+        if let Some(indexes) = cell.borrow_mut().get_mut(&heap_relid.get()) {
+            for ri in indexes.iter_mut() {
+                ri.indisclustered = ri.index.rd_id == index_oid;
+            }
+        }
     });
 }
 
@@ -131,6 +147,8 @@ pub struct RegisteredIndexInfo {
     pub index: Arc<RelationData>,
     pub key_attnums: Vec<i16>,
     pub unique: bool,
+    /// pg_index.indisclustered stand-in (set by CLUSTER via [`set_index_clustered`]).
+    pub indisclustered: bool,
 }
 
 /// PG `RelationGetIndexList` (the registry-backed M6 form): the indexes of a heap
@@ -150,6 +168,7 @@ pub fn relation_get_index_list(heap_relid: Oid) -> Vec<RegisteredIndexInfo> {
                             index: Arc::clone(&ri.index),
                             key_attnums: ri.info.index_attr_numbers.clone(),
                             unique: ri.info.unique,
+                            indisclustered: ri.indisclustered,
                         })
                         .collect()
                 })

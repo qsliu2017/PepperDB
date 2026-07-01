@@ -1,13 +1,12 @@
-//! Integration tests for VACUUM + ANALYZE (step 46).
+//! Integration tests for CLUSTER / VACUUM FULL (step 47).
 //!
 //! Each test stands up a real foundation `SharedState` over a tempdir + the full
-//! per-task scope stack (the catalog-test harness), runs initdb, then drives real
-//! SQL through the parse -> analyze -> plan -> (process_utility | ExecutorRun)
-//! pipeline. The assertions check the milestone bar: VACUUM reclaims dead tuples'
-//! space (a re-insert reuses it, live rows stay correct, index entries for deleted
-//! rows are gone), ANALYZE populates pg_statistic + pg_class.reltuples and the
-//! planner's eqsel consumes the real frequency, and an un-analyzed table keeps the
-//! no-stats default.
+//! per-task scope stack, runs initdb, then drives real SQL through the
+//! parse -> analyze -> rewrite -> process_utility pipeline. The assertions check the
+//! milestone bar: VACUUM FULL shrinks the heap (relpages/reltuples drop, the
+//! relfilenode changes -- a genuinely new physical file) while the live rows stay
+//! correct + visible + found by index; CLUSTER physically orders the heap by an
+//! index and marks the index indisclustered; and a rewrite loses/duplicates no rows.
 
 #![allow(
     clippy::unwrap_used,
@@ -25,12 +24,13 @@ use crate::postgres_ext::Oid;
 use crate::shared_state::{SharedState, SharedStateConfig};
 
 static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static TEST_SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const DB_OID: Oid = Oid::new(90000);
 
 fn new_shared() -> Arc<SharedState> {
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("pepperdb-vac-{}-{}", std::process::id(), n));
+    let dir = std::env::temp_dir().join(format!("pepperdb-cluster-{}-{}", std::process::id(), n));
     let _ = std::fs::create_dir_all(dir.join(crate::access::xlog_internal::XLOGDIR));
     let _ = std::fs::create_dir_all(dir.join("base").join("90000"));
     SharedState::new(SharedStateConfig {
@@ -153,16 +153,13 @@ fn describe_panic(payload: &(dyn std::any::Any + Send)) -> String {
 
 static LAST_ERROR_SLOT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 static HOOK_INSTALLED: std::sync::Once = std::sync::Once::new();
-static TEST_SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn clear_last_error() {
     *LAST_ERROR_SLOT.lock().unwrap() = None;
 }
-
 fn last_error() -> Option<String> {
     LAST_ERROR_SLOT.lock().unwrap().clone()
 }
-
 fn install_error_capture_hook() {
     HOOK_INSTALLED.call_once(|| {
         let prev = std::panic::take_hook();
@@ -232,7 +229,6 @@ async fn run_sql_inner(shared: &Arc<SharedState>, sql: &str) -> Vec<Vec<(i32, bo
 struct RowSink {
     sink: Arc<std::sync::Mutex<Vec<Vec<(i32, bool)>>>>,
 }
-
 impl crate::tcop::dest::DestReceiver for RowSink {
     fn receive_slot(&mut self, slot: &mut crate::executor::tuptable::TupleTableSlot) -> bool {
         let natts = i32::from(slot.nvalid);
@@ -252,75 +248,74 @@ impl crate::tcop::dest::DestReceiver for RowSink {
     }
 }
 
-/// The number of pg_statistic rows for `relid` (a catalog scan). Runs in its own
-/// read transaction so the seeded/ANALYZE'd rows are visible.
-async fn count_pg_statistic_rows(shared: &Arc<SharedState>, relid: Oid) -> usize {
-    use crate::access::htup_details::GETSTRUCT;
-    use crate::backend::access::transam::xact::{
-        CommitTransactionCommand, GetCurrentCommandId, StartTransactionCommand,
-    };
-    use crate::backend::utils::time::snapmgr::{
-        GetTransactionSnapshot, PopActiveSnapshot, PushActiveSnapshot,
-    };
-    use crate::catalog::pg_statistic::{self as s, FormData_pg_statistic, StatisticRelationId};
+// ---------------------------------------------------------------------------
+// catalog readers (each in its own read transaction)
+// ---------------------------------------------------------------------------
 
-    StartTransactionCommand(shared).await;
-    crate::backend::utils::time::snapmgr::InvalidateCatalogSnapshot();
-    let mut snap = GetTransactionSnapshot(shared);
-    if let Some(sn) = snap.as_mut() {
-        Arc::make_mut(sn).curcid = GetCurrentCommandId(false);
-    }
-    PushActiveSnapshot(snap);
-
-    let rows = crate::backend::commands::tablecmds::scan_catalog_rows_by_oid(
-        shared,
-        StatisticRelationId,
-        s::Anum_pg_statistic_starelid,
-        relid,
-    )
-    .await;
-    let mut n = 0;
-    for row in &rows {
-        // SAFETY: owned tuple; the fixed part starts with FormData_pg_statistic.
-        let p = GETSTRUCT(&row.tuple).cast::<FormData_pg_statistic>();
-        if unsafe { (*p).starelid } == relid {
-            n += 1;
-        }
-    }
-    for row in rows {
-        crate::backend::access::common::heaptuple::heap_freetuple(row.tuple);
-    }
-
-    PopActiveSnapshot();
-    CommitTransactionCommand(shared).await;
-    n
-}
-
-/// The OID of a user relation by name (via a fresh read transaction).
 async fn relid_of(shared: &Arc<SharedState>, name: &str) -> Oid {
-    use crate::backend::access::transam::xact::{
-        CommitTransactionCommand, GetCurrentCommandId, StartTransactionCommand,
-    };
-    use crate::backend::utils::time::snapmgr::{
-        GetTransactionSnapshot, PopActiveSnapshot, PushActiveSnapshot,
-    };
-    StartTransactionCommand(shared).await;
-    crate::backend::utils::time::snapmgr::InvalidateCatalogSnapshot();
-    let mut snap = GetTransactionSnapshot(shared);
-    if let Some(sn) = snap.as_mut() {
-        Arc::make_mut(sn).curcid = GetCurrentCommandId(false);
-    }
-    PushActiveSnapshot(snap);
-    let oid = crate::backend::catalog::namespace::range_var_get_relid(shared, None, name)
-        .await
-        .unwrap_or(crate::postgres_ext::InvalidOid);
-    PopActiveSnapshot();
-    CommitTransactionCommand(shared).await;
-    oid
+    with_read_txn(shared, |shared| async move {
+        crate::backend::catalog::namespace::range_var_get_relid(&shared, None, name)
+            .await
+            .unwrap_or(crate::postgres_ext::InvalidOid)
+    })
+    .await
 }
 
-/// The durable pg_class.reltuples for `relid` (via a fresh read transaction).
-async fn pg_class_reltuples(shared: &Arc<SharedState>, relid: Oid) -> f64 {
+/// pg_class (relfilenode, relpages, reltuples) for `relid`.
+async fn pg_class_phys(shared: &Arc<SharedState>, relid: Oid) -> (Oid, i32, f32) {
+    with_read_txn(shared, |shared| async move {
+        use crate::access::htup_details::GETSTRUCT;
+        use crate::catalog::pg_class::{self as pc, FormData_pg_class, RelationRelationId};
+        let rows = crate::backend::commands::tablecmds::scan_catalog_rows_by_oid(
+            &shared,
+            RelationRelationId,
+            pc::Anum_pg_class_oid,
+            relid,
+        )
+        .await;
+        let mut out = (crate::postgres_ext::InvalidOid, 0, 0.0);
+        for row in &rows {
+            let p = GETSTRUCT(&row.tuple).cast::<FormData_pg_class>();
+            if unsafe { (*p).oid } == relid {
+                out = unsafe { ((*p).relfilenode, (*p).relpages, (*p).reltuples) };
+            }
+        }
+        for row in rows {
+            crate::backend::access::common::heaptuple::heap_freetuple(row.tuple);
+        }
+        out
+    })
+    .await
+}
+
+/// Whether some index of `heap_relid` is marked clustered (indisclustered stand-in,
+/// the index registry -- pg_index is not an on-disk catalog in this port).
+fn any_index_clustered(heap_relid: Oid) -> bool {
+    crate::backend::catalog::indexing::relation_get_index_list(heap_relid)
+        .iter()
+        .any(|ri| ri.indisclustered)
+}
+
+/// The main-fork block count of relation `relid` (via a fresh read transaction).
+async fn heap_nblocks(shared: &Arc<SharedState>, relid: Oid) -> u32 {
+    with_read_txn(shared, |shared| async move {
+        use crate::common::relpath::ForkNumber;
+        crate::backend::utils::cache::relcache::relation_build_desc(&shared, relid).await;
+        let rel = crate::backend::utils::cache::relcache::relation_id_get_relation(relid).unwrap();
+        let smgr_ptr = rel.smgr();
+        let smgr = unsafe { &mut *smgr_ptr };
+        let n = smgr.nblocks(&shared, ForkNumber::MAIN_FORKNUM).await;
+        crate::backend::utils::cache::relcache::relation_close(rel);
+        n
+    })
+    .await
+}
+
+async fn with_read_txn<F, Fut, T>(shared: &Arc<SharedState>, f: F) -> T
+where
+    F: FnOnce(Arc<SharedState>) -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
     use crate::backend::access::transam::xact::{
         CommitTransactionCommand, GetCurrentCommandId, StartTransactionCommand,
     };
@@ -334,180 +329,181 @@ async fn pg_class_reltuples(shared: &Arc<SharedState>, relid: Oid) -> f64 {
         Arc::make_mut(sn).curcid = GetCurrentCommandId(false);
     }
     PushActiveSnapshot(snap);
-    let n = crate::backend::utils::adt::selfuncs::pg_class_reltuples_for_test(shared, relid).await;
+    let out = f(Arc::clone(shared)).await;
     PopActiveSnapshot();
     CommitTransactionCommand(shared).await;
-    n
+    out
+}
+
+fn set_of(rows: &[Vec<(i32, bool)>]) -> std::collections::HashSet<i32> {
+    rows.iter().map(|r| r[0].0).collect()
+}
+fn order_of(rows: &[Vec<(i32, bool)>]) -> Vec<i32> {
+    rows.iter().map(|r| r[0].0).collect()
 }
 
 // ===========================================================================
 //  Tests
 // ===========================================================================
 
+/// VACUUM FULL shrinks a table: insert many, delete most, VACUUM FULL, then the
+/// relation is physically smaller (relpages + reltuples drop), the live rows remain
+/// correct + visible, the relfilenode changed (a new physical file), and a re-insert
+/// works.
 #[tokio::test(flavor = "multi_thread")]
-async fn vacuum_removes_dead_tuples_and_keeps_live_rows() {
+async fn vacuum_full_shrinks_and_preserves_live_rows() {
     let _serial = TEST_SERIAL.lock().await;
     let shared = new_shared();
     Box::pin(in_scopes(shared.clone(), |shared| async move {
         init_db(&shared).await;
-        crate::backend::utils::adt::selfuncs::clear_stats_cache_for_test();
 
         run_sql(&shared, "CREATE TABLE t (a int4)").await.unwrap();
+        for i in 1..=12 {
+            run_sql(&shared, &format!("INSERT INTO t VALUES ({i})")).await.unwrap();
+        }
+        // Delete most rows, leaving 11 and 12.
+        run_sql(&shared, "DELETE FROM t WHERE a <= 10").await.unwrap();
+
+        let relid = relid_of(&shared, "t").await;
+        let (filenode_before, _pages_before, _tuples_before) = pg_class_phys(&shared, relid).await;
+        // The heap before VACUUM FULL holds 12 slots (2 live + 10 dead), 1+ pages.
+        let nblocks_before = heap_nblocks(&shared, relid).await;
+
+        // VACUUM FULL rewrites the heap.
+        run_sql(&shared, "VACUUM FULL t").await.unwrap();
+
+        let (filenode_after, pages_after, tuples_after) = pg_class_phys(&shared, relid).await;
+        let nblocks_after = heap_nblocks(&shared, relid).await;
+
+        // reltuples is now exactly the 2 live rows (the dead space is gone, not just
+        // marked free); pg_class.relpages matches the compacted heap's block count.
+        assert_eq!(tuples_after as i64, 2, "exactly the 2 live rows remain");
+        assert_eq!(pages_after, nblocks_after as i32, "relpages tracks the new heap size");
+        assert!(
+            nblocks_after <= nblocks_before,
+            "the rewritten heap is no larger: {nblocks_before} -> {nblocks_after} blocks"
+        );
+
+        // The relfilenode changed: a genuinely new physical file.
+        assert_ne!(
+            filenode_after, filenode_before,
+            "VACUUM FULL swaps in a new relfilenode ({filenode_before:?} -> {filenode_after:?})"
+        );
+
+        // Live rows are intact + visible.
+        let live = set_of(&run_sql(&shared, "SELECT a FROM t").await.unwrap());
+        assert_eq!(live, [11, 12].into_iter().collect(), "live rows preserved by VACUUM FULL");
+
+        // A re-insert into the rewritten heap works + reads back.
+        run_sql(&shared, "INSERT INTO t VALUES (99)").await.unwrap();
+        let after_ins = set_of(&run_sql(&shared, "SELECT a FROM t").await.unwrap());
+        assert_eq!(after_ins, [11, 12, 99].into_iter().collect(), "re-insert works after rewrite");
+    }))
+    .await;
+}
+
+/// VACUUM FULL over an indexed table: the index is rebuilt so an index scan still
+/// finds the live rows after the rewrite.
+#[tokio::test(flavor = "multi_thread")]
+async fn vacuum_full_rebuilds_indexes() {
+    let _serial = TEST_SERIAL.lock().await;
+    let shared = new_shared();
+    Box::pin(in_scopes(shared.clone(), |shared| async move {
+        init_db(&shared).await;
+
+        run_sql(&shared, "CREATE TABLE t (a int4)").await.unwrap();
+        run_sql(&shared, "CREATE INDEX t_a_idx ON t (a)").await.unwrap();
         for i in 1..=6 {
             run_sql(&shared, &format!("INSERT INTO t VALUES ({i})")).await.unwrap();
         }
-        // Delete half the rows, creating dead tuples.
-        run_sql(&shared, "DELETE FROM t WHERE a <= 3").await.unwrap();
 
-        // Live rows before VACUUM: 4,5,6.
-        let before = run_sql(&shared, "SELECT a FROM t").await.unwrap();
-        assert_eq!(before.len(), 3, "3 live rows survive the delete");
+        run_sql(&shared, "VACUUM FULL t").await.unwrap();
 
-        // VACUUM reclaims the dead tuples.
-        run_sql(&shared, "VACUUM t").await.unwrap();
-
-        // Live rows still correct after VACUUM.
-        let after: std::collections::HashSet<i32> =
-            run_sql(&shared, "SELECT a FROM t").await.unwrap().into_iter().map(|r| r[0].0).collect();
-        assert_eq!(after, [4, 5, 6].into_iter().collect(), "live rows intact post-vacuum");
-
-        // Re-insert reuses the reclaimed space and reads back correctly.
-        run_sql(&shared, "INSERT INTO t VALUES (7)").await.unwrap();
-        let final_rows: std::collections::HashSet<i32> =
-            run_sql(&shared, "SELECT a FROM t").await.unwrap().into_iter().map(|r| r[0].0).collect();
-        assert_eq!(final_rows, [4, 5, 6, 7].into_iter().collect());
+        // An index scan (WHERE a = k) still finds each row after the rebuild.
+        for k in 1..=6 {
+            let hit = run_sql(&shared, &format!("SELECT a FROM t WHERE a = {k}")).await.unwrap();
+            assert_eq!(hit.len(), 1, "index scan finds a = {k} after VACUUM FULL rebuild");
+            assert_eq!(hit[0][0].0, k);
+        }
+        // A full scan returns exactly the live rows.
+        let all = set_of(&run_sql(&shared, "SELECT a FROM t").await.unwrap());
+        assert_eq!(all, (1..=6).collect(), "all rows preserved after indexed VACUUM FULL");
     }))
     .await;
 }
 
+/// CLUSTER t USING idx: insert out-of-order rows, cluster, then a physical (seqscan)
+/// order of the heap follows the index order, and the index is marked indisclustered.
 #[tokio::test(flavor = "multi_thread")]
-async fn vacuum_removes_index_entries_for_deleted_rows() {
+async fn cluster_orders_heap_by_index() {
     let _serial = TEST_SERIAL.lock().await;
     let shared = new_shared();
     Box::pin(in_scopes(shared.clone(), |shared| async move {
         init_db(&shared).await;
-        crate::backend::utils::adt::selfuncs::clear_stats_cache_for_test();
 
-        // VACUUM must run cleanly over a table that HAS an index (it opens the
-        // index and drives its bulk-delete). The end-to-end "index entry for a
-        // deleted row is gone" is covered at the AM level by the nbtree test
-        // `btbulkdelete_removes_dead_index_entries` (the executor's
-        // index-scan-driven DELETE is a separate M8 gap, so we do not delete through
-        // SQL on an indexed table here).
         run_sql(&shared, "CREATE TABLE t (a int4)").await.unwrap();
         run_sql(&shared, "CREATE INDEX t_a_idx ON t (a)").await.unwrap();
-        for i in 1..=5 {
-            run_sql(&shared, &format!("INSERT INTO t VALUES ({i})")).await.unwrap();
+        // Insert out of order.
+        for v in [5, 1, 4, 2, 3] {
+            run_sql(&shared, &format!("INSERT INTO t VALUES ({v})")).await.unwrap();
         }
-        // VACUUM over the indexed table succeeds (no panic; the index vacuum runs).
-        run_sql(&shared, "VACUUM t").await.unwrap();
-
-        // The live rows and the index scan remain correct after VACUUM.
-        let all: std::collections::HashSet<i32> =
-            run_sql(&shared, "SELECT a FROM t").await.unwrap().into_iter().map(|r| r[0].0).collect();
-        assert_eq!(all, [1, 2, 3, 4, 5].into_iter().collect(), "live rows intact after indexed VACUUM");
-        let pt: std::collections::HashSet<i32> =
-            run_sql(&shared, "SELECT a FROM t WHERE a = 3").await.unwrap().into_iter().map(|r| r[0].0).collect();
-        assert_eq!(pt, std::collections::HashSet::from([3]), "index scan still finds live key 3");
-    }))
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn analyze_populates_pg_statistic_and_reltuples() {
-    let _serial = TEST_SERIAL.lock().await;
-    let shared = new_shared();
-    Box::pin(in_scopes(shared.clone(), |shared| async move {
-        init_db(&shared).await;
-        crate::backend::utils::adt::selfuncs::clear_stats_cache_for_test();
-
-        run_sql(&shared, "CREATE TABLE t (a int4)").await.unwrap();
-        // A skewed distribution: value 5 is very common (a clear MCV), plus a spread.
-        for _ in 0..40 {
-            run_sql(&shared, "INSERT INTO t VALUES (5)").await.unwrap();
-        }
-        for i in 1..=20 {
-            run_sql(&shared, &format!("INSERT INTO t VALUES ({i})")).await.unwrap();
-        }
-        // 60 rows total; value 5 appears 41 times.
-        run_sql(&shared, "ANALYZE t").await.unwrap();
 
         let relid = relid_of(&shared, "t").await;
-        assert!(relid.is_valid(), "table t resolves");
+        assert!(!any_index_clustered(relid), "not clustered before CLUSTER");
 
-        // pg_statistic has a row for the analyzed column.
-        let nstats = count_pg_statistic_rows(&shared, relid).await;
-        assert!(nstats >= 1, "ANALYZE wrote a pg_statistic row, got {nstats}");
+        run_sql(&shared, "CLUSTER t USING t_a_idx").await.unwrap();
 
-        // pg_class.reltuples ~ 60 (the durable catalog row ANALYZE updated).
-        let reltuples = pg_class_reltuples(&shared, relid).await;
-        assert!(
-            (reltuples - 60.0).abs() < 5.0,
-            "pg_class.reltuples ~ 60 after ANALYZE, got {reltuples}"
-        );
+        // A plain SELECT (seqscan) now returns the rows in physical == index order.
+        let order = order_of(&run_sql(&shared, "SELECT a FROM t").await.unwrap());
+        assert_eq!(order, vec![1, 2, 3, 4, 5], "heap physically ordered by the cluster index");
 
-        // eqsel for the common value 5 reflects its real frequency (~41/60 = 0.68),
-        // well above DEFAULT_EQ_SEL (0.005).
-        let sel_common =
-            crate::backend::utils::adt::selfuncs::eqsel_for_test(relid, 1, 5);
-        assert!(
-            sel_common > crate::backend::utils::adt::selfuncs::DEFAULT_EQ_SEL,
-            "eqsel for a common value ({sel_common}) exceeds DEFAULT_EQ_SEL"
-        );
-        assert!(
-            (sel_common - 41.0 / 60.0).abs() < 0.1,
-            "eqsel for value 5 (~0.68) close to its real frequency, got {sel_common}"
-        );
+        // The index is marked clustered.
+        assert!(any_index_clustered(relid), "indisclustered set after CLUSTER");
 
-        // eqsel for a rare value (appears once) is small (< the common value).
-        let sel_rare = crate::backend::utils::adt::selfuncs::eqsel_for_test(relid, 1, 17);
-        assert!(sel_rare < sel_common, "rare value selectivity below the common one");
+        // The relfilenode changed (a rewrite happened).
+        let (_fn, _pg, rt) = pg_class_phys(&shared, relid).await;
+        assert_eq!(rt as i64, 5, "all 5 rows preserved by CLUSTER");
     }))
     .await;
 }
 
+/// A rewrite preserves every live row exactly -- no loss, no duplicate -- and the
+/// relfilenode changes.
 #[tokio::test(flavor = "multi_thread")]
-async fn selfuncs_no_stats_fallback_is_default() {
+async fn rewrite_preserves_rows_exactly() {
     let _serial = TEST_SERIAL.lock().await;
     let shared = new_shared();
     Box::pin(in_scopes(shared.clone(), |shared| async move {
         init_db(&shared).await;
-        crate::backend::utils::adt::selfuncs::clear_stats_cache_for_test();
 
-        run_sql(&shared, "CREATE TABLE u (a int4)").await.unwrap();
-        for i in 1..=10 {
-            run_sql(&shared, &format!("INSERT INTO u VALUES ({i})")).await.unwrap();
-        }
-        // No ANALYZE: the stats cache has no entry for u.a, so eqsel returns the
-        // no-stats default.
-        let relid = relid_of(&shared, "u").await;
-        let sel = crate::backend::utils::adt::selfuncs::eqsel_for_test(relid, 1, 3);
-        assert!(
-            (sel - crate::backend::utils::adt::selfuncs::DEFAULT_EQ_SEL).abs() < 1e-9,
-            "un-analyzed table keeps DEFAULT_EQ_SEL, got {sel}"
-        );
-    }))
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn vacuum_full_rewrites_and_keeps_live_rows() {
-    let _serial = TEST_SERIAL.lock().await;
-    let shared = new_shared();
-    Box::pin(in_scopes(shared.clone(), |shared| async move {
-        init_db(&shared).await;
-        crate::backend::utils::adt::selfuncs::clear_stats_cache_for_test();
         run_sql(&shared, "CREATE TABLE t (a int4)").await.unwrap();
-        for i in 1..=5 {
+        for i in 1..=8 {
             run_sql(&shared, &format!("INSERT INTO t VALUES ({i})")).await.unwrap();
         }
-        run_sql(&shared, "DELETE FROM t WHERE a <= 3").await.unwrap();
-        // VACUUM FULL rewrites the heap (via CLUSTER, physical order); the reclaim
-        // path is covered in cluster_tests. Here: it runs cleanly + live rows stay.
+        let before = order_of(&run_sql(&shared, "SELECT a FROM t").await.unwrap());
+        let relid = relid_of(&shared, "t").await;
+        let (fn_before, _, _) = pg_class_phys(&shared, relid).await;
+
         run_sql(&shared, "VACUUM FULL t").await.unwrap();
-        let live: std::collections::HashSet<i32> =
-            run_sql(&shared, "SELECT a FROM t").await.unwrap().into_iter().map(|r| r[0].0).collect();
-        assert_eq!(live, [4, 5].into_iter().collect(), "live rows survive VACUUM FULL");
+
+        let after = set_of(&run_sql(&shared, "SELECT a FROM t").await.unwrap());
+        assert_eq!(after, before.iter().copied().collect(), "no row lost or duplicated");
+        assert_eq!(after.len(), 8, "exactly 8 distinct rows");
+        let (fn_after, _, _) = pg_class_phys(&shared, relid).await;
+        assert_ne!(fn_after, fn_before, "relfilenode changed by the rewrite");
+    }))
+    .await;
+}
+
+/// CLUSTER with no relation (re-cluster every marked table) is a clean staged error.
+#[tokio::test(flavor = "multi_thread")]
+async fn cluster_all_tables_is_staged() {
+    let _serial = TEST_SERIAL.lock().await;
+    let shared = new_shared();
+    Box::pin(in_scopes(shared.clone(), |shared| async move {
+        init_db(&shared).await;
+        let err = run_sql(&shared, "CLUSTER").await.unwrap_err();
+        assert!(err.contains("CLUSTER"), "staged bare-CLUSTER error, got: {err}");
     }))
     .await;
 }

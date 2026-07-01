@@ -197,6 +197,16 @@ pub async fn standard_process_utility(
             }
             crate::backend::access::transam::xact::CommandCounterIncrement();
         }
+        Node::ClusterStmt(stmt) => {
+            // CLUSTER table [USING index] (+ the VACUUM FULL rewrite path). Box::pin
+            // the deep rewrite future (new-heap create + copy + swap + reindex).
+            Box::pin(crate::backend::commands::cluster::cluster(shared, stmt)).await;
+            if let Some(qc) = qc {
+                qc.command_tag = CommandTag::Cluster;
+                qc.nprocessed = 0;
+            }
+            crate::backend::access::transam::xact::CommandCounterIncrement();
+        }
         other => not_yet_reachable(&format!("standard_ProcessUtility: {other:?}")),
     }
 }

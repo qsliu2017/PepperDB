@@ -42,12 +42,6 @@ pub async fn exec_vacuum(shared: &Arc<SharedState>, stmt: &VacuumStmt) {
     }
     let params = VacuumParams { options, ..params };
 
-    // VACUUM FULL routes to CLUSTER (step 47). Surface a clean staged error
-    // (catchable ereport) rather than silently doing a plain vacuum.
-    if options.contains(VacOpt::FULL) {
-        crate::elog!(ERROR, "VACUUM FULL (rewrite via CLUSTER) is not yet supported -- step 47");
-    }
-
     vacuum(shared, &stmt.rels, &params).await;
 }
 
@@ -68,7 +62,14 @@ pub async fn vacuum(shared: &Arc<SharedState>, rels: &[Node], params: &VacuumPar
 
     for (relid, va_cols) in targets {
         if params.options.contains(VacOpt::VACUUM) {
-            vacuum_rel(shared, relid, params).await;
+            if params.options.contains(VacOpt::FULL) {
+                // VACUUM FULL rewrites the heap via CLUSTER with no index (physical
+                // order): reclaims all dead space by copying the live tuples into a
+                // fresh relfilenode and swapping the files.
+                crate::backend::commands::cluster::cluster_rel(shared, relid, None).await;
+            } else {
+                vacuum_rel(shared, relid, params).await;
+            }
         }
         if params.options.contains(VacOpt::ANALYZE) {
             crate::backend::commands::analyze::analyze_rel(shared, relid, params, &va_cols).await;

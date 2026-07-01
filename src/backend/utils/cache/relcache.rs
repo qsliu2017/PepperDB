@@ -288,13 +288,17 @@ pub async fn relation_build_desc(shared: &Arc<SharedState>, target_rel_id: Oid) 
     *rel.rd_isvalid.get_mut() = true;
     *rel.rd_refcnt.get_mut() = 0;
     // RelationInitPhysicalAddr: a user table's storage lives at {default
-    // tablespace, current db, relfilenode == relid} (M2: filenode == oid). Filled
-    // here at build time (the entry is unshared) so the shared Arc is immutable.
+    // tablespace, current db, relfilenode}. Filled here at build time (the entry is
+    // unshared) so the shared Arc is immutable. The relfilenode comes from pg_class
+    // (== oid at CREATE, but distinct after a CLUSTER / VACUUM FULL relfilenode
+    // swap); a zero relfilenode (mapped relations) falls back to the OID.
     let dbid = crate::session::current().database_id();
+    let relfilenode =
+        if form_copy.relfilenode.is_valid() { form_copy.relfilenode } else { target_rel_id };
     rel.rd_locator = crate::storage::relfilelocator::RelFileLocator {
         spcOid: crate::common::relpath::DEFAULTTABLESPACE_OID,
         dbOid: dbid,
-        relNumber: target_rel_id,
+        relNumber: relfilenode,
     };
     rel.rd_lockInfo = crate::utils::rel::LockInfoData {
         lockRelId: LockRelId { relId: target_rel_id, dbId: dbid },

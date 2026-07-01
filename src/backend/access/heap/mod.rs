@@ -5,4 +5,5 @@ pub mod heapam_handler;
 pub mod heapam_visibility;
 pub mod hio;
 pub mod pruneheap;
+pub mod rewriteheap;
 pub mod vacuumlazy;

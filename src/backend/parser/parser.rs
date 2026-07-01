@@ -1945,6 +1945,29 @@ pub fn make_vacuum_relation(relation: crate::nodes::primnodes::RangeVar, cols: V
     }))
 }
 
+/// Build a `ClusterStmt` node. `relation` is the target table (`None` = re-cluster
+/// every previously-clustered table); `indexname` is the cluster index (`None` =
+/// reuse the marked index / physical rewrite); `params` is the option `DefElem`
+/// list (e.g. a `verbose` flag).
+pub fn make_cluster_stmt(
+    relation: Option<crate::nodes::primnodes::RangeVar>,
+    indexname: Option<String>,
+    params: Vec<Node>,
+) -> Node {
+    Node::ClusterStmt(Box::new(crate::nodes::parsenodes::ClusterStmt {
+        relation: relation.map(Box::new),
+        indexname,
+        params,
+    }))
+}
+
+/// gram.y `opt_verbose` -> option list: an empty list, or a single `verbose`
+/// DefElem when VERBOSE was given (the unparenthesized CLUSTER/VACUUM legacy form).
+#[must_use]
+pub fn verbose_opts(verbose: bool) -> Vec<Node> {
+    if verbose { vec![make_generic_def_elem("verbose", None)] } else { Vec::new() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2310,6 +2333,34 @@ mod tests {
         assert!(u.whereClause.is_some(), "WHERE present");
         let ret = u.returningClause.as_ref().expect("RETURNING present");
         assert_eq!(ret.exprs.len(), 2, "RETURNING a, b");
+    }
+
+    #[test]
+    fn cluster_stmt_parses() {
+        // Legacy `CLUSTER table USING index`.
+        let list = parse("CLUSTER t USING t_a_idx");
+        let Node::ClusterStmt(c) = one_stmt(&list) else { panic!("not a ClusterStmt") };
+        assert_eq!(c.relation.as_ref().unwrap().relname.as_deref(), Some("t"));
+        assert_eq!(c.indexname.as_deref(), Some("t_a_idx"));
+        assert!(c.params.is_empty(), "no options");
+
+        // Bare `CLUSTER` (re-cluster all).
+        let list = parse("CLUSTER");
+        let Node::ClusterStmt(c) = one_stmt(&list) else { panic!("not a ClusterStmt") };
+        assert!(c.relation.is_none() && c.indexname.is_none());
+
+        // Modern paren form + VERBOSE, no index.
+        let list = parse("CLUSTER (VERBOSE) t");
+        let Node::ClusterStmt(c) = one_stmt(&list) else { panic!("not a ClusterStmt") };
+        assert_eq!(c.relation.as_ref().unwrap().relname.as_deref(), Some("t"));
+        assert!(c.indexname.is_none());
+        assert_eq!(c.params.len(), 1, "one verbose option");
+
+        // Legacy VERBOSE prefix.
+        let list = parse("CLUSTER VERBOSE t USING t_a_idx");
+        let Node::ClusterStmt(c) = one_stmt(&list) else { panic!("not a ClusterStmt") };
+        assert_eq!(c.indexname.as_deref(), Some("t_a_idx"));
+        assert_eq!(c.params.len(), 1, "verbose def elem");
     }
 
     #[test]

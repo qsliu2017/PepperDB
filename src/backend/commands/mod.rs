@@ -2,6 +2,7 @@
 
 pub mod alter;
 pub mod analyze;
+pub mod cluster;
 pub mod collationcmds;
 pub mod comment;
 pub mod conversioncmds;

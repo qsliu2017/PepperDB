@@ -37,7 +37,7 @@ use crate::backend::parser::parser::{
     make_create_conversion_stmt, make_create_tablespace_stmt, make_function_parameter,
     make_ot_column_def, make_view_stmt, make_rule_stmt, make_string_value_node,
     make_create_trig_stmt, make_fk_constraint, make_column_fk_constraint, set_constraint_name,
-    make_copy_stmt, make_vacuum_stmt, make_vacuum_relation,
+    make_copy_stmt, make_vacuum_stmt, make_vacuum_relation, make_cluster_stmt, verbose_opts,
     make_null_const, TrigTiming, TrigEvent,
     make_set_op, set_select_with_clause, make_with_clause, make_common_table_expr,
     DropBehaviorTok, ObjType,
@@ -313,6 +313,8 @@ extern {
         "ANALYSE"    => Token::Keyword("analyse"),
         "VERBOSE"    => Token::Keyword("verbose"),
         "FREEZE"     => Token::Keyword("freeze"),
+        // M13 (step 47): CLUSTER keyword (USING already exists at line 122).
+        "CLUSTER"    => Token::Keyword("cluster"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -394,6 +396,7 @@ Stmt: Option<Node> = {
     <s:CopyStmt> => Some(s),
     <s:VacuumStmt> => Some(s),
     <s:AnalyzeStmt> => Some(s),
+    <s:ClusterStmt> => Some(s),
     <s:InsertStmt> => Some(s),
     <s:UpdateStmt> => Some(s),
     <s:DeleteStmt> => Some(s),
@@ -947,6 +950,33 @@ VacuumRelationList: Vec<Node> = {
 // gram.y `vacuum_relation`: qualified_name opt_name_list (the column list).
 VacuumRelation: Node = {
     <rel:QualifiedName> <cols:OptColumnList> => make_vacuum_relation(rel, cols),
+};
+
+// ===========================================================================
+//  CLUSTER  (M13, step 47). gram.y `ClusterStmt`.
+// ===========================================================================
+
+// gram.y `ClusterStmt`: the modern paren-option form and the legacy VERBOSE
+// forms. The pre-8.3 `CLUSTER opt_verbose name ON qualified_name` spelling is
+// omitted (it collides with the `CLUSTER opt_verbose qualified_name USING name`
+// form once ColId reductions are considered; the two supported spellings cover
+// M13). VERBOSE is funneled through `opt_verbose` -> a `verbose` DefElem to match
+// the paren form's option carrier.
+ClusterStmt: Node = {
+    "CLUSTER" "(" <opts:VacGenericOptList> ")" <rel:QualifiedName> <idx:ClusterIndexSpec> =>
+        make_cluster_stmt(Some(rel), idx, opts),
+    "CLUSTER" "(" <opts:VacGenericOptList> ")" =>
+        make_cluster_stmt(None, None, opts),
+    "CLUSTER" <verbose:OptVerbose> <rel:QualifiedName> <idx:ClusterIndexSpec> =>
+        make_cluster_stmt(Some(rel), idx, verbose_opts(verbose)),
+    "CLUSTER" <verbose:OptVerbose> =>
+        make_cluster_stmt(None, None, verbose_opts(verbose)),
+};
+
+// gram.y `cluster_index_specification: USING name | /*EMPTY*/`.
+ClusterIndexSpec: Option<String> = {
+    "USING" <n:ColId> => Some(n),
+    => None,
 };
 
 // gram.y `copy_from`: FROM (true) | TO (false).
