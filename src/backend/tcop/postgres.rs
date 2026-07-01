@@ -90,9 +90,9 @@ pub async fn postgres_main(
     shared: Arc<SharedState>,
     dbname: String,
     username: String,
+    proc_pid: i32,
+    cancel_key: Vec<u8>,
 ) {
-    let _ = &username;
-
     // PG runs InitPostgres (auth + connect-to-database) here; backend_startup
     // already ran the identity slice (backend_task_init) and published the
     // Session, so we flip to normal processing mode and record the attached db.
@@ -114,7 +114,10 @@ pub async fn postgres_main(
     // the backend task itself is spawned with an enlarged stack (backend_startup),
     // so the real backend does not stack-overflow.
     let comm = Arc::new(PqComm::new(stream));
-    let loop_fut = Box::pin(init_postgres(shared.clone(), command_loop(shared)));
+    let loop_fut = Box::pin(init_postgres(
+        shared.clone(),
+        command_loop(shared, proc_pid, cancel_key, username),
+    ));
     pq::scope(comm, loop_fut).await;
 }
 
@@ -265,10 +268,22 @@ async fn do_initdb(shared: Arc<SharedState>) {
 /// The backend message loop proper (PG `PostgresMain`'s `for (;;)`), run inside
 /// the pqcomm + connect-to-database scopes. Async (awaits the wire read + flush,
 /// and the per-command pipeline reaches the buffer pool / WAL).
-async fn command_loop(shared: Arc<SharedState>) {
+async fn command_loop(
+    shared: Arc<SharedState>,
+    proc_pid: i32,
+    cancel_key: Vec<u8>,
+    username: String,
+) {
     use futures_util::FutureExt;
-    // Send this backend's cancellation key to the frontend (BackendKeyData).
-    send_backend_key_data().await;
+    // Complete the startup handshake: AuthenticationOk, ParameterStatus for the
+    // reported GUCs, and this backend's BackendKeyData. Buffered here and flushed
+    // by the first ReadyForQuery below (PG PostgresMain order).
+    crate::backend::tcop::backend_startup::perform_authentication_and_report(
+        proc_pid,
+        &cancel_key,
+        &username,
+    )
+    .await;
 
     let mut send_ready_for_query = true;
     loop {
@@ -1328,13 +1343,6 @@ fn abort_current_transaction_stub() {
 }
 
 // --- Wire helpers over the per-task PqComm (rules.md s5) --------------------
-
-/// PG `pq_putmessage(BackendKeyData, ...)`. Sent once after startup. The cancel
-/// key payload (pid + MyCancelKey) is appended by backend_startup; M1 sends an
-/// empty BackendKeyData body (the cancel handshake is exercised separately).
-async fn send_backend_key_data() {
-    let _ = pq::pq_putmessage(crate::libpq::protocol::PQMSG_BACKEND_KEY_DATA, &[]).await;
-}
 
 /// PG `ReadCommand`/`SocketBackend`: read one message (type byte + body) from the
 /// wire. Returns `Some((firstchar, body))`, or `None` on EOF / protocol loss.

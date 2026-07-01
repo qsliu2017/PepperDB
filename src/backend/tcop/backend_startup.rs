@@ -120,7 +120,7 @@ pub async fn backend_main(
             slot.clone(),
             crate::storage::lock::local_lock_scope(resowner::scope(
                 owner,
-                run_backend(stream, shared.clone(), startup, slot, cancel),
+                run_backend(stream, shared.clone(), startup, slot, cancel, proc_pid, cancel_key),
             )),
         ),
     )
@@ -139,11 +139,15 @@ async fn run_backend(
     startup: StartupParams,
     slot: Arc<ProcSignalSlot>,
     cancel: Arc<Notify>,
+    proc_pid: i32,
+    cancel_key: Vec<u8>,
 ) {
     let dbname = startup.database.unwrap_or_default();
     let username = startup.user.unwrap_or_default();
 
-    let main = crate::backend::tcop::postgres::postgres_main(stream, shared, dbname, username);
+    let main = crate::backend::tcop::postgres::postgres_main(
+        stream, shared, dbname, username, proc_pid, cancel_key,
+    );
     tokio::pin!(main);
 
     loop {
@@ -278,6 +282,55 @@ fn parse_startup_params(buf: &[u8]) -> StartupParams {
         }
     }
     params
+}
+
+/// Complete the v3 startup handshake to the point of ReadyForQuery: send
+/// AuthenticationOk (trust auth -- no password exchange), then a ParameterStatus
+/// for each GUC_REPORT variable, then a non-empty BackendKeyData. Mirrors the
+/// PG startup order: `ClientAuthentication` -> `sendAuthRequest(AUTH_REQ_OK)`
+/// (auth.c), `BeginReportingGUCOptions` (guc.c), then PostgresMain's
+/// BackendKeyData. All three are buffered; the caller's first `ReadyForQuery`
+/// flushes them, matching C ("need not flush since ReadyForQuery will do it").
+///
+/// Must run inside the pqcomm + GUC scopes (established in `postgres_main` /
+/// `init_postgres`), so it is invoked from the command loop, not `backend_main`.
+pub async fn perform_authentication_and_report(pid: i32, cancel_key: &[u8], username: &str) {
+    use crate::backend::libpq::pqcomm::{
+        pq_send_authentication_ok, pq_send_backend_key_data, pq_send_parameter_status,
+    };
+
+    // AuthenticationOk: trust auth accepts every connection with no credential
+    // exchange (no pg_hba.conf yet; the single-process bootstrap role is a
+    // superuser). PG's PerformAuthentication -> ClientAuthentication reaches
+    // sendAuthRequest(AUTH_REQ_OK) on the trust path.
+    pq_send_authentication_ok().await;
+
+    // BeginReportingGUCOptions: one ParameterStatus per GUC_REPORT variable. PG
+    // walks the GUC hash for the GUC_REPORT flag; the reportable variables that
+    // exist in the port's GUC table are read from it, and the ones PG always
+    // reports but that the port's table does not carry yet are supplied here with
+    // values consistent with the fixed bootstrap (SQL_ASCII encoding, ISO dates,
+    // 64-bit integer datetimes, standard-conforming strings, bootstrap superuser).
+    for name in ["client_encoding", "DateStyle", "TimeZone", "application_name"] {
+        if let Some(val) = crate::backend::utils::misc::guc::GetConfigOption(name, true, false) {
+            pq_send_parameter_status(name, &val).await;
+        }
+    }
+    pq_send_parameter_status("server_version", crate::pg_config::PG_VERSION).await;
+    pq_send_parameter_status("server_encoding", "SQL_ASCII").await;
+    pq_send_parameter_status("IntervalStyle", "postgres").await;
+    pq_send_parameter_status("integer_datetimes", "on").await;
+    pq_send_parameter_status("standard_conforming_strings", "on").await;
+    pq_send_parameter_status("is_superuser", "on").await;
+    pq_send_parameter_status("session_authorization", username).await;
+
+    // BackendKeyData: PostgresMain advertises MyProcPid + MyCancelKey. Protocol
+    // 3.0 (the only version we speak -- no NegotiateProtocolVersion) uses the
+    // classic 4-byte key, so send the pid plus the leading 4 bytes of the
+    // registered cancel key. (Cancel-request matching against the full 32-byte
+    // registered key needs protocol 3.2; see the TODO(rng) on the key.)
+    let classic_key = &cancel_key[..cancel_key.len().min(4)];
+    pq_send_backend_key_data(pid, classic_key).await;
 }
 
 /// Placeholder query-cancel key. PG fills `MyCancelKey` from `pg_strong_random`;

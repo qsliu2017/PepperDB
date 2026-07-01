@@ -723,6 +723,43 @@ pub fn pq_comm_reset() {
 }
 
 // ---------------------------------------------------------------------------
+// Startup-handshake messages (PG auth.c sendAuthRequest, guc.c ReportGUCOption,
+// postgres.c PostgresMain BackendKeyData). Assembled + emitted here so the wire
+// framing of the startup sequence lives in one place; the callers (auth OK,
+// GUC reporting, cancel-key advertisement) are in backend_startup.rs.
+// ---------------------------------------------------------------------------
+
+/// PG `sendAuthRequest(port, AUTH_REQ_OK, NULL, 0)`: the AuthenticationOk
+/// message -- type 'R' with an Int32(0) body. Trust auth: no password exchange.
+/// Buffered (not flushed); ReadyForQuery flushes at the end of startup, matching
+/// C's "need not be sent until we are ready for queries" for AUTH_REQ_OK.
+pub async fn pq_send_authentication_ok() {
+    let body = (crate::libpq::protocol::AuthRequest::Ok as u32).to_be_bytes();
+    let _ = pq_putmessage(crate::libpq::protocol::PQMSG_AUTHENTICATION_REQUEST, &body).await;
+}
+
+/// PG `ReportGUCOption`: one ParameterStatus ('S') message -- `name\0value\0`.
+/// Buffered; flushed by the trailing ReadyForQuery.
+pub async fn pq_send_parameter_status(name: &str, value: &str) {
+    let mut body = Vec::with_capacity(name.len() + value.len() + 2);
+    body.extend_from_slice(name.as_bytes());
+    body.push(0);
+    body.extend_from_slice(value.as_bytes());
+    body.push(0);
+    let _ = pq_putmessage(crate::libpq::protocol::PQMSG_PARAMETER_STATUS, &body).await;
+}
+
+/// PG `PostgresMain`'s BackendKeyData ('K'): Int32(pid) followed by the cancel
+/// key bytes. Buffered; ReadyForQuery flushes it (C: "need not flush since
+/// ReadyForQuery will do it").
+pub async fn pq_send_backend_key_data(pid: i32, cancel_key: &[u8]) {
+    let mut body = Vec::with_capacity(4 + cancel_key.len());
+    body.extend_from_slice(&pid.to_be_bytes());
+    body.extend_from_slice(cancel_key);
+    let _ = pq_putmessage(crate::libpq::protocol::PQMSG_BACKEND_KEY_DATA, &body).await;
+}
+
+// ---------------------------------------------------------------------------
 // re-export the startup max for callers that referenced the C symbol via pqcomm
 // ---------------------------------------------------------------------------
 
