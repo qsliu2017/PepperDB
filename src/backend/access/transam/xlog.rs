@@ -53,6 +53,7 @@ use crate::access::xlog_internal::{
 };
 use crate::access::xlogdefs::{TimeLineID, XLogRecPtr, XLogSegNo, INVALID_XLOG_REC_PTR};
 use crate::access::xlogrecord::SizeOfXLogRecord;
+use crate::catalog::pg_control::DBState;
 use crate::c::MAXALIGN;
 use crate::pg_config::XLOG_BLCKSZ;
 use crate::port::pg_crc32c::{comp_crc32c, fin_crc32c, pg_crc32c};
@@ -437,6 +438,45 @@ impl XLogCtl {
     /// walwriter wakeup is step 17; we just keep the monotonic max here.
     pub fn set_async_xact_lsn(&self, lsn: XLogRecPtr) {
         self.async_xact_lsn.fetch_max(lsn.0, Ordering::AcqRel);
+    }
+
+    /// The configured WAL segment size (bytes). Recovery's WAL reader needs it to
+    /// map an LSN to a segment file.
+    pub fn wal_segment_size(&self) -> u64 {
+        self.wal_seg_size
+    }
+
+    /// Build a synchronous WAL page reader over the on-disk segment files for the
+    /// recovery loop (PG's `read_local_xlog_page` role). The reader opens the
+    /// segment file for the requested page and reads directly; the recovery
+    /// driver's own async I/O happens between record reads, keeping the parse side
+    /// pure-CPU (the `XLogReader` contract). Returns `None` if `DataDir` is unset.
+    pub fn make_recovery_page_reader(
+        &self,
+    ) -> Option<crate::backend::access::transam::xlogreader::PageReadFn> {
+        let data_dir = self.data_dir()?;
+        let wal_seg_size = self.wal_seg_size;
+        let segs_per_id = 0x1_0000_0000u64 / wal_seg_size;
+        Some(Box::new(move |page_ptr: XLogRecPtr, _req: usize, into: &mut [u8]| {
+            use std::io::{Read, Seek, SeekFrom};
+            let segno = page_ptr.0 / wal_seg_size;
+            let off = page_ptr.0 % wal_seg_size;
+            let logid = (segno / segs_per_id) as u32;
+            let seg = (segno % segs_per_id) as u32;
+            let name = format!("{:08X}{:08X}{:08X}", INSERT_TLI.0, logid, seg);
+            let path = std::path::Path::new(&data_dir).join(XLOGDIR).join(name);
+            let mut f = std::fs::File::open(&path)
+                .map_err(|e| format!("open {}: {e}", path.display()))?;
+            f.seek(SeekFrom::Start(off)).map_err(|e| e.to_string())?;
+            let mut n = 0usize;
+            while n < into.len() {
+                match f.read(&mut into[n..]).map_err(|e| e.to_string())? {
+                    0 => break,
+                    k => n += k,
+                }
+            }
+            Ok(n)
+        }))
     }
 
     // --- insert reservation --------------------------------------------------
@@ -1080,6 +1120,102 @@ impl XLogCtl {
     fn io_of(&self) -> Arc<crate::storage::io_backend::IoBackend> {
         self.io.clone()
     }
+
+    // --- control file (pg_control) + recovery entry -------------------------
+
+    /// Path to the control file (`global/pg_control`) under the data dir.
+    fn control_file_path(data_dir: &str) -> std::path::PathBuf {
+        std::path::Path::new(data_dir)
+            .join(crate::access::xlog_internal::XLOG_CONTROL_FILE)
+    }
+
+    /// PG `UpdateControlFile`/`WriteControlFile`: write the control file recording
+    /// the DB state and the checkpoint's redo point. The 512-byte struct is
+    /// written with a trailing CRC; the file is padded to `PG_CONTROL_FILE_SIZE`.
+    pub async fn write_control_file(&self, state: DBState, redo: XLogRecPtr, checkpoint: XLogRecPtr) {
+        use crate::catalog::pg_control::{
+            CheckPoint, ControlFileData, DBState as _DBState, PG_CONTROL_FILE_SIZE,
+            PG_CONTROL_VERSION,
+        };
+        let _ = _DBState::STARTUP; // keep enum import referenced
+        let Some(data_dir) = self.data_dir() else {
+            return;
+        };
+        // SAFETY: ControlFileData is repr(C) POD; an all-zero start is valid, and
+        // we set the fields recovery reads. Unset fields stay zero (harmless).
+        let mut cf: ControlFileData = unsafe { core::mem::zeroed() };
+        cf.system_identifier = Self::CLUSTER_SYSTEM_IDENTIFIER;
+        cf.pg_control_version = PG_CONTROL_VERSION;
+        cf.state = state;
+        cf.checkPoint = checkpoint;
+        // SAFETY: CheckPoint is repr(C) POD; zero it then set the redo point.
+        let mut ckpt: CheckPoint = unsafe { core::mem::zeroed() };
+        ckpt.redo = redo;
+        ckpt.ThisTimeLineID = INSERT_TLI;
+        cf.checkPointCopy = ckpt;
+        cf.xlog_seg_size = self.wal_seg_size as u32;
+
+        // Serialize the struct bytes, compute + store the CRC (over all but the
+        // trailing crc field), pad to the physical file size.
+        let sz = core::mem::size_of::<ControlFileData>();
+        // SAFETY: reading the POD struct as bytes.
+        let raw = unsafe {
+            core::slice::from_raw_parts(std::ptr::from_ref(&cf).cast::<u8>(), sz)
+        };
+        let mut buf = raw.to_vec();
+        let crc_off = core::mem::offset_of!(ControlFileData, crc);
+        let mut crc = crate::port::pg_crc32c::init_crc32c();
+        crc = crate::port::pg_crc32c::comp_crc32c(crc, &buf[..crc_off]);
+        crc = crate::port::pg_crc32c::fin_crc32c(crc);
+        buf[crc_off..crc_off + 4].copy_from_slice(&crc.to_ne_bytes());
+        buf.resize(PG_CONTROL_FILE_SIZE, 0);
+
+        let path = Self::control_file_path(&data_dir);
+        if let Some(parent) = path.parent() {
+            let _ = crate::storage::io_backend::mkdir_all(parent.to_path_buf()).await;
+        }
+        let io = self.io_of();
+        let (file, _permit) = io
+            .open(&path, OpenFlags::create_read_write())
+            .await
+            .expect("open pg_control");
+        io.write_at(&file, &buf, 0).await.expect("write pg_control");
+        io.fsync(&file).await;
+    }
+
+    /// PG `ReadControlFile`: read the control file if present. Returns `None` when
+    /// there is no control file (a fresh cluster that never checkpointed) or the
+    /// CRC does not validate.
+    pub async fn read_control_file(&self) -> Option<crate::catalog::pg_control::ControlFileData> {
+        use crate::catalog::pg_control::ControlFileData;
+        let data_dir = self.data_dir()?;
+        let path = Self::control_file_path(&data_dir);
+        let io = self.io_of();
+        let (file, _permit) = io.open(&path, OpenFlags::read_only()).await.ok()?;
+        let sz = core::mem::size_of::<ControlFileData>();
+        let mut buf = vec![0u8; sz];
+        let n = io.read_at(&file, &mut buf, 0).await.ok()?;
+        if n < sz {
+            return None;
+        }
+        // Validate the CRC.
+        let crc_off = core::mem::offset_of!(ControlFileData, crc);
+        let stored = u32::from_ne_bytes(buf[crc_off..crc_off + 4].try_into().ok()?);
+        let mut crc = crate::port::pg_crc32c::init_crc32c();
+        crc = crate::port::pg_crc32c::comp_crc32c(crc, &buf[..crc_off]);
+        crc = crate::port::pg_crc32c::fin_crc32c(crc);
+        if crc != stored {
+            return None;
+        }
+        // SAFETY: buf holds a valid, CRC-checked ControlFileData image.
+        let cf = unsafe { std::ptr::read_unaligned(buf.as_ptr().cast::<ControlFileData>()) };
+        Some(cf)
+    }
+
+    /// The cluster system identifier used in WAL long-page headers. There is no
+    /// initdb-set random id yet, so a fixed nonzero constant is used (the reader
+    /// only cross-checks it against itself). TODO(initdb): random per-cluster id.
+    const CLUSTER_SYSTEM_IDENTIFIER: u64 = 0x5045_5050_4552_4442; // "PEPPERDB"
 
     #[cfg(test)]
     fn fsync_count(&self) -> u64 {

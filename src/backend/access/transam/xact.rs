@@ -327,6 +327,16 @@ fn in_scope() -> bool {
     XACT.try_with(|_| ()).is_ok()
 }
 
+/// True iff a per-task xact scope exists. The WAL assembler uses this to decide
+/// whether it may read the current transaction's xid: unlike
+/// `is_transaction_state_or_false` (which is only true for TRANS_INPROGRESS),
+/// this stays true across TRANS_COMMIT/TRANS_ABORT so the commit/abort records
+/// carry the committing xid (matching C, where `XLogRecordAssemble` calls
+/// `GetCurrentTransactionIdIfAny` unconditionally).
+pub fn in_transaction_scope() -> bool {
+    in_scope()
+}
+
 /// Borrow the per-task xact state synchronously. NEVER hold the returned borrow
 /// across an `.await` (rules s5).
 fn with_xact<R>(f: impl FnOnce(&mut XactState) -> R) -> R {
@@ -2668,10 +2678,87 @@ const _: () = {
 // Recovery / rmgr description (out of foundation)
 // ===========================================================================
 
-/// xact.c `xact_redo`. WAL replay is recovery, out of the foundation.
+/// xact.c `xact_redo` (sync rmgr entry). Recovery drives [`xact_redo_async`]
+/// directly (the clog status write is async), so this sync shim is unused.
 pub fn xact_redo(_record: &mut crate::access::xlogreader::XLogReaderState) {
-    // TODO(recovery): xact_redo_commit / xact_redo_abort / prepare / assignment.
-    unimplemented!("xact_redo is recovery (out of foundation)")
+    unimplemented!("xact redo is driven by the async recovery loop")
+}
+
+/// xact.c `xact_redo`: replay a transaction COMMIT or ABORT record by recording
+/// the transaction's (and any subtransactions') final status in clog. This is
+/// what makes replayed data visible: a heap tuple's xmin is only visible once its
+/// xact is marked committed in clog. The commit/abort record carries the xid in
+/// its header; the subxact list (if any) follows the optional xinfo word.
+pub async fn xact_redo_async(
+    shared: &Arc<SharedState>,
+    record: &crate::access::xlogreader::DecodedXLogRecord,
+) {
+    use crate::access::clog::XidStatus;
+    use crate::access::xact::{
+        XACT_XINFO_HAS_SUBXACTS, XLOG_XACT_ABORT, XLOG_XACT_COMMIT, XLOG_XACT_HAS_INFO,
+        XLOG_XACT_OPMASK,
+    };
+
+    let info = record.info();
+    let xid = record.header.xid;
+    let main = record.get_data().unwrap_or_default();
+
+    // Parse the optional subxact list: after the fixed body (xact_time: 8 bytes)
+    // comes an xinfo word (only if XLOG_XACT_HAS_INFO), then, if xinfo has the
+    // SUBXACTS flag, an i32 count followed by that many xids.
+    let subxacts = parse_redo_subxacts(main, info);
+
+    let opcode = info & XLOG_XACT_OPMASK;
+    let status = if opcode == XLOG_XACT_COMMIT {
+        XidStatus::Committed
+    } else if opcode == XLOG_XACT_ABORT {
+        XidStatus::Aborted
+    } else {
+        crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("xact_redo: unimplemented xact opcode {opcode:#x} (staged: prepared 2PC)")
+        );
+        return;
+    };
+
+    // Recovery sets the status directly with an invalid LSN (the WAL is already
+    // durable at this point during replay; no async-commit LSN gating needed).
+    shared
+        .clog()
+        .set_tree_status(xid, &subxacts, status, INVALID_XLOG_REC_PTR)
+        .await;
+
+    let _ = (XACT_XINFO_HAS_SUBXACTS, XLOG_XACT_HAS_INFO);
+}
+
+/// Extract the committed/aborted subtransaction xids from a commit/abort record's
+/// main data. Layout: xact_time(8) [xinfo(4) if HAS_INFO] [nsubxacts(4) + xids if
+/// xinfo has SUBXACTS]. Sub-records other than subxacts are not parsed here (the
+/// foundation emits at most subxacts + relfilelocators, and only subxacts affect
+/// clog).
+fn parse_redo_subxacts(main: &[u8], info: u8) -> Vec<TransactionId> {
+    use crate::access::xact::{XACT_XINFO_HAS_SUBXACTS, XLOG_XACT_HAS_INFO};
+    if info & XLOG_XACT_HAS_INFO == 0 || main.len() < 12 {
+        return Vec::new();
+    }
+    // Skip xact_time (8), read xinfo (4).
+    let xinfo = u32::from_ne_bytes(main[8..12].try_into().expect("xinfo word"));
+    if xinfo & XACT_XINFO_HAS_SUBXACTS == 0 || main.len() < 16 {
+        return Vec::new();
+    }
+    let n = i32::from_ne_bytes(main[12..16].try_into().expect("nsubxacts")).max(0) as usize;
+    let mut out = Vec::with_capacity(n);
+    let mut off = 16;
+    for _ in 0..n {
+        if off + 4 > main.len() {
+            break;
+        }
+        out.push(TransactionId(u32::from_ne_bytes(
+            main[off..off + 4].try_into().expect("subxact xid"),
+        )));
+        off += 4;
+    }
+    out
 }
 
 #[cfg(test)]

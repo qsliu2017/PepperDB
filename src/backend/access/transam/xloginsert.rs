@@ -430,11 +430,13 @@ fn assemble(
     partial_crc = comp_crc32c(partial_crc, &hdr);
     partial_crc = comp_crc32c(partial_crc, &payload);
 
-    // xl_xid: C stamps GetCurrentTransactionIdIfAny() (xloginsert.c:926). That
-    // accessor reads the current xact frame's xid, returning Invalid when none is
-    // assigned; the no-scope emitters (log_newpage/FPI/tests) have no xid, so we
-    // gate on a scope-tolerant predicate and stamp 0 there -- same bytes C emits.
-    let xl_xid = if crate::backend::access::transam::xact::is_transaction_state_or_false() {
+    // xl_xid: C stamps GetCurrentTransactionIdIfAny() (xloginsert.c:926)
+    // unconditionally -- it reads the current xact frame's xid, returning Invalid
+    // when none is assigned. We gate only on xact-scope presence (not on
+    // TRANS_INPROGRESS) so the commit/abort records, assembled in the TRANS_COMMIT
+    // /TRANS_ABORT states, still carry the committing xid; the no-scope emitters
+    // (log_newpage/FPI/tests) have no scope and stamp 0 -- same bytes C emits.
+    let xl_xid = if crate::backend::access::transam::xact::in_transaction_scope() {
         crate::access::xact::GetCurrentTransactionIdIfAny().map_or(0, |x| x.0)
     } else {
         0

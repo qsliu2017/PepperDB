@@ -10,3 +10,4 @@ pub mod nbtsearch;
 pub mod nbtsort;
 pub mod nbtree;
 pub mod nbtutils;
+pub mod nbtxlog;

@@ -47,9 +47,11 @@ pub fn CLOGShmemSize(nbuffers: usize) -> usize {
 pub const CLOG_ZEROPAGE: u8 = 0x00;
 pub const CLOG_TRUNCATE: u8 = 0x10;
 
-/// clog.c clog_redo: deferred to recovery (out of foundation).
+/// clog.c clog_redo (sync rmgr entry). Recovery drives the async
+/// `backend::access::transam::clog::clog_redo` directly (buffer/SLRU I/O is
+/// async), so this sync shim is unused by the redo loop.
 pub fn clog_redo(_record: &mut XLogReaderState) {
-    crate::backend::access::transam::clog::clog_redo();
+    unimplemented!("clog redo is driven by the async recovery loop")
 }
 
 /// clog.c clog_desc: format a clog WAL record (recovery tooling, deferred).

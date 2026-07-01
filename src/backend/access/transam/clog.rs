@@ -353,10 +353,35 @@ pub async fn clogsyncfiletag(
     clog.sync_file_tag(ftag).await
 }
 
-/// clog.c clog_redo: replay clog WAL. TODO(recovery): the rmgr redo path is
-/// sync and out of foundation; deferred to recovery.
-pub fn clog_redo() {
-    unimplemented!("clog_redo deferred to recovery (step out of foundation)")
+/// clog.c clog_redo: replay a CLOG WAL record. ZEROPAGE zeroes (and durably
+/// writes) a fresh clog page; TRUNCATE removes obsolete segments. The commit/
+/// abort status bits are NOT set here -- xact_redo re-performs those from the
+/// transaction records, exactly as C does.
+pub async fn clog_redo(clog: &SlruCtl, info: u8, main_data: &[u8]) {
+    match info & 0xF0 {
+        crate::access::clog::CLOG_ZEROPAGE => {
+            // main data = the page number to zero (int).
+            debug_assert!(main_data.len() >= 4);
+            let pageno = i64::from(i32::from_ne_bytes([
+                main_data[0], main_data[1], main_data[2], main_data[3],
+            ]));
+            let slot = clog.zero_page(pageno).await;
+            clog.write_page(slot).await;
+        }
+        crate::access::clog::CLOG_TRUNCATE => {
+            // xl_clog_truncate: pageno (i64) then oldestXact (u32) then db oid.
+            debug_assert!(main_data.len() >= 8);
+            let mut p = [0u8; 8];
+            p.copy_from_slice(&main_data[0..8]);
+            let pageno = i64::from_ne_bytes(p);
+            clog.set_latest_page_number(pageno);
+            clog.truncate(pageno).await;
+        }
+        other => crate::elog!(
+            crate::utils::elog::ERROR,
+            format!("clog_redo: unknown clog opcode {other:#x}")
+        ),
+    }
 }
 
 /// clog.c clog_identify: name the clog WAL opcode.

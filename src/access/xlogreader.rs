@@ -69,6 +69,7 @@ pub trait PageRead: XLogReaderRoutine {
 }
 
 /// One decoded backup block reference within a record.
+#[derive(Clone)]
 pub struct DecodedBkpBlock {
     pub in_use: bool,
 
@@ -102,6 +103,7 @@ pub struct DecodedBkpBlock {
 /// The decoded contents of a record. In C this is one contiguous allocation
 /// with main_data and per-block data trailing the header; here the trailing
 /// data become owned/borrowed Rust values and the FAM `blocks[]` becomes a Vec.
+#[derive(Clone)]
 pub struct DecodedXLogRecord {
     // Private member used for resource management.
     pub size: usize,     // total size of decoded record

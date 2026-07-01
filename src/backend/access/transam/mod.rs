@@ -11,4 +11,6 @@ pub mod xact;
 pub mod xlog;
 pub mod xloginsert;
 pub mod xlogreader;
+pub mod xlogrecovery;
 pub mod xlogstats;
+pub mod xlogutils;
