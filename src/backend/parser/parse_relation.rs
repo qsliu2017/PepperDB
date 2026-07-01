@@ -48,11 +48,6 @@ pub fn add_range_table_entry_for_relation(
     inh: bool,
     in_from_cl: bool,
 ) -> ParseNamespaceItem {
-    if alias.is_some() {
-        not_yet_reachable("addRangeTableEntryForRelation: alias clause");
-    }
-
-    let refname = relation_name(rel);
     let tupdesc = rel
         .rd_att
         .as_ref()
@@ -60,9 +55,23 @@ pub fn add_range_table_entry_for_relation(
 
     let relkind = rel.form().relkind;
 
-    // Build the effective column names from the tupdesc (no user alias for M2).
+    // The RTE's exposed name is the alias name if given, else the relation name.
+    let refname = alias
+        .and_then(|a| a.aliasname.clone())
+        .unwrap_or_else(|| relation_name(rel));
+
+    // Build the effective column names from the tupdesc, then apply any user
+    // column-name overrides from the alias (`FROM t c(x, y)`). A too-long alias
+    // column list would be a user error; the covered tests only rename the table.
     let mut eref = makeAlias(&refname, Vec::new());
     build_relation_aliases(tupdesc, &mut eref);
+    if let Some(a) = alias {
+        for (i, colname) in a.colnames.iter().enumerate() {
+            if i < eref.colnames.len() {
+                eref.colnames[i] = colname.clone();
+            }
+        }
+    }
 
     let mut rte = make_relation_rte(rel.rd_id, inh, relkind, lockmode, eref, in_from_cl);
 

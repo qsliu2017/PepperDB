@@ -90,7 +90,10 @@ pub fn typenameTypeIdAndMod(_pstate: &mut ParseState, type_name: &TypeName) -> (
     if let Some(oid) =
         get_sys_cache_oid(SysCacheIdentifier::TYPENAMENSP, Anum_pg_type_oid as i16, &keys)
     {
-        return (oid, -1);
+        // A pre-encoded typemod (e.g. the char(n)/varchar(n) grammar sets
+        // `type_name.typemod = VARHDRSZ + n` directly, since the ArrayType-based
+        // `typmodin` path is staged) is carried through verbatim.
+        return (oid, type_name.typemod);
     }
     // Negative-cache / cold miss: release any held tuple and raise.
     if let Some(t) = search_sys_cache(SysCacheIdentifier::TYPENAMENSP, &keys) {
@@ -183,10 +186,19 @@ pub fn parseTypeString(str: &str, _escontext: Option<&mut Node>) -> Option<(Oid,
     use crate::nodes::value::String_;
 
     let name = str.trim();
+
+    // Character typmod forms (`char(4)`, `varchar(4)`, `character(4)`,
+    // `character varying(4)`, `bpchar(4)`): parse `<kind>(n)` and encode the typmod
+    // as VARHDRSZ+n. This is the `pg_input_is_valid('abcde','char(4)')` path (the
+    // full type-name grammar mode is not wired for arbitrary typmodin yet).
+    if let Some((typoid, typmod)) = try_char_typmod_string(name) {
+        return Some((typoid, typmod));
+    }
+
     // Reject anything the bare-name fast path cannot faithfully handle; those need
     // the type-name grammar (typmod, arrays, SETOF, %TYPE, quoted identifiers).
     if name.is_empty()
-        || name.contains(['(', ')', '[', ']', '"', '%', ' ', '\t', '\n'])
+        || name.contains(['(', ')', '[', ']', '"', '%', '\t', '\n'])
         || name.to_ascii_lowercase().starts_with("setof")
     {
         unimplemented!("parseTypeString: type-name grammar forms (typmod/array/SETOF) deferred");
@@ -212,6 +224,41 @@ pub fn parseTypeString(str: &str, _escontext: Option<&mut Node>) -> Option<(Oid,
     // TYPE NAME is a hard error, distinct from a bad VALUE which is the soft one).
     let mut pstate = crate::parser::parse_node::make_parsestate(None);
     Some(typenameTypeIdAndMod(&mut pstate, &type_name))
+}
+
+/// Parse a `<kind>(n)` character-type string (`char(4)`, `varchar(4)`,
+/// `character(4)`, `character varying(4)`, `bpchar(4)`) to `(typeOid, VARHDRSZ+n)`.
+/// Returns `None` if the string is not one of these forms (so the caller falls
+/// back to the bare-name path). Resolves the type OID through the warm TYPENAMENSP
+/// syscache, exactly like the bare-name path.
+fn try_char_typmod_string(s: &str) -> Option<(Oid, i32)> {
+    use crate::backend::utils::cache::syscache::get_sys_cache_oid;
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    const VARHDRSZ: i32 = 4;
+    let open = s.find('(')?;
+    if !s.trim_end().ends_with(')') {
+        return None;
+    }
+    let head = s[..open].trim().to_ascii_lowercase();
+    let inner = s[open + 1..s.rfind(')')?].trim();
+    let typname = match head.as_str() {
+        "char" | "character" | "bpchar" | "nchar" => "bpchar",
+        "varchar" | "character varying" | "char varying" => "varchar",
+        _ => return None,
+    };
+    let n: i32 = inner.parse().ok()?;
+
+    let nd = crate::backend::catalog::heap::name_data(typname);
+    let keys = [
+        crate::postgres::NameGetDatum(&nd),
+        crate::postgres::ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
+    ];
+    let oid = get_sys_cache_oid(
+        crate::utils::syscache::SysCacheIdentifier::TYPENAMENSP,
+        crate::catalog::pg_type::Anum_pg_type_oid as i16,
+        &keys,
+    )?;
+    Some((oid, VARHDRSZ + n))
 }
 
 /// true if typeid is composite, or domain over composite, but not RECORD

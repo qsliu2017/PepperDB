@@ -35,8 +35,9 @@ use crate::access::toast_compression::INVALID_COMPRESSION_METHOD;
 use crate::c::{NameData, NameStr, NAMEDATALEN, PG_INT16_MAX};
 use crate::catalog::catalog::IsCatalogRelationOid;
 use crate::catalog::genbki::{
-    BOOLOID, DATEOID, DEFAULT_COLLATION_OID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID, INT8OID,
-    NUMERICOID, OIDOID, RECORDOID, TEXTARRAYOID, TEXTOID, TIMESTAMPOID,
+    BOOLOID, BPCHAROID, BYTEAOID, CHAROID, DATEOID, DEFAULT_COLLATION_OID, FLOAT4OID, FLOAT8OID,
+    INT2OID, INT4OID, INT8OID, NAMEOID, NUMERICOID, OIDOID, RECORDOID, TEXTARRAYOID, TEXTOID,
+    TIMESTAMPOID, VARCHAROID,
 };
 use crate::catalog::pg_attribute::{FormData_pg_attribute, ATTRIBUTE_FIXED_PART_SIZE};
 use crate::catalog::pg_type::{
@@ -575,6 +576,7 @@ impl TupleDescData {
 
     /// `TupleDescInitBuiltinEntry`: initialize an attribute for one of a small
     /// set of builtin types without catalog access (for catalog-less processes).
+    #[allow(clippy::too_many_lines, reason = "a flat per-builtin-type layout table; one arm per supported type")]
     pub fn init_builtin_entry(
         &mut self,
         attribute_number: AttrNumber,
@@ -680,6 +682,38 @@ impl TupleDescData {
             att.attbyval = false;
             att.attalign = TYPALIGN_INT;
             att.attstorage = TYPSTORAGE_MAIN;
+            att.attcompression = INVALID_COMPRESSION_METHOD as i8;
+            att.attcollation = InvalidOid;
+        } else if oidtypeid == BPCHAROID || oidtypeid == VARCHAROID {
+            // bpchar/varchar: collatable varlena, EXTENDED storage, int-aligned.
+            att.attlen = -1;
+            att.attbyval = false;
+            att.attalign = TYPALIGN_INT;
+            att.attstorage = TYPSTORAGE_EXTENDED;
+            att.attcompression = INVALID_COMPRESSION_METHOD as i8;
+            att.attcollation = DEFAULT_COLLATION_OID;
+        } else if oidtypeid == BYTEAOID {
+            // bytea: non-collatable varlena, EXTENDED storage, int-aligned.
+            att.attlen = -1;
+            att.attbyval = false;
+            att.attalign = TYPALIGN_INT;
+            att.attstorage = TYPSTORAGE_EXTENDED;
+            att.attcompression = INVALID_COMPRESSION_METHOD as i8;
+            att.attcollation = InvalidOid;
+        } else if oidtypeid == NAMEOID {
+            // name: fixed 64-byte, char-aligned, C-collation.
+            att.attlen = 64;
+            att.attbyval = false;
+            att.attalign = TYPALIGN_CHAR;
+            att.attstorage = TYPSTORAGE_PLAIN;
+            att.attcompression = INVALID_COMPRESSION_METHOD as i8;
+            att.attcollation = crate::catalog::genbki::C_COLLATION_OID;
+        } else if oidtypeid == CHAROID {
+            // "char": single byte, pass-by-value, char-aligned.
+            att.attlen = 1;
+            att.attbyval = true;
+            att.attalign = TYPALIGN_CHAR;
+            att.attstorage = TYPSTORAGE_PLAIN;
             att.attcompression = INVALID_COMPRESSION_METHOD as i8;
             att.attcollation = InvalidOid;
         } else {

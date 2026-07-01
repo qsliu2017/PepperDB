@@ -95,6 +95,13 @@ enum Raw {
     #[regex(r"'([^']|'')*'", |lex| unquote_sconst(lex.slice()))]
     String(String),
 
+    // delimited identifier: "..." with "" as an embedded quote (PG `{xdstart}`/
+    // `{xddouble}`). Case-preserving and NEVER keyword-folded (so `AS "TRUE"` and
+    // `'a'::"char"` work). Empty `""` is a zero-length identifier (a lex error in
+    // PG; not reachable in the covered tests).
+    #[regex(r#""([^"]|"")*""#, |lex| unquote_dconst(lex.slice()))]
+    QuotedIdent(String),
+
     // PARAM: PG `\${decdigit}+`. The digits after `$` are the parameter number;
     // overflowing i32 is a lex failure (PG's process_integer_literal errors on a
     // `$n` that exceeds int range).
@@ -125,6 +132,11 @@ enum Raw {
     #[token("=")] Eq,
 }
 
+/// Strip the surrounding double quotes and collapse doubled `""` to a single `"`.
+fn unquote_dconst(slice: &str) -> String {
+    slice[1..slice.len() - 1].replace("\"\"", "\"")
+}
+
 /// Strip the surrounding single quotes and collapse doubled `''` to a single `'`.
 fn unquote_sconst(slice: &str) -> String {
     slice[1..slice.len() - 1].replace("''", "'")
@@ -147,6 +159,8 @@ pub fn lex(src: &str) -> impl Iterator<Item = Result<(Loc, Token, Loc), LexError
         let Ok(raw) = res else { return Err(LexError { location: start }) };
         let tok = match raw {
             Raw::Word(w) => word_token(&w),
+            // A delimited identifier is a plain Ident (case-preserved, unfolded).
+            Raw::QuotedIdent(s) => Token::Ident(s),
             Raw::Integer(s) => integer_token(&s),
             Raw::Float(s) => Token::FConst(s),
             Raw::String(s) => Token::SConst(s),

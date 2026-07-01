@@ -89,16 +89,29 @@ pub async fn get_type_output_info_populate(shared: &Arc<SharedState>, r#type: Oi
 /// The builtin int2/4/8 output map (bootstrap-window fallback; the int types are
 /// pass-by-value fixed-length, so `typIsVarlena` is false).
 fn builtin_type_output(r#type: Oid) -> (Oid, bool) {
-    use crate::catalog::genbki::{BOOLOID, INT2OID, INT4OID, INT8OID};
-    use crate::utils::fmgroids::{F_BOOLOUT, F_INT2OUT, F_INT4OUT, F_INT8OUT};
-    let typoutput = match r#type {
-        t if t == INT4OID => F_INT4OUT,
-        t if t == INT2OID => F_INT2OUT,
-        t if t == INT8OID => F_INT8OUT,
-        t if t == BOOLOID => F_BOOLOUT,
+    use crate::catalog::genbki::{
+        BOOLOID, BPCHAROID, BYTEAOID, CHAROID, INT2OID, INT4OID, INT8OID, NAMEOID, TEXTOID,
+        VARCHAROID,
+    };
+    use crate::utils::fmgroids::{
+        F_BOOLOUT, F_BPCHAROUT, F_BYTEAOUT, F_CHAROUT, F_INT2OUT, F_INT4OUT, F_INT8OUT, F_NAMEOUT,
+        F_TEXTOUT, F_VARCHAROUT,
+    };
+    // The varlena string types set typIsVarlena (typlen -1); name/char are fixed.
+    let (typoutput, is_varlena) = match r#type {
+        t if t == INT4OID => (F_INT4OUT, false),
+        t if t == INT2OID => (F_INT2OUT, false),
+        t if t == INT8OID => (F_INT8OUT, false),
+        t if t == BOOLOID => (F_BOOLOUT, false),
+        t if t == CHAROID => (F_CHAROUT, false),
+        t if t == NAMEOID => (F_NAMEOUT, false),
+        t if t == TEXTOID => (F_TEXTOUT, true),
+        t if t == BPCHAROID => (F_BPCHAROUT, true),
+        t if t == VARCHAROID => (F_VARCHAROUT, true),
+        t if t == BYTEAOID => (F_BYTEAOUT, true),
         _ => cache_lookup_failed(r#type),
     };
-    (typoutput, false)
+    (typoutput, is_varlena)
 }
 
 /// Raise PG's "cache lookup failed for type" error (used when a sync accessor hits
@@ -197,15 +210,24 @@ pub fn type_is_collatable(typid: Oid) -> bool {
     crate::c::OidIsValid(get_typcollation(typid))
 }
 
-/// Builtin layout for the int2/4/8 types (bootstrap-window fallback).
+/// Builtin layout for the base types reachable in the bootstrap window (before
+/// the pg_type catalog is warm): the int/bool set plus the step-10 string types.
 fn builtin_typlenbyvalalign(typid: Oid) -> Option<(i16, bool, u8)> {
-    use crate::catalog::genbki::{BOOLOID, INT2OID, INT4OID, INT8OID};
+    use crate::catalog::genbki::{
+        BOOLOID, BPCHAROID, BYTEAOID, CHAROID, INT2OID, INT4OID, INT8OID, NAMEOID, TEXTOID,
+        VARCHAROID,
+    };
     use crate::catalog::pg_type::{TYPALIGN_CHAR, TYPALIGN_DOUBLE, TYPALIGN_INT, TYPALIGN_SHORT};
     let r = match typid {
         t if t == BOOLOID => (1, true, TYPALIGN_CHAR as u8),
         t if t == INT2OID => (2, true, TYPALIGN_SHORT as u8),
         t if t == INT4OID => (4, true, TYPALIGN_INT as u8),
         t if t == INT8OID => (8, true, TYPALIGN_DOUBLE as u8),
+        t if t == CHAROID => (1, true, TYPALIGN_CHAR as u8),
+        t if t == NAMEOID => (64, false, TYPALIGN_CHAR as u8),
+        t if t == TEXTOID || t == BPCHAROID || t == VARCHAROID || t == BYTEAOID => {
+            (-1, false, TYPALIGN_INT as u8)
+        }
         _ => return None,
     };
     Some(r)
@@ -295,6 +317,21 @@ pub fn get_func_rettype(funcid: Oid) -> Oid {
     rettype
 }
 
+/// `get_func_nargs` (SYNC): the function's declared input-argument count
+/// (pronargs). Used by the typmod-coercion path to decide whether to append the
+/// typmod / isExplicit arguments to a length-coercion FuncExpr.
+#[must_use]
+pub fn get_func_nargs(funcid: Oid) -> i16 {
+    let Some(tuple) = search_sys_cache(SysCacheIdentifier::PROCOID, &[ObjectIdGetDatum(funcid)])
+    else {
+        proc_cache_lookup_failed(funcid);
+    };
+    // SAFETY: `tuple` is a held PROCOID hit -> a pg_proc row.
+    let nargs = unsafe { proc_form(&*tuple) }.pronargs;
+    release_sys_cache(tuple);
+    nargs
+}
+
 // ---------------------------------------------------------------------------
 // M4 (step 23): cast-resolution accessors (getTypeInputInfo / get_cast_func /
 // get_type_category_preferred). Sync (warm-hit) readers over the syscache.
@@ -348,13 +385,25 @@ pub async fn get_type_input_info_populate(shared: &Arc<SharedState>, r#type: Oid
 /// The builtin int2/4/8 input map (bootstrap-window fallback; typioparam is the
 /// type's own OID since none is an array type).
 fn builtin_type_input(r#type: Oid) -> (Oid, Oid) {
-    use crate::catalog::genbki::{BOOLOID, INT2OID, INT4OID, INT8OID};
-    use crate::utils::fmgroids::{F_BOOLIN, F_INT2IN, F_INT4IN, F_INT8IN};
+    use crate::catalog::genbki::{
+        BOOLOID, BPCHAROID, BYTEAOID, CHAROID, INT2OID, INT4OID, INT8OID, NAMEOID, TEXTOID,
+        VARCHAROID,
+    };
+    use crate::utils::fmgroids::{
+        F_BOOLIN, F_BPCHARIN, F_BYTEAIN, F_CHARIN, F_INT2IN, F_INT4IN, F_INT8IN, F_NAMEIN,
+        F_TEXTIN, F_VARCHARIN,
+    };
     let typinput = match r#type {
         t if t == INT4OID => F_INT4IN,
         t if t == INT2OID => F_INT2IN,
         t if t == INT8OID => F_INT8IN,
         t if t == BOOLOID => F_BOOLIN,
+        t if t == CHAROID => F_CHARIN,
+        t if t == NAMEOID => F_NAMEIN,
+        t if t == TEXTOID => F_TEXTIN,
+        t if t == BPCHAROID => F_BPCHARIN,
+        t if t == VARCHAROID => F_VARCHARIN,
+        t if t == BYTEAOID => F_BYTEAIN,
         _ => cache_lookup_failed(r#type),
     };
     (typinput, r#type)

@@ -187,9 +187,61 @@ pub fn coerce_to_target_type(
     let result = coerce_type(
         pstate, expr, exprtype, targettype, targettypmod, ccontext, cformat, location,
     );
-    // coerce_type_typmod (length coercion) grows later; the M4 types reaching here
-    // (numeric/float/int/date) need no typmod coercion for the milestone queries.
+    // Apply a length/typmod coercion if the target carries a typmod (char(n)/
+    // varchar(n) etc.). PG calls coerce_type_typmod here with hideInputCoercion.
+    let result = if targettypmod >= 0 {
+        coerce_type_typmod(result, targettype, targettypmod, ccontext, cformat, location)
+    } else {
+        result
+    };
     Some(result)
+}
+
+/// PG `coerce_type_typmod`: apply the target type's length-coercion function (from
+/// pg_cast where source==target) so a char(n)/varchar(n) value is blank-padded or
+/// truncated to `target_type_mod`. A negative typmod needs no coercion.
+fn coerce_type_typmod(
+    node: Node,
+    target_type_id: Oid,
+    target_type_mod: i32,
+    ccontext: CoercionContext,
+    cformat: CoercionForm,
+    location: i32,
+) -> Node {
+    use crate::nodes::nodeFuncs::exprTypmod;
+
+    if target_type_mod == exprTypmod(&node) {
+        return node;
+    }
+    if target_type_mod < 0 {
+        // A RelabelType would expose the typmod; the milestone queries never depend
+        // on the exposed typmod for a negative target, so we return the node as-is.
+        return node;
+    }
+    let mut funcid = InvalidOid;
+    let pathtype = find_typmod_coercion_function(target_type_id, &mut funcid);
+    if pathtype == CoercionPathType::None {
+        return node;
+    }
+    build_coercion_expression(
+        node, pathtype, funcid, target_type_id, target_type_mod, ccontext, cformat, location,
+    )
+}
+
+/// PG `find_typmod_coercion_function`: look up the type's typmod-coercion function
+/// in pg_cast (the row where castsource == casttarget == `type_id`). Returns
+/// `(Func, funcid)` when found, else `None`. (True array types would switch to the
+/// element type + ArrayCoerce; that grows with arrays.)
+fn find_typmod_coercion_function(type_id: Oid, funcid: &mut Oid) -> CoercionPathType {
+    use crate::backend::utils::cache::lsyscache::get_cast_info;
+    *funcid = InvalidOid;
+    if let Some((castfunc, _ctx, _method)) = get_cast_info(type_id, type_id)
+        && crate::c::OidIsValid(castfunc)
+    {
+        *funcid = castfunc;
+        return CoercionPathType::Func;
+    }
+    CoercionPathType::None
 }
 
 /// PG `can_coerce_type` (M4 subset): can each input type be coerced to the matching
@@ -321,11 +373,48 @@ fn build_coercion_expression(
     cformat: CoercionForm,
     location: i32,
 ) -> Node {
-    let _ = target_type_mod;
     match pathtype {
         CoercionPathType::Func => {
-            // A single-argument FuncExpr over the cast function (length-coercion
-            // two-arg casts grow with typmod coercion).
+            use crate::catalog::genbki::{BOOLOID, INT4OID};
+            use crate::backend::nodes::makefuncs::make_const;
+            use crate::postgres::{BoolGetDatum, Int32GetDatum};
+            // A length-coercion function takes up to 3 args: (value, typmod,
+            // isExplicit). Append the extra Consts per the function's pronargs
+            // (PG build_coercion_expression). Only a typmod'd target (>= 0) can need
+            // the extra args, so we read pronargs (a PROCOID hit) only then; a plain
+            // 1-arg cast func (numeric/int/... coercion) skips the read entirely,
+            // which also avoids a cold PROCOID lookup in the sync transform.
+            let nargs = if target_type_mod >= 0 {
+                crate::backend::utils::cache::lsyscache::get_func_nargs(funcid)
+            } else {
+                1
+            };
+            let mut args = vec![node];
+            if nargs >= 2 {
+                // The target typmod as an int4 Const.
+                args.push(Node::Const(Box::new(make_const(
+                    INT4OID,
+                    -1,
+                    InvalidOid,
+                    4,
+                    Int32GetDatum(target_type_mod),
+                    false,
+                    true,
+                ))));
+            }
+            if nargs >= 3 {
+                // isExplicit = (cformat != COERCE_IMPLICIT_CAST).
+                let is_explicit = !matches!(cformat, CoercionForm::IMPLICIT_CAST);
+                args.push(Node::Const(Box::new(make_const(
+                    BOOLOID,
+                    -1,
+                    InvalidOid,
+                    1,
+                    BoolGetDatum(is_explicit),
+                    false,
+                    true,
+                ))));
+            }
             let f = crate::nodes::primnodes::FuncExpr {
                 funcid,
                 funcresulttype: target_type_id,
@@ -334,7 +423,7 @@ fn build_coercion_expression(
                 funcformat: cformat,
                 funccollid: InvalidOid,
                 inputcollid: InvalidOid,
-                args: vec![node],
+                args,
                 location,
             };
             Node::FuncExpr(Box::new(f))

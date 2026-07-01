@@ -1482,14 +1482,16 @@ async fn warm_expr_caches(
 ) {
     use crate::backend::catalog::heap::name_data;
     use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
-    use crate::catalog::genbki::{BOOLOID, INT4OID};
+    use crate::catalog::genbki::{BOOLOID, BPCHAROID, INT4OID, TEXTOID, VARCHAROID};
     use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
     use crate::catalog::pg_operator::FormData_pg_operator;
     use crate::postgres::{NameGetDatum, ObjectIdGetDatum};
     use crate::utils::syscache::SysCacheIdentifier;
 
-    // Candidate operand types: the namespace column types + int4 + bool.
-    let mut types: Vec<Oid> = vec![INT4OID, BOOLOID];
+    // Candidate operand types: the namespace column types + int4 + bool + the
+    // string types (so `text`/`bpchar`/`varchar` operators warm for FROM-less
+    // string queries whose operands are function results, not columns).
+    let mut types: Vec<Oid> = vec![INT4OID, BOOLOID, TEXTOID, BPCHAROID, VARCHAROID];
     for nsitem in &pstate.p_namespace {
         for col in &nsitem.nscolumns {
             if col.vartype != Oid::new(0) && !types.contains(&col.vartype) {
@@ -1582,7 +1584,7 @@ async fn warm_expr_caches(
 async fn warm_func_call_caches(shared: &Arc<SharedState>, fn_names: &[String], types: &[Oid]) {
     use crate::backend::catalog::heap::name_data;
     use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
-    use crate::catalog::genbki::{TEXTOID, UNKNOWNOID};
+    use crate::catalog::genbki::{BYTEAOID, INT4OID, TEXTOID, UNKNOWNOID};
     use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
     use crate::postgres::{NameGetDatum, ObjectIdGetDatum, PointerGetDatum};
     use crate::utils::syscache::SysCacheIdentifier as Sc;
@@ -1591,7 +1593,9 @@ async fn warm_func_call_caches(shared: &Arc<SharedState>, fn_names: &[String], t
     }
 
     let mut fn_types: Vec<Oid> = types.to_vec();
-    for t in [TEXTOID, UNKNOWNOID] {
+    // TEXT/UNKNOWN so string-literal args resolve; BYTEA for md5/length(bytea)
+    // and encode/decode; INT4 for the (text,int4) funcs (left/right/repeat/lpad).
+    for t in [TEXTOID, UNKNOWNOID, BYTEAOID, INT4OID] {
         if !fn_types.contains(&t) {
             fn_types.push(t);
         }
@@ -1647,8 +1651,8 @@ async fn warm_insert_values_type_caches(shared: &Arc<SharedState>, stmt: &Insert
     use crate::backend::catalog::heap::name_data;
     use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
     use crate::catalog::genbki::{
-        BOOLOID, DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID, INT8OID, NUMERICOID, TEXTOID,
-        TIMESTAMPOID,
+        BOOLOID, BPCHAROID, BYTEAOID, CHAROID, DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID,
+        INT8OID, NAMEOID, NUMERICOID, TEXTOID, TIMESTAMPOID, VARCHAROID,
     };
     use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
     use crate::postgres::{NameGetDatum, ObjectIdGetDatum};
@@ -1666,6 +1670,8 @@ async fn warm_insert_values_type_caches(shared: &Arc<SharedState>, stmt: &Insert
         (BOOLOID, "bool"), (INT2OID, "int2"), (INT4OID, "int4"), (INT8OID, "int8"),
         (FLOAT4OID, "float4"), (FLOAT8OID, "float8"), (NUMERICOID, "numeric"),
         (DATEOID, "date"), (TIMESTAMPOID, "timestamp"), (TEXTOID, "text"),
+        (BPCHAROID, "bpchar"), (VARCHAROID, "varchar"), (BYTEAOID, "bytea"),
+        (NAMEOID, "name"), (CHAROID, "char"),
     ];
     for &(oid, name) in base_types {
         if let Some(t) = search_sys_cache_populate(shared, Sc::TYPEOID, &[ObjectIdGetDatum(oid)]).await {
@@ -1674,6 +1680,32 @@ async fn warm_insert_values_type_caches(shared: &Arc<SharedState>, stmt: &Insert
         let nd = name_data(name);
         let keys = [NameGetDatum(&nd), ObjectIdGetDatum(PG_CATALOG_NAMESPACE)];
         if let Some(t) = search_sys_cache_populate(shared, Sc::TYPENAMENSP, &keys).await {
+            release_sys_cache(t);
+        }
+    }
+
+    // The length-coercion (typmod) self-casts + the string cross-casts: an INSERT
+    // into a char(n)/varchar(n) column applies coerce_type_typmod, which reads the
+    // bpchar->bpchar / varchar->varchar pg_cast rows via CASTSOURCETARGET, and the
+    // unknown-literal path may need text<->bpchar<->varchar.
+    let cast_pairs: &[(Oid, Oid)] = &[
+        (BPCHAROID, BPCHAROID), (VARCHAROID, VARCHAROID),
+        (TEXTOID, BPCHAROID), (TEXTOID, VARCHAROID),
+        (VARCHAROID, TEXTOID), (VARCHAROID, BPCHAROID),
+        (CHAROID, BPCHAROID), (NAMEOID, BPCHAROID),
+    ];
+    for &(src, tgt) in cast_pairs {
+        let keys = [ObjectIdGetDatum(src), ObjectIdGetDatum(tgt)];
+        if let Some(t) = search_sys_cache_populate(shared, Sc::CASTSOURCETARGET, &keys).await {
+            release_sys_cache(t);
+        }
+    }
+    // PROCOID for the length-coercion functions (build_coercion_expression reads
+    // pronargs to append the typmod/isExplicit args): bpchar(668), varchar(669).
+    for func in [668u32, 669] {
+        if let Some(t) =
+            search_sys_cache_populate(shared, Sc::PROCOID, &[ObjectIdGetDatum(Oid::new(func))]).await
+        {
             release_sys_cache(t);
         }
     }

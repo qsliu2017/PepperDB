@@ -11,6 +11,11 @@ use crate::c::text;
 use crate::mb::pg_wchar::pg_wchar;
 use crate::postgres_ext::Oid;
 
+// The working matcher lives in `engine`; re-export the clean internal API the
+// regexp.rs adt layer compiles/executes against. (`pg_regcomp`/`pg_regexec`
+// below remain the Spencer-shaped C surface, still staged.)
+pub use super::engine::{Regex, RegexError};
+
 /// C: `typedef long pg_regoff_t;` - signed, holds off_t/ssize_t.
 pub type pg_regoff_t = isize;
 

@@ -2887,6 +2887,74 @@ pub fn numeric_to_number(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
 }
 
 // ===========================================================================
+// str_tolower / str_toupper / str_initcap and the SQL lower()/upper()/initcap()
+// (formatting.c). The default (C/database-encoding) path folds ASCII plus the
+// Unicode simple-case mapping; the ICU/locale collation path is staged.
+// ===========================================================================
+
+/// Borrow a non-toasted varlena's payload bytes.
+///
+/// SAFETY: `p` is a valid 4-byte-or-short-header varlena that outlives the borrow.
+unsafe fn fmt_varlena_bytes<'a>(p: *mut u8) -> &'a [u8] {
+    let len = crate::varatt::VARSIZE_ANY_EXHDR(p);
+    core::slice::from_raw_parts(crate::varatt::VARDATA_ANY(p), len)
+}
+
+/// PG `str_tolower`: lowercase a UTF-8 buffer (default collation path).
+#[must_use]
+pub fn str_tolower(s: &str) -> String {
+    s.chars().flat_map(char::to_lowercase).collect()
+}
+
+/// PG `str_toupper`: uppercase a UTF-8 buffer (default collation path).
+#[must_use]
+pub fn str_toupper(s: &str) -> String {
+    s.chars().flat_map(char::to_uppercase).collect()
+}
+
+/// PG `str_initcap`: uppercase the first letter of each word, lowercase the rest.
+/// A "word" starts after any non-alphanumeric character (`wasalnum` tracking).
+#[must_use]
+pub fn str_initcap(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut wasalnum = false;
+    for c in s.chars() {
+        if wasalnum {
+            out.extend(c.to_lowercase());
+        } else {
+            out.extend(c.to_uppercase());
+        }
+        wasalnum = c.is_alphanumeric();
+    }
+    out
+}
+
+/// Read the sole text arg as a `String` and apply `f`, returning a text Datum.
+fn text_map(fcinfo: &FunctionCallInfoBaseData, f: impl Fn(&str) -> String) -> Datum {
+    let p = DatumGetPointer(fcinfo.args[0].value);
+    // SAFETY: the arg is a valid non-toasted text varlena.
+    let bytes = unsafe { fmt_varlena_bytes(p) };
+    let s = String::from_utf8_lossy(bytes);
+    let out = f(&s);
+    PointerGetDatum(cstring_to_text(&out).cast::<u8>())
+}
+
+/// PG `lower`: SQL `lower(text)`.
+pub fn lower(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    text_map(fcinfo, str_tolower)
+}
+
+/// PG `upper`: SQL `upper(text)`.
+pub fn upper(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    text_map(fcinfo, str_toupper)
+}
+
+/// PG `initcap`: SQL `initcap(text)`.
+pub fn initcap(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    text_map(fcinfo, str_initcap)
+}
+
+// ===========================================================================
 // Tests
 // ===========================================================================
 

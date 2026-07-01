@@ -209,7 +209,7 @@ async fn transform_table_entry(
         pstate,
         &rel,
         LockMode::AccessShareLock as i32,
-        None,
+        rv.alias.as_deref(),
         rv.inh,
         true,
     );

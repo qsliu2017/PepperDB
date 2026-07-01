@@ -416,13 +416,13 @@ macro_rules! basetype {
 /// preferred members of category N, so coercion picks them as common types).
 fn m2_base_types() -> Vec<BootBaseType> {
     use crate::catalog::genbki::{
-        BOOLOID, DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID, INT8OID, NAMEOID, NUMERICOID,
-        OIDOID, TEXTOID, TIMESTAMPOID,
+        BOOLOID, BPCHAROID, BYTEAOID, CHAROID, DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID,
+        INT8OID, NAMEOID, NUMERICOID, OIDOID, TEXTOID, TIMESTAMPOID, VARCHAROID,
     };
     use crate::catalog::pg_type::{
         TYPALIGN_CHAR, TYPALIGN_DOUBLE, TYPALIGN_INT, TYPALIGN_SHORT, TYPCATEGORY_BOOLEAN,
-        TYPCATEGORY_DATETIME, TYPCATEGORY_NUMERIC, TYPCATEGORY_STRING, TYPSTORAGE_EXTENDED,
-        TYPSTORAGE_MAIN, TYPSTORAGE_PLAIN,
+        TYPCATEGORY_DATETIME, TYPCATEGORY_INTERNAL, TYPCATEGORY_NUMERIC, TYPCATEGORY_STRING,
+        TYPCATEGORY_USER, TYPSTORAGE_EXTENDED, TYPSTORAGE_MAIN, TYPSTORAGE_PLAIN,
     };
     use crate::utils::fmgroids as f;
     // FLOAT8PASSBYVAL is true on 64-bit (Datum is 8 bytes); we target 64-bit only.
@@ -439,6 +439,13 @@ fn m2_base_types() -> Vec<BootBaseType> {
         basetype!(NUMERICOID, "numeric", len => -1, byval => false, TYPALIGN_INT, TYPSTORAGE_MAIN, TYPCATEGORY_NUMERIC, preferred => false, f::F_NUMERIC_IN, f::F_NUMERIC_OUT),
         basetype!(DATEOID, "date", len => 4, byval => true, TYPALIGN_INT, TYPSTORAGE_PLAIN, TYPCATEGORY_DATETIME, preferred => false, f::F_DATE_IN, f::F_DATE_OUT),
         basetype!(TIMESTAMPOID, "timestamp", len => 8, byval => true, TYPALIGN_DOUBLE, TYPSTORAGE_PLAIN, TYPCATEGORY_DATETIME, preferred => false, f::F_TIMESTAMP_IN, f::F_TIMESTAMP_OUT),
+        // step 10 (string types): the SQL character types + bytea + the ad-hoc
+        // one-byte "char". bpchar/varchar carry typmods (VARHDRSZ+n) via their in
+        // functions; category S with text preferred so string coercion picks text.
+        basetype!(CHAROID, "char", len => 1, byval => true, TYPALIGN_CHAR, TYPSTORAGE_PLAIN, TYPCATEGORY_INTERNAL, preferred => false, f::F_CHARIN, f::F_CHAROUT),
+        basetype!(BPCHAROID, "bpchar", len => -1, byval => false, TYPALIGN_INT, TYPSTORAGE_EXTENDED, TYPCATEGORY_STRING, preferred => false, f::F_BPCHARIN, f::F_BPCHAROUT),
+        basetype!(VARCHAROID, "varchar", len => -1, byval => false, TYPALIGN_INT, TYPSTORAGE_EXTENDED, TYPCATEGORY_STRING, preferred => false, f::F_VARCHARIN, f::F_VARCHAROUT),
+        basetype!(BYTEAOID, "bytea", len => -1, byval => false, TYPALIGN_INT, TYPSTORAGE_EXTENDED, TYPCATEGORY_USER, preferred => false, f::F_BYTEAIN, f::F_BYTEAOUT),
     ]
 }
 

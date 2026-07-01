@@ -1,6 +1,7 @@
 //! Directory module: src/include/regex
 
 // === scaffold: child modules (Phase 0) ===
+pub mod engine;
 pub mod regcustom;
 pub mod regerrs;
 pub mod regex;

@@ -286,7 +286,10 @@ async fn typename_type_id_and_mod(shared: &Arc<SharedState>, type_name: &TypeNam
         });
         unreachable!("ereport(ERROR) diverges");
     };
-    (typoid, -1)
+    // A pre-encoded typemod (char(n)/varchar(n) grammar sets `type_name.typemod =
+    // VARHDRSZ + n` directly, since the ArrayType typmodin path is staged) flows to
+    // pg_attribute.atttypmod so INSERT applies the length coercion.
+    (typoid, type_name.typemod)
 }
 
 // ===========================================================================

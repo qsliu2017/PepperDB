@@ -155,10 +155,45 @@ pub fn make_op(
         unimplemented!("make_op: prefix operator resolution not yet reachable for this milestone");
     };
 
+    let unknown_oid = crate::catalog::genbki::UNKNOWNOID;
+
     let ltype_id = exprType(&ltree);
     let rtype_id = exprType(&rtree);
-    let tup = oper(pstate, opname, ltype_id, rtype_id, false, location)
-        .unwrap_or_else(|| unreachable!("oper(no_error=false) raises on failure"));
+
+    // Resolve the operator. On an exact-match miss where exactly one operand is an
+    // UNKNOWN literal, substitute the known side's type for the unknown side and
+    // retry (PG `oper_select_candidate`'s single-unknown resolution), so `text = 'x'`
+    // and friends resolve to `text = text` with the literal coerced.
+    let (tup, ltree, rtree) = match oper(pstate, opname, ltype_id, rtype_id, true, location) {
+        Some(t) => (t, ltree, rtree),
+        None if rtype_id == unknown_oid && ltype_id != unknown_oid => {
+            let t = oper(pstate, opname, ltype_id, ltype_id, false, location)
+                .unwrap_or_else(|| op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location));
+            let rtree = coerce_operand_unknown(pstate, rtree, ltype_id, location);
+            (t, ltree, rtree)
+        }
+        None if ltype_id == unknown_oid && rtype_id != unknown_oid => {
+            let t = oper(pstate, opname, rtype_id, rtype_id, false, location)
+                .unwrap_or_else(|| op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location));
+            let ltree = coerce_operand_unknown(pstate, ltree, rtype_id, location);
+            (t, ltree, rtree)
+        }
+        // Binary-coercible string types (bpchar/varchar) have no own operators;
+        // they resolve to the `text` operator via the binary varchar/bpchar->text
+        // cast. When both operands are string-category and an exact match failed,
+        // relabel both to text and retry (a narrow `oper_select_candidate`).
+        None if is_binary_text_coercible(ltype_id) && is_binary_text_coercible(rtype_id) => {
+            const TEXTOID: Oid = crate::catalog::genbki::TEXTOID;
+            let t = oper(pstate, opname, TEXTOID, TEXTOID, true, location)
+                .unwrap_or_else(|| op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location));
+            (
+                t,
+                relabel_to_text(ltree, ltype_id, location),
+                relabel_to_text(rtree, rtype_id, location),
+            )
+        }
+        None => op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location),
+    };
 
     // SAFETY: `tup` is a held OPEROID hit -> a pg_operator row.
     let opform = unsafe { oper_form(&*tup) };
@@ -195,6 +230,50 @@ pub fn make_op(
         location,
     };
     Node::OpExpr(Box::new(result))
+}
+
+/// Coerce an UNKNOWN-literal operand to `target_type` for operator resolution
+/// (PG runs `coerce_type` on the unknown arg once the candidate is chosen). Uses
+/// the implicit coercion context; a fresh ParseState is enough (the position is
+/// carried by the Const's own location).
+fn coerce_operand_unknown(_pstate: &ParseState, operand: Node, target_type: Oid, location: i32) -> Node {
+    use crate::nodes::primnodes::{CoercionContext, CoercionForm};
+    const UNKNOWNOID: Oid = crate::catalog::genbki::UNKNOWNOID;
+    let mut ps = crate::parser::parse_node::make_parsestate(None);
+    crate::backend::parser::parse_coerce::coerce_type(
+        &mut ps,
+        operand,
+        UNKNOWNOID,
+        target_type,
+        -1,
+        CoercionContext::IMPLICIT,
+        CoercionForm::IMPLICIT_CAST,
+        location,
+    )
+}
+
+/// True if `typid` is binary-coercible to `text` for operator resolution
+/// (bpchar/varchar/text itself). These share text's operators via the binary cast.
+fn is_binary_text_coercible(typid: Oid) -> bool {
+    use crate::catalog::genbki::{BPCHAROID, TEXTOID, VARCHAROID};
+    typid == TEXTOID || typid == BPCHAROID || typid == VARCHAROID
+}
+
+/// Wrap `operand` (of `srctype`) in a binary RelabelType to `text` so the resolved
+/// `text` operator sees the right type. A text operand is returned unchanged.
+fn relabel_to_text(operand: Node, srctype: Oid, location: i32) -> Node {
+    use crate::catalog::genbki::TEXTOID;
+    if srctype == TEXTOID {
+        return operand;
+    }
+    Node::RelabelType(Box::new(crate::nodes::primnodes::RelabelType {
+        arg: Some(operand),
+        resulttype: TEXTOID,
+        resulttypmod: -1,
+        resultcollid: InvalidOid,
+        relabelformat: crate::nodes::primnodes::CoercionForm::IMPLICIT_CAST,
+        location,
+    }))
 }
 
 /// PG `op_error`: raise the "operator does not exist" error. Diverges (>= ERROR).

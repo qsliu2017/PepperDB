@@ -288,6 +288,7 @@ fn gen_fmgroids(procs: &[Proc]) -> String {
 const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     // utils/adt/int.c (step 02) + bool.c/name.c/varlena.c (step 11):
     // the builtin prosrc -> Rust impl map, kept globally sorted by prosrc.
+    ("ascii", "crate::backend::utils::adt::varlena::ascii"),
     ("bool_accum", "crate::backend::utils::adt::bool::bool_accum"),
     ("bool_accum_inv", "crate::backend::utils::adt::bool::bool_accum_inv"),
     ("bool_alltrue", "crate::backend::utils::adt::bool::bool_alltrue"),
@@ -306,6 +307,22 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("boolrecv", "crate::backend::utils::adt::bool::boolrecv"),
     ("boolsend", "crate::backend::utils::adt::bool::boolsend"),
     ("booltext", "crate::backend::utils::adt::bool::booltext"),
+    // utils/adt/varchar.c (step 10): bpchar (CHARACTER(n)) + varchar surface.
+    ("bpchar", "crate::backend::utils::adt::varchar::bpchar"),
+    ("bpchar_name", "crate::backend::utils::adt::varchar::bpchar_name"),
+    ("bpcharcmp", "crate::backend::utils::adt::varchar::bpcharcmp"),
+    ("bpchareq", "crate::backend::utils::adt::varchar::bpchareq"),
+    ("bpcharge", "crate::backend::utils::adt::varchar::bpcharge"),
+    ("bpchargt", "crate::backend::utils::adt::varchar::bpchargt"),
+    ("bpcharin", "crate::backend::utils::adt::varchar::bpcharin"),
+    ("bpcharle", "crate::backend::utils::adt::varchar::bpcharle"),
+    ("bpcharlen", "crate::backend::utils::adt::varchar::bpcharlen"),
+    ("bpcharlt", "crate::backend::utils::adt::varchar::bpcharlt"),
+    ("bpcharne", "crate::backend::utils::adt::varchar::bpcharne"),
+    ("bpcharout", "crate::backend::utils::adt::varchar::bpcharout"),
+    ("bpcharsend", "crate::backend::utils::adt::varchar::bpcharsend"),
+    ("bpchartypmodin", "crate::backend::utils::adt::varchar::bpchartypmodin"),
+    ("bpchartypmodout", "crate::backend::utils::adt::varchar::bpchartypmodout"),
     // access/nbtree/nbtcompare.c (step 13): btree comparison support fns.
     ("btboolcmp", "crate::backend::access::nbtree::nbtcompare::btboolcmp"),
     ("btcharcmp", "crate::backend::access::nbtree::nbtcompare::btcharcmp"),
@@ -337,7 +354,11 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("btoidsortsupport", "crate::backend::access::nbtree::nbtcompare::btoidsortsupport"),
     ("btoidvectorcmp", "crate::backend::access::nbtree::nbtcompare::btoidvectorcmp"),
     ("btnamesortsupport", "crate::backend::utils::adt::name::btnamesortsupport"),
+    ("btrim", "crate::backend::utils::adt::varlena::btrim"),
+    ("btrim1", "crate::backend::utils::adt::varlena::btrim1"),
     ("bttextcmp", "crate::backend::utils::adt::varlena::bttextcmp"),
+    ("bytea_substr", "crate::backend::utils::adt::varlena::bytea_substr"),
+    ("bytea_substr_no_len", "crate::backend::utils::adt::varlena::bytea_substr_no_len"),
     ("byteacat", "crate::backend::utils::adt::varlena::byteacat"),
     ("byteacmp", "crate::backend::utils::adt::varlena::byteacmp"),
     ("byteaeq", "crate::backend::utils::adt::varlena::byteaeq"),
@@ -345,12 +366,19 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("byteagt", "crate::backend::utils::adt::varlena::byteagt"),
     ("byteain", "crate::backend::utils::adt::varlena::byteain"),
     ("byteale", "crate::backend::utils::adt::varlena::byteale"),
+    ("bytealike", "crate::backend::utils::adt::like::bytealike"),
     ("bytealt", "crate::backend::utils::adt::varlena::bytealt"),
+    ("bytealtrim", "crate::backend::utils::adt::varlena::bytealtrim"),
     ("byteane", "crate::backend::utils::adt::varlena::byteane"),
+    ("byteanlike", "crate::backend::utils::adt::like::byteanlike"),
     ("byteaoctetlen", "crate::backend::utils::adt::varlena::byteaoctetlen"),
     ("byteaout", "crate::backend::utils::adt::varlena::byteaout"),
+    ("byteapos", "crate::backend::utils::adt::varlena::byteapos"),
     ("bytearecv", "crate::backend::utils::adt::varlena::bytearecv"),
+    ("byteartrim", "crate::backend::utils::adt::varlena::byteartrim"),
     ("byteasend", "crate::backend::utils::adt::varlena::byteasend"),
+    ("byteatrim", "crate::backend::utils::adt::varlena::byteatrim"),
+    ("char_bpchar", "crate::backend::utils::adt::varchar::char_bpchar"),
     ("char_text", "crate::backend::utils::adt::char::char_text"),
     ("chareq", "crate::backend::utils::adt::char::chareq"),
     ("charge", "crate::backend::utils::adt::char::charge"),
@@ -363,6 +391,7 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("charrecv", "crate::backend::utils::adt::char::charrecv"),
     ("charsend", "crate::backend::utils::adt::char::charsend"),
     ("chartoi4", "crate::backend::utils::adt::char::chartoi4"),
+    ("chr", "crate::backend::utils::adt::varlena::chr"),
     ("dacos", "crate::backend::utils::adt::float::dacos"),
     ("dacosd", "crate::backend::utils::adt::float::dacosd"),
     ("dacosh", "crate::backend::utils::adt::float::dacosh"),
@@ -512,6 +541,7 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("in_range_int4_int2", "crate::backend::utils::adt::int::in_range_int4_int2"),
     ("in_range_int4_int4", "crate::backend::utils::adt::int::in_range_int4_int4"),
     ("in_range_int4_int8", "crate::backend::utils::adt::int::in_range_int4_int8"),
+    ("initcap", "crate::backend::utils::adt::formatting::initcap"),
     ("int24div", "crate::backend::utils::adt::int::int24div"),
     ("int24eq", "crate::backend::utils::adt::int::int24eq"),
     ("int24ge", "crate::backend::utils::adt::int::int24ge"),
@@ -604,16 +634,34 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("int8out", "crate::backend::utils::adt::int::int8out"),
     ("int8pl", "crate::backend::utils::adt::int::int8pl"),
     ("int8smaller", "crate::backend::utils::adt::int::int8smaller"),
+    ("like_escape", "crate::backend::utils::adt::like::like_escape"),
+    ("like_escape_bytea", "crate::backend::utils::adt::like::like_escape_bytea"),
+    // utils/adt/formatting.c (step 10): lower()/upper()/initcap().
+    ("lower", "crate::backend::utils::adt::formatting::lower"),
+    // utils/adt/cryptohashfuncs.c (step 10): MD5 hash builtins.
+    ("ltrim", "crate::backend::utils::adt::varlena::ltrim"),
+    ("ltrim1", "crate::backend::utils::adt::varlena::ltrim1"),
+    ("md5_bytea", "crate::backend::utils::adt::cryptohashfuncs::md5_bytea"),
+    ("md5_text", "crate::backend::utils::adt::cryptohashfuncs::md5_text"),
+    ("name_bpchar", "crate::backend::utils::adt::varchar::name_bpchar"),
     ("nameconcatoid", "crate::backend::utils::adt::name::nameconcatoid"),
     ("nameeq", "crate::backend::utils::adt::name::nameeq"),
     ("namege", "crate::backend::utils::adt::name::namege"),
     ("namegt", "crate::backend::utils::adt::name::namegt"),
+    ("nameiclike", "crate::backend::utils::adt::like::nameiclike"),
+    ("nameicnlike", "crate::backend::utils::adt::like::nameicnlike"),
+    ("nameicregexeq", "crate::backend::utils::adt::regexp::nameicregexeq"),
+    ("nameicregexne", "crate::backend::utils::adt::regexp::nameicregexne"),
     ("namein", "crate::backend::utils::adt::name::namein"),
     ("namele", "crate::backend::utils::adt::name::namele"),
+    ("namelike", "crate::backend::utils::adt::like::namelike"),
     ("namelt", "crate::backend::utils::adt::name::namelt"),
     ("namene", "crate::backend::utils::adt::name::namene"),
+    ("namenlike", "crate::backend::utils::adt::like::namenlike"),
     ("nameout", "crate::backend::utils::adt::name::nameout"),
     ("namerecv", "crate::backend::utils::adt::name::namerecv"),
+    ("nameregexeq", "crate::backend::utils::adt::regexp::nameregexeq"),
+    ("nameregexne", "crate::backend::utils::adt::regexp::nameregexne"),
     ("namesend", "crate::backend::utils::adt::name::namesend"),
     ("float4_numeric", "crate::backend::utils::adt::numeric::float4_numeric"),
     ("float8_numeric", "crate::backend::utils::adt::numeric::float8_numeric"),
@@ -718,26 +766,98 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("oidvectorout", "crate::backend::utils::adt::oid::oidvectorout"),
     ("oidvectorrecv", "crate::backend::utils::adt::oid::oidvectorrecv"),
     ("oidvectorsend", "crate::backend::utils::adt::oid::oidvectorsend"),
+    ("parse_ident", "crate::backend::utils::adt::varlena::parse_ident"),
+    ("quote_ident", "crate::backend::utils::adt::varlena::quote_ident"),
+    ("quote_literal", "crate::backend::utils::adt::varlena::quote_literal"),
+    ("quote_nullable", "crate::backend::utils::adt::varlena::quote_nullable"),
     ("radians", "crate::backend::utils::adt::float::radians"),
+    ("repeat", "crate::backend::utils::adt::varlena::text_repeat"),
+    ("replace_text", "crate::backend::utils::adt::varlena::replace_text"),
+    ("regexp_count", "crate::backend::utils::adt::regexp::regexp_count"),
+    ("regexp_count_no_flags", "crate::backend::utils::adt::regexp::regexp_count_no_flags"),
+    ("regexp_count_no_start", "crate::backend::utils::adt::regexp::regexp_count_no_start"),
+    ("regexp_instr", "crate::backend::utils::adt::regexp::regexp_instr"),
+    ("regexp_instr_no_endoption", "crate::backend::utils::adt::regexp::regexp_instr_no_endoption"),
+    ("regexp_instr_no_flags", "crate::backend::utils::adt::regexp::regexp_instr_no_flags"),
+    ("regexp_instr_no_n", "crate::backend::utils::adt::regexp::regexp_instr_no_n"),
+    ("regexp_instr_no_start", "crate::backend::utils::adt::regexp::regexp_instr_no_start"),
+    ("regexp_instr_no_subexpr", "crate::backend::utils::adt::regexp::regexp_instr_no_subexpr"),
+    ("regexp_like", "crate::backend::utils::adt::regexp::regexp_like"),
+    ("regexp_like_no_flags", "crate::backend::utils::adt::regexp::regexp_like_no_flags"),
+    ("regexp_match", "crate::backend::utils::adt::regexp::regexp_match"),
+    ("regexp_match_no_flags", "crate::backend::utils::adt::regexp::regexp_match_no_flags"),
+    ("regexp_matches", "crate::backend::utils::adt::regexp::regexp_matches"),
+    ("regexp_matches_no_flags", "crate::backend::utils::adt::regexp::regexp_matches_no_flags"),
+    ("regexp_split_to_array", "crate::backend::utils::adt::regexp::regexp_split_to_array"),
+    ("regexp_split_to_array_no_flags", "crate::backend::utils::adt::regexp::regexp_split_to_array_no_flags"),
+    ("regexp_split_to_table", "crate::backend::utils::adt::regexp::regexp_split_to_table"),
+    ("regexp_split_to_table_no_flags", "crate::backend::utils::adt::regexp::regexp_split_to_table_no_flags"),
+    ("regexp_substr", "crate::backend::utils::adt::regexp::regexp_substr"),
+    ("regexp_substr_no_flags", "crate::backend::utils::adt::regexp::regexp_substr_no_flags"),
+    ("regexp_substr_no_n", "crate::backend::utils::adt::regexp::regexp_substr_no_n"),
+    ("regexp_substr_no_start", "crate::backend::utils::adt::regexp::regexp_substr_no_start"),
+    ("regexp_substr_no_subexpr", "crate::backend::utils::adt::regexp::regexp_substr_no_subexpr"),
+    ("rtrim", "crate::backend::utils::adt::varlena::rtrim"),
+    ("rtrim1", "crate::backend::utils::adt::varlena::rtrim1"),
+    ("split_part", "crate::backend::utils::adt::varlena::split_part"),
     ("text_char", "crate::backend::utils::adt::char::text_char"),
+    ("text_concat", "crate::backend::utils::adt::varlena::text_concat"),
+    ("text_concat_ws", "crate::backend::utils::adt::varlena::text_concat_ws"),
+    ("text_format", "crate::backend::utils::adt::varlena::text_format"),
+    ("text_format_nv", "crate::backend::utils::adt::varlena::text_format_nv"),
     ("text_ge", "crate::backend::utils::adt::varlena::text_ge"),
     ("text_gt", "crate::backend::utils::adt::varlena::text_gt"),
     ("text_le", "crate::backend::utils::adt::varlena::text_le"),
+    ("text_left", "crate::backend::utils::adt::varlena::text_left"),
     ("text_lt", "crate::backend::utils::adt::varlena::text_lt"),
+    ("text_reverse", "crate::backend::utils::adt::varlena::text_reverse"),
+    ("text_right", "crate::backend::utils::adt::varlena::text_right"),
     ("text_starts_with", "crate::backend::utils::adt::varlena::text_starts_with"),
     ("text_substr", "crate::backend::utils::adt::varlena::text_substr"),
     ("text_substr_no_len", "crate::backend::utils::adt::varlena::text_substr_no_len"),
     ("textcat", "crate::backend::utils::adt::varlena::textcat"),
     ("texteq", "crate::backend::utils::adt::varlena::texteq"),
+    ("texticlike", "crate::backend::utils::adt::like::texticlike"),
+    ("texticnlike", "crate::backend::utils::adt::like::texticnlike"),
+    ("texticregexeq", "crate::backend::utils::adt::regexp::texticregexeq"),
+    ("texticregexne", "crate::backend::utils::adt::regexp::texticregexne"),
     ("textin", "crate::backend::utils::adt::varlena::textin"),
     ("textlen", "crate::backend::utils::adt::varlena::textlen"),
+    ("textlike", "crate::backend::utils::adt::like::textlike"),
     ("textne", "crate::backend::utils::adt::varlena::textne"),
+    ("textnlike", "crate::backend::utils::adt::like::textnlike"),
     ("textoctetlen", "crate::backend::utils::adt::varlena::textoctetlen"),
     ("textout", "crate::backend::utils::adt::varlena::textout"),
+    ("textoverlay", "crate::backend::utils::adt::varlena::textoverlay"),
+    ("textoverlay_no_len", "crate::backend::utils::adt::varlena::textoverlay_no_len"),
+    ("textpos", "crate::backend::utils::adt::varlena::textpos"),
     ("textrecv", "crate::backend::utils::adt::varlena::textrecv"),
+    ("textregexeq", "crate::backend::utils::adt::regexp::textregexeq"),
+    ("textregexne", "crate::backend::utils::adt::regexp::textregexne"),
+    ("textregexreplace", "crate::backend::utils::adt::regexp::textregexreplace"),
+    ("textregexreplace_extended", "crate::backend::utils::adt::regexp::textregexreplace_extended"),
+    ("textregexreplace_extended_no_flags", "crate::backend::utils::adt::regexp::textregexreplace_extended_no_flags"),
+    ("textregexreplace_extended_no_n", "crate::backend::utils::adt::regexp::textregexreplace_extended_no_n"),
+    ("textregexreplace_noopt", "crate::backend::utils::adt::regexp::textregexreplace_noopt"),
+    ("textregexsubstr", "crate::backend::utils::adt::regexp::textregexsubstr"),
     ("textsend", "crate::backend::utils::adt::varlena::textsend"),
+    ("to_bin32", "crate::backend::utils::adt::varlena::to_bin32"),
+    ("to_bin64", "crate::backend::utils::adt::varlena::to_bin64"),
+    ("to_hex32", "crate::backend::utils::adt::varlena::to_hex32"),
+    ("to_hex64", "crate::backend::utils::adt::varlena::to_hex64"),
+    ("to_oct32", "crate::backend::utils::adt::varlena::to_oct32"),
+    ("to_oct64", "crate::backend::utils::adt::varlena::to_oct64"),
+    ("translate", "crate::backend::utils::adt::varlena::translate"),
     ("unknownin", "crate::backend::utils::adt::varlena::unknownin"),
     ("unknownout", "crate::backend::utils::adt::varlena::unknownout"),
+    ("upper", "crate::backend::utils::adt::formatting::upper"),
+    // utils/adt/varchar.c (step 10): varchar (CHARACTER VARYING(n)) surface.
+    ("varchar", "crate::backend::utils::adt::varchar::varchar"),
+    ("varcharin", "crate::backend::utils::adt::varchar::varcharin"),
+    ("varcharout", "crate::backend::utils::adt::varchar::varcharout"),
+    ("varcharsend", "crate::backend::utils::adt::varchar::varcharsend"),
+    ("varchartypmodin", "crate::backend::utils::adt::varchar::varchartypmodin"),
+    ("varchartypmodout", "crate::backend::utils::adt::varchar::varchartypmodout"),
     ("width_bucket_float8", "crate::backend::utils::adt::float::width_bucket_float8"),
     // utils/adt/date.c + timestamp.c (step 22b): date/time/timetz +
     // timestamp/timestamptz/interval type fns, sorted by prosrc.
@@ -847,6 +967,11 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("pg_input_error_info", "crate::backend::utils::adt::misc::pg_input_error_info"),
     ("pg_input_is_valid", "crate::backend::utils::adt::misc::pg_input_is_valid"),
     ("pg_postmaster_start_time", "crate::backend::utils::adt::timestamp::pg_postmaster_start_time"),
+    // utils/adt/cryptohashfuncs.c (step 10): SHA-2 hash builtins.
+    ("sha224_bytea", "crate::backend::utils::adt::cryptohashfuncs::sha224_bytea"),
+    ("sha256_bytea", "crate::backend::utils::adt::cryptohashfuncs::sha256_bytea"),
+    ("sha384_bytea", "crate::backend::utils::adt::cryptohashfuncs::sha384_bytea"),
+    ("sha512_bytea", "crate::backend::utils::adt::cryptohashfuncs::sha512_bytea"),
     ("statement_timestamp", "crate::backend::utils::adt::timestamp::statement_timestamp"),
     ("time_cmp", "crate::backend::utils::adt::date::time_cmp"),
     ("time_eq", "crate::backend::utils::adt::date::time_eq"),
@@ -1570,6 +1695,18 @@ const M3_PROC_NAMES: &[&str] = &[
     "booleq", "boolne", "boollt", "boolgt", "boolle", "boolge",
     // soft-error type-validation SRF/scalar functions (misc.rs).
     "pg_input_is_valid", "pg_input_error_info",
+    // step 10 (string types): bpchar/varchar I/O + comparison support (unique
+    // names in pg_proc.dat) for operator/function resolution.
+    "bpcharin", "bpcharout", "varcharin", "varcharout",
+    "bpchareq", "bpcharne", "bpcharlt", "bpcharle", "bpchargt", "bpcharge", "bpcharcmp",
+    "initcap",
+    // text comparison + concat oprcode support (unique names).
+    "texteq", "textne", "text_lt", "text_le", "text_gt", "text_ge", "bttextcmp", "textcat",
+    // step 10 string scalar functions (unique names) the tests call. reverse(3062)
+    // is seeded by OID below. concat/concat_ws/format are variadic-`any` and stage
+    // on get_call_expr_argtype, so they are not seeded here.
+    "replace", "split_part",
+    "translate", "chr", "ascii", "quote_ident",
     // int8 gcd/lcm (int.rs) -- unique names among int8 in pg_proc.dat? No: gcd/lcm
     // are overloaded (int4/int8), so those two overloads are seeded by OID via
     // M3_PROC_OIDS below.
@@ -1585,6 +1722,22 @@ const M3_PROC_OIDS: &[u32] = &[
     1069, // generate_series(int8, int8)       -> setof int8 [generate_series_int8]
     5045, // gcd(int8, int8) -> int8 [int8gcd]
     5047, // lcm(int8, int8) -> int8 [int8lcm]
+    // step 10 (string types): overloaded string builtins picked by exact OID.
+    // NB: the coercion funcs bpchar(668)/varchar(669)/char_bpchar(860)/
+    // name_bpchar(408) are seeded via SEED_PG_PROC_M4_CAST (they are cast
+    // support functions), so they are NOT listed here to avoid a duplicate OID.
+    870,  // lower(text) -> text
+    871,  // upper(text) -> text
+    1317, // length(text) -> int4  [textlen]
+    1318, // length(bpchar) -> int4 [bpcharlen]
+    2010, // length(bytea) -> int4  [byteaoctetlen]
+    1622, // repeat(text, int4) -> text
+    1283, // quote_literal(text) -> text
+    3060, // left(text, int4) -> text
+    3061, // right(text, int4) -> text
+    3062, // reverse(text) -> text
+    2311, // md5(text) -> text
+    2321, // md5(bytea) -> text
 ];
 
 /// The pg_operator entries M3 seeds: the int4-on-int4 arithmetic and comparison
@@ -1611,6 +1764,24 @@ const M3_OPERATORS: &[(&str, &str, &str)] = &[
     (">", "bool", "bool"),
     ("<=", "bool", "bool"),
     (">=", "bool", "bool"),
+    // step 10 (string types): text comparison operators (oprcode texteq/...); the
+    // varchar comparisons resolve to these via the binary-coercible varchar->text
+    // cast, so varchar needs no own operators.
+    ("=", "text", "text"),
+    ("<>", "text", "text"),
+    ("<", "text", "text"),
+    (">", "text", "text"),
+    ("<=", "text", "text"),
+    (">=", "text", "text"),
+    // bpchar comparison operators (blank-insensitive; oprcode bpchareq/...).
+    ("=", "bpchar", "bpchar"),
+    ("<>", "bpchar", "bpchar"),
+    ("<", "bpchar", "bpchar"),
+    (">", "bpchar", "bpchar"),
+    ("<=", "bpchar", "bpchar"),
+    (">=", "bpchar", "bpchar"),
+    // text concatenation operator (oprcode textcat).
+    ("||", "text", "text"),
 ];
 
 /// The M4 casts pg_cast seeds (step 23): the numeric tower (int<->float<->numeric)
@@ -1640,6 +1811,20 @@ const M4_CASTS: &[(&str, &str, &str, char, char)] = &[
     ("int4", "bool", "int4_bool", 'e', 'f'),
     ("bool", "int4", "bool_int4", 'e', 'f'),
     ("bool", "text", "booltext", 'a', 'f'),
+    // step 10 (string types). A prosrc of "" denotes a BINARY-coercible cast
+    // (castfunc 0, castmethod 'b'); the char/varchar typmod SELF-casts and the
+    // cross-type function casts use method 'f' with the coercion prosrc. The
+    // coercion procs (bpchar/varchar/char_bpchar/name_bpchar) are resolved by OID
+    // in M3_PROC_OIDS above; here `by_prosrc` picks them by prosrc (which is
+    // unique except `bpchar`/`varchar`, disambiguated by the 3-arg self-cast).
+    ("text", "bpchar", "", 'i', 'b'),   // binary
+    ("text", "varchar", "", 'i', 'b'),  // binary
+    ("varchar", "text", "", 'i', 'b'),  // binary
+    ("varchar", "bpchar", "", 'i', 'b'), // binary
+    ("bpchar", "bpchar", "bpchar", 'i', 'f'),   // typmod self-coercion (668)
+    ("varchar", "varchar", "varchar", 'i', 'f'), // typmod self-coercion (669)
+    ("char", "bpchar", "char_bpchar", 'a', 'f'),
+    ("name", "bpchar", "name_bpchar", 'a', 'f'),
 ];
 
 /// Emit the M4 pg_cast + cast-support-proc seed tables (step 23). Like the M3
@@ -1691,6 +1876,11 @@ fn gen_m4_cast_seeds(
     out.push_str("pub static SEED_PG_PROC_M4_CAST: &[M3Proc] = &[\n");
     let mut emitted: Vec<u32> = Vec::new();
     for &(_, _, prosrc, _, _) in M4_CASTS {
+        // An empty prosrc denotes a BINARY-coercible cast (castfunc 0); no support
+        // proc to seed.
+        if prosrc.is_empty() {
+            continue;
+        }
         let rec = by_prosrc(prosrc);
         let oid: u32 = rec.get("oid").unwrap().parse().unwrap();
         if emitted.contains(&oid) {
@@ -1724,7 +1914,12 @@ fn gen_m4_cast_seeds(
     for &(src, tgt, prosrc, ctx, meth) in M4_CASTS {
         let source = type_oid(src);
         let target = type_oid(tgt);
-        let func: u32 = by_prosrc(prosrc).get("oid").unwrap().parse().unwrap();
+        // Empty prosrc = binary-coercible cast (castfunc 0).
+        let func: u32 = if prosrc.is_empty() {
+            0
+        } else {
+            by_prosrc(prosrc).get("oid").unwrap().parse().unwrap()
+        };
         let oid = cast_oid(src, tgt);
         out.push_str(&format!(
             "    M4Cast {{ oid: {oid}, source: {source}, target: {target}, func: {func}, \

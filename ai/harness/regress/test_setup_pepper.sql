@@ -57,3 +57,23 @@ INSERT INTO INT4_TBL(f1) VALUES
   ('    -123456'),
   ('2147483647'),  -- largest and smallest values
   ('-2147483647');
+
+-- char/varchar fixtures (char(4)/varchar(4)): the string step (10) parses the
+-- parameterized typmod, so these are restored from upstream test_setup.sql. The
+-- char.sql / varchar.sql tests DROP the TEMP tables they build, then reference
+-- these.
+CREATE TABLE CHAR_TBL(f1 char(4));
+
+INSERT INTO CHAR_TBL (f1) VALUES
+  ('a'),
+  ('ab'),
+  ('abcd'),
+  ('abcd    ');
+
+CREATE TABLE VARCHAR_TBL(f1 varchar(4));
+
+INSERT INTO VARCHAR_TBL (f1) VALUES
+  ('a'),
+  ('ab'),
+  ('abcd'),
+  ('abcd    ');

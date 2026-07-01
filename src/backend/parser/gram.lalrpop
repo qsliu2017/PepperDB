@@ -16,6 +16,7 @@ use crate::backend::parser::parser::{
     make_int_const_at, make_float_const_at, make_string_const_at, make_string_const_cast_at,
     make_bool_const_at,
     do_negate, make_create_stmt, make_column_def_elt, system_type_name, generic_type_name,
+    char_type_name,
     make_insert_stmt, make_values_select, make_column_ref, make_column_ref_star,
     make_bool_const, make_bool_test, make_range_var_table_ref,
     make_a_expr, make_ne_expr, NE_OP_NAME, make_and_expr, make_or_expr, make_not_expr, make_func_call, RawStmtVec,
@@ -170,6 +171,14 @@ extern {
         "LOCAL"    => Token::Keyword("local"),
         "SESSION"  => Token::Keyword("session"),
         "CHARACTERISTICS" => Token::Keyword("characteristics"),
+        // step 10: character-type spellings (CHAR / CHARACTER / VARCHAR / VARYING /
+        // NATIONAL / NCHAR / BPCHAR) for the char(n)/varchar(n) Typename tower.
+        "CHAR_P"    => Token::Keyword("char"),
+        "CHARACTER" => Token::Keyword("character"),
+        "VARCHAR"   => Token::Keyword("varchar"),
+        "VARYING"   => Token::Keyword("varying"),
+        "NATIONAL"  => Token::Keyword("national"),
+        "NCHAR"     => Token::Keyword("nchar"),
         "DEFAULT"  => Token::Keyword("default"),
         "CURRENT"  => Token::Keyword("current"),
         "ISOLATION" => Token::Keyword("isolation"),
@@ -1596,7 +1605,36 @@ SimpleTypename: TypeName = {
     // `text`/`timestamp` ARE keywords and need an explicit arm.
     "TEXT"      => system_type_name("text"),
     "TIMESTAMP" => system_type_name("timestamp"),
+    Character,
     GenericType,
+};
+
+// gram.y `Character` / `CharacterWithLength` / `CharacterWithoutLength`: the SQL
+// character types. `character`/`char`/`nchar`/`national character` -> bpchar (with
+// a default length of 1 when no `(n)` is given); `varchar`/`character varying` ->
+// varchar (no default length -- an unbounded varchar). `char(n)`/`varchar(n)` carry
+// the length as an encoded typmod (see `char_type_name`).
+Character: TypeName = {
+    <c:CharacterKind> "(" <n:"ICONST"> ")" => char_type_name(c, Some(n)),
+    // Bare `char`/`character` (no length) is char(1); bare `varchar` is unbounded.
+    <c:CharacterKind> => {
+        if c == "bpchar" { char_type_name("bpchar", Some(1)) }
+        else { char_type_name(c, None) }
+    },
+};
+
+// The character-type spellings that resolve to `bpchar` vs `varchar`.
+CharacterKind: &'static str = {
+    "CHARACTER" "VARYING" => "varchar",
+    "CHAR_P" "VARYING"    => "varchar",
+    "VARCHAR"             => "varchar",
+    "NATIONAL" "CHARACTER" "VARYING" => "varchar",
+    "NATIONAL" "CHAR_P" "VARYING"    => "varchar",
+    "CHARACTER" => "bpchar",
+    "CHAR_P"    => "bpchar",
+    "NCHAR"     => "bpchar",
+    "NATIONAL" "CHARACTER" => "bpchar",
+    "NATIONAL" "CHAR_P"    => "bpchar",
 };
 
 // gram.y `Numeric`: the built-in numeric/boolean spellings. The integer aliases map

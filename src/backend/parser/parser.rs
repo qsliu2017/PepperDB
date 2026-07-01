@@ -1264,6 +1264,22 @@ pub fn generic_type_name(name: String) -> TypeName {
     crate::nodes::makefuncs::makeTypeNameFromNameList(vec![makeString(name)])
 }
 
+/// gram.y character-type builder: a `pg_catalog.<name>` TypeName carrying a
+/// character-length typmod. gram.y builds `typmods = [Iconst(n)]` and defers the
+/// VARHDRSZ+n encoding to `typenameTypeMod` -> the type's `typmodin`. Since the
+/// bpchar/varchar `typmodin` (ArrayType marshalling) is staged, we encode the
+/// typmod directly here (`VARHDRSZ + n`), which is exactly what those two types'
+/// typmodin computes. `n = None` (no length) leaves typemod = -1.
+#[must_use]
+pub fn char_type_name(name: &str, n: Option<i32>) -> TypeName {
+    const VARHDRSZ: i32 = 4;
+    let mut tn = system_type_name(name);
+    if let Some(len) = n {
+        tn.typemod = VARHDRSZ + len;
+    }
+    tn
+}
+
 /// PG `makeRawStmt`: wrap a top-level statement node in a RawStmt. The
 /// stmt_location / stmt_len text bookkeeping that gram.y threads from `@N` is
 /// added when location tracking is wired through the lexer.
