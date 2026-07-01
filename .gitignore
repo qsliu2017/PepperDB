@@ -25,6 +25,7 @@ ai/harness/*
 ai/harness/regress/*
 !ai/harness/regress/run.sh
 !ai/harness/regress/pepper_schedule
+!ai/harness/regress/test_setup_pepper.sql
 !ai/harness/regress/known_diffs/
 # except the built pg_regress binary and pg_regress run output.
 ai/harness/regress/.build/

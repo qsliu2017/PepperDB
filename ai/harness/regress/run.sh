@@ -69,6 +69,8 @@ BUILD_DIR="$HERE/.build"                             # cached pg_regress (gitign
 RUN_DIR="$HERE/.run"                                 # per-run work dirs (gitignored)
 PG_REGRESS="$BUILD_DIR/pg_regress"
 
+TEST_SETUP_OVERRIDE="$HERE/test_setup_pepper.sql"   # trimmed shared fixtures
+
 PSQL="/opt/homebrew/bin/psql"
 PG_CONFIG="/opt/homebrew/bin/pg_config"
 CLANG="/usr/bin/clang"                               # `cc` is shell-aliased here
@@ -285,6 +287,19 @@ run_pg_regress() {
     local -a names=("$@")
     OUTDIR="$WORK/out"
     mkdir -p "$OUTDIR"
+
+    # test_setup override: pg_regress resolves each test's SQL from
+    # $outputdir/sql/NAME.sql FIRST, then falls back to $inputdir/sql/NAME.sql
+    # (see pg_regress_main.c). The upstream sql/test_setup.sql needs geometry,
+    # inheritance, range types, SQL/C functions and a C extension the server
+    # cannot run yet, so we drop our trimmed fixture into the outputdir slot; all
+    # OTHER tests still come from the untouched upstream sql/ via the fallback.
+    if [[ -f "$TEST_SETUP_OVERRIDE" ]]; then
+        mkdir -p "$OUTDIR/sql"
+        cp "$TEST_SETUP_OVERRIDE" "$OUTDIR/sql/test_setup.sql"
+        log "test_setup override: $OUTDIR/sql/test_setup.sql <- $(basename "$TEST_SETUP_OVERRIDE")"
+    fi
+
     log "running pg_regress over: ${names[*]}"
     # pg_regress itself diffs vs expected/ (that drives its own ok/not-ok), but
     # our authoritative classification is the double-baseline pass below; we let
@@ -320,6 +335,19 @@ classify_one() {
     local known="$KNOWN_DIFFS/$name.out"
 
     [[ -f "$result" ]] || { echo "NORESULT"; return; }
+
+    # test_setup is a trimmed FIXTURE, not a conformance test -- its output
+    # deliberately differs from upstream expected/test_setup.out. Judge it by
+    # "loaded cleanly": no error / dropped connection in its result. This keeps
+    # a broken fixture from silently poisoning every downstream test.
+    if [[ "$name" == "test_setup" ]]; then
+        if grep -Eq '^(ERROR|FATAL|PANIC):|server closed the connection' "$result"; then
+            echo "NEW-DIFF"
+        else
+            echo "PASS"
+        fi
+        return
+    fi
     if [[ -f "$expected" ]] && diff -q "$expected" "$result" >/dev/null 2>&1; then
         echo "PASS"; return
     fi

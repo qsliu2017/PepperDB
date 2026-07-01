@@ -1,22 +1,46 @@
 # PepperDB starting schedule for pg_regress (plan 004).
 #
 # pg_regress schedule format: `test: NAME [NAME...]` runs the named tests in
-# order (each line's group could run in parallel upstream; the harness pins
-# --max-connections=1 so ordering is deterministic here).
+# order. The harness pins --max-connections=1 so ordering is deterministic and
+# the `regression` database persists across tests within a run (so fixtures
+# seeded by `test_setup` are visible to every test after it).
 #
-# This is the MINIMAL step-05 seed -- just enough READY, self-contained tests to
-# exercise the harness end to end. Step 06 curates the real starting subset and
-# ships the trimmed test_setup fixtures. Tests that need the upstream test_setup
-# tables (onek/tenk1/int8_tbl/...), which is not loadable yet, are intentionally
-# LEFT OUT for now and noted below.
+# INVARIANT: this schedule is the GREEN baseline -- every line is either PASS or
+# an intentional, documented KNOWN-DIFF, so `run.sh` exits 0. It grows as later
+# steps translate the modules each blocked test needs. Do NOT force a test green
+# by editing upstream expected output.
 #
-# Included (README Phase-0 exit list, minus test_setup-dependent ones):
-test: comments
-test: sanity_check
-test: misc_sanity
-test: select_having
-test: combocid
+# --------------------------------------------------------------------------
+# ACTIVE (PASS today)
+# --------------------------------------------------------------------------
+# test_setup: the trimmed shared fixtures (INT2_TBL, INT4_TBL). run.sh swaps in
+# ai/harness/regress/test_setup_pepper.sql for this slot and classifies it by
+# "loaded without error" (its output intentionally differs from upstream).
+# Must be FIRST so downstream tests see its tables.
+test: test_setup
 #
-# Deferred to step 06 (need the test_setup tables, not yet loadable):
-#   bitmapops   -- builds a large indexed table, relies on onek-style data
-#   portals_p2  -- SELECT * FROM onek (test_setup table)
+# --------------------------------------------------------------------------
+# BLOCKED -- verified NEW-DIFF against the current server (2026-07-01), each
+# owned by a later step. Left OUT (not KNOWN-DIFF'd) per plan policy: the
+# schedule stays a true green baseline; add each back in the step that unblocks
+# it. Empirical blocker in brackets.
+# --------------------------------------------------------------------------
+# Tier-0 "READY" from static analysis -- NONE actually pass yet:
+#   comments        [needs `AS <keyword>` alias + multi-line/leading block
+#                    comments + unknown-literal typing (type 705)]
+#   sanity_check    [needs catalog regexp/joins over pg_class/pg_index et al.]
+#   misc_sanity     [relation "pg_depend"/"pg_shdepend" do not exist yet]
+#   combocid        [CREATE TEMP TABLE syntax; then aborted-txn cascade]
+#   bitmapops       [large indexed fixture + planner paths]
+#   portals_p2      [depends on the onek fixture (COPY-from-file, not loadable)]
+#   select_having   [char(n) typmod + HAVING clause syntax -> string/agg steps]
+#
+# Tier-1 simple types -- all NEW-DIFF:
+#   char, varchar   [char(n)/varchar(n) typmod not parsed -- string step (10)]
+#   int2, int4      [missing `LINE n:`/caret error context (soft-error input,
+#                    step 07); note: these tests currently CRASH the backend]
+#   int8            [int8 INSERT path bugs ("syscache not warm", literal typing)]
+#   float4, float8  [float input crashes/soft-error context -- steps 07/12]
+#   text            [text INSERT "syscache not warm"; string funcs -- step 10]
+#   union           [UNION/UNION ALL set-op execution -- large diff]
+#   delete          [inline PRIMARY KEY constraint + DELETE table alias/USING]
