@@ -56,8 +56,18 @@ async fn transform_from_clause_item(
     pstate: &mut ParseState,
     n: Node,
 ) -> (Node, ParseNamespaceItem) {
+    // gram.y `transformFromClauseItem` (RangeFunction arm): a function call in FROM.
+    if let Node::RangeFunction(r) = &n {
+        let _ = shared;
+        let nsitem = transform_range_function(pstate, r);
+        let rtr = Node::RangeTblRef(Box::new(crate::nodes::primnodes::RangeTblRef {
+            rtindex: nsitem.rtindex,
+        }));
+        return (rtr, nsitem);
+    }
+
     let Node::RangeVar(rv) = n else {
-        not_yet_reachable("transformFromClauseItem: non-RangeVar FROM item (join/subquery/function)");
+        not_yet_reachable("transformFromClauseItem: non-RangeVar FROM item (join/subquery)");
     };
     // getRTEForSpecialRelationTypes: an unqualified RangeVar matching a visible CTE
     // name becomes an RTE_CTE (the WITH-query reference), not a table open.
@@ -77,6 +87,76 @@ async fn transform_from_clause_item(
         rtindex: nsitem.rtindex,
     }));
     (rtr, nsitem)
+}
+
+/// PG `transformRangeFunction`: transform a function-in-FROM item into an
+/// `RTE_FUNCTION` nsitem. Each raw function expression is transformed with
+/// `EXPR_KIND_FROM_FUNCTION` (like a SELECT output expr), its display name is
+/// captured via `FigureColname`, collations are assigned, and the RTE is built by
+/// `addRangeTableEntryForFunction`. M8 reaches the single-function, no-coldeflist,
+/// no-ORDINALITY, non-LATERAL form (the SRF/record functions the type tests use);
+/// UNNEST expansion, ROWS FROM(), coldeflists, and LATERAL cross-refs grow later.
+fn transform_range_function(
+    pstate: &mut ParseState,
+    r: &crate::nodes::parsenodes::RangeFunction,
+) -> ParseNamespaceItem {
+    use crate::backend::parser::parse_collate::assign_list_collations;
+    use crate::backend::parser::parse_target::FigureColname;
+    use crate::parser::parse_expr::transformExpr;
+    use crate::parser::parse_node::ParseExprKind;
+
+    // We make lateral_only names of this level visible (SQL-spec UNNEST convenience).
+    crate::assert!(!pstate.p_lateral_active);
+    pstate.p_lateral_active = true;
+
+    let mut funcexprs: Vec<Node> = Vec::new();
+    let mut funcnames: Vec<String> = Vec::new();
+    let coldeflists: Vec<Vec<Node>> = Vec::new();
+
+    for fexpr in &r.functions {
+        // ROWS FROM / UNNEST multi-arg expansion and per-function coldeflists are
+        // grow guards; the milestone item is a single plain function call.
+        let last_srf = pstate.p_last_srf.clone();
+        let newfexpr = transformExpr(pstate, Some(fexpr.clone()), ParseExprKind::FromFunction)
+            .unwrap_or_else(|| not_yet_reachable("transformRangeFunction: NULL function expression"));
+
+        // nodeFunctionscan.c requires SRFs to be at the top level of the FROM item.
+        if pstate.p_last_srf != last_srf && pstate.p_last_srf.as_ref() != Some(&newfexpr) {
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+                    .errmsg("set-returning functions must appear at top level of FROM".to_string());
+            });
+            unreachable!("ereport(ERROR) diverges");
+        }
+
+        funcnames.push(FigureColname(fexpr));
+        funcexprs.push(newfexpr);
+    }
+
+    pstate.p_lateral_active = false;
+
+    if !r.coldeflist.is_empty() {
+        not_yet_reachable("transformRangeFunction: top-level column definition list (ROWS FROM/UNNEST)");
+    }
+
+    // Assign collations so the RTE exposes correct collation info for its Vars.
+    assign_list_collations(pstate, &mut funcexprs);
+
+    // Milestone functions are never LATERAL (no cross-references).
+    let is_lateral = r.lateral;
+    if is_lateral {
+        not_yet_reachable("transformRangeFunction: LATERAL function item");
+    }
+
+    crate::backend::parser::parse_relation::add_range_table_entry_for_function(
+        pstate,
+        &funcnames,
+        funcexprs,
+        &coldeflists,
+        r,
+        is_lateral,
+        true,
+    )
 }
 
 /// PG `scanNameSpaceForCTE`: find an unqualified RangeVar's name among the

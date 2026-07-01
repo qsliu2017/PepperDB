@@ -922,6 +922,11 @@ async fn transform_select_stmt_async(
     }
     let where_clause = combine_quals(stmt.whereClause.clone(), join_quals);
 
+    // The FROM clause transform is synchronous and resolves any function-in-FROM
+    // (RangeFunction) through the hit-only PROCNAMEARGSNSP syscache; warm those
+    // function caches before the sync transform runs (the cold per-backend cache).
+    warm_from_function_caches(shared, &from_list).await;
+
     // Process the FROM clause (builds the rangetable + namespace).
     crate::backend::parser::parse_clause::transform_from_clause(shared, pstate, from_list).await;
 
@@ -1240,6 +1245,91 @@ async fn warm_grouping_caches(shared: &Arc<SharedState>, pstate: &ParseState, st
             ];
             if let Some(tup) = search_sys_cache_populate(shared, Sc::OPERNAMENSP, &keys).await {
                 release_sys_cache(tup);
+            }
+        }
+    }
+}
+
+/// Async-warm the function caches a function-in-FROM (`RangeFunction`) resolves
+/// through the SYNC `transformRangeFunction` -> `func_get_detail` path. Each
+/// RangeFunction's `FuncCall` name is warmed in `PROCNAMEARGSNSP` over candidate
+/// argument vectors built from the raw literal arguments' likely types (int4/int8
+/// for integer literals, text for string literals), then `PROCOID` for whatever
+/// row resolves (so `get_func_rettype` / `get_type_input_info` are also warm).
+/// Over-warming unused combinations is harmless (a negative cache entry).
+#[allow(
+    clippy::cast_ptr_alignment,
+    reason = "GETSTRUCT returns the MAXALIGN'd tuple body, aligned for Form_pg_proc"
+)]
+async fn warm_from_function_caches(shared: &Arc<SharedState>, from_list: &[Node]) {
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+    use crate::catalog::genbki::{INT4OID, INT8OID, TEXTOID};
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    use crate::catalog::pg_proc::FormData_pg_proc;
+    use crate::postgres::{NameGetDatum, ObjectIdGetDatum, PointerGetDatum};
+    use crate::utils::syscache::SysCacheIdentifier as Sc;
+
+    for item in from_list {
+        let Node::RangeFunction(rf) = item else { continue };
+        for fexpr in &rf.functions {
+            let Node::FuncCall(fc) = fexpr else { continue };
+            let Some(Node::String_(s)) = fc.funcname.last() else { continue };
+            let name = &s.sval;
+            let nd = name_data(name);
+
+            // Candidate per-argument types from each raw argument's literal kind.
+            let per_arg: Vec<Vec<Oid>> = fc
+                .args
+                .iter()
+                .map(|a| match a {
+                    Node::A_Const(c) => match &c.val {
+                        crate::nodes::parsenodes::ValUnion::Integer(_) => vec![INT4OID, INT8OID],
+                        crate::nodes::parsenodes::ValUnion::String(_) => vec![TEXTOID],
+                        _ => vec![INT4OID, INT8OID, TEXTOID],
+                    },
+                    _ => vec![INT4OID, INT8OID, TEXTOID],
+                })
+                .collect();
+
+            // Cartesian product of the per-argument candidate lists.
+            let mut arglists: Vec<Vec<Oid>> = vec![Vec::new()];
+            for choices in &per_arg {
+                let mut next = Vec::new();
+                for base in &arglists {
+                    for &t in choices {
+                        let mut v = base.clone();
+                        v.push(t);
+                        next.push(v);
+                    }
+                }
+                arglists = next;
+            }
+
+            for argtypes in &arglists {
+                let argvec = crate::utils::builtins::buildoidvector(argtypes);
+                let keys = [
+                    NameGetDatum(&nd),
+                    PointerGetDatum(argvec.cast::<u8>()),
+                    ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
+                ];
+                let Some(tup) = search_sys_cache_populate(shared, Sc::PROCNAMEARGSNSP, &keys).await
+                else {
+                    continue;
+                };
+                let funcid = {
+                    // SAFETY: a held PROCNAMEARGSNSP hit -> a pg_proc row.
+                    let form = unsafe {
+                        &*crate::access::htup_details::GETSTRUCT(&*tup).cast::<FormData_pg_proc>()
+                    };
+                    form.oid
+                };
+                release_sys_cache(tup);
+                if let Some(t) =
+                    search_sys_cache_populate(shared, Sc::PROCOID, &[ObjectIdGetDatum(funcid)]).await
+                {
+                    release_sys_cache(t);
+                }
             }
         }
     }

@@ -22,7 +22,7 @@ use crate::backend::parser::parser::{
     make_type_cast, make_case_expr, make_case_when, make_coalesce_expr, make_min_max_expr,
     make_nullif_expr, make_string_const_cast, make_agg_star_call, make_distinct_func_call,
     make_sortby, insert_select_options, make_index_stmt, make_index_elem,
-    make_join_expr, make_alias, apply_rangevar_alias, apply_join_alias,
+    make_join_expr, make_alias, make_range_function, apply_rangevar_alias, apply_join_alias,
     make_update_stmt, make_delete_stmt, make_merge_stmt, make_set_target,
     make_returning_clause, make_locking_clause, make_merge_when, set_select_locking,
     make_transaction_stmt, make_def_elem_str, make_def_elem_bool, set_variable_local,
@@ -2558,10 +2558,22 @@ TableRef: Node = {
     JoinedTable,
 };
 
-// A non-join FROM atom: a plain (aliased) table or a parenthesized join (aliased).
+// A non-join FROM atom: a plain (aliased) table, a parenthesized join (aliased),
+// or a function call in FROM (gram.y `func_table`).
 TableAtom: Node = {
     <r:QualifiedName> <a:OptAliasClause> => make_range_var_table_ref(apply_rangevar_alias(r, a)),
     "(" <j:JoinedTable> ")" <a:OptAliasClause> => apply_join_alias(j, a),
+    // gram.y `table_ref: func_table func_alias_clause`. M8 (step 08) reaches the
+    // simple `func_expr_windowless` form (a single function call, optional alias).
+    // WITH ORDINALITY / ROWS FROM() / per-function coldeflists / LATERAL grow later.
+    <f:FuncExprWindowless> <a:OptAliasClause> => make_range_function(f, false, a),
+};
+
+// gram.y `func_expr_windowless: func_application | func_expr_common_subexpr`. The
+// function-in-FROM position does not allow FILTER/OVER (windowed) suffixes.
+FuncExprWindowless: Node = {
+    FuncApplication,
+    FuncExprCommonSubexpr,
 };
 
 // gram.y `joined_table`. M7 reaches the cross join (`a CROSS JOIN b`), the

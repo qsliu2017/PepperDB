@@ -21,12 +21,20 @@ test: test_setup
 # boolean: the bool type surface (input/output, the six comparison operators +
 # casts, IS [NOT] TRUE/FALSE/UNKNOWN, TRUE/FALSE literals, `AS <keyword>` column
 # labels, `table.*` expansion, LINE/caret error position, pg_input_is_valid).
-# KNOWN-DIFF on exactly ONE line: `SELECT * FROM pg_input_error_info('junk','bool')`
-# -- a record/set-returning function in FROM (RangeFunction -> RTE_FUNCTION ->
-# FunctionScan executor node), which is step 08 (SRF/funcapi). Every other line
-# matches upstream byte-for-byte. Flip to PASS (delete known_diffs/boolean.out)
-# when step 08 lands the function-in-FROM path.
+# FULL PASS as of step 08: the last line `SELECT * FROM pg_input_error_info(
+# 'junk','bool')` -- a record-returning function in FROM (RangeFunction ->
+# RTE_FUNCTION -> FunctionScan) -- now matches upstream. (Its known_diff snapshot
+# was deleted when step 08 landed the function-in-FROM path.)
 test: boolean
+#
+# Step 08 also landed: generate_series (int4/int8) as a materialized SRF-in-FROM,
+# gcd/lcm(int8), and the funcapi SRF ValuePerCall machinery. The step's remaining
+# target tests are STILL blocked by other modules and are left OUT (not KNOWN-DIFF)
+# per plan policy:
+#   select_distinct     [needs the `onek` fixture (COPY-loaded) + INSERT ... SELECT
+#                        FROM generate_series -- step 09 CTAS/INSERT-SELECT]
+#   select_distinct_on  [needs DISTINCT ON grammar + the `onek` fixture]
+#   int8                [needs the INT8_TBL table + int8 typmod/`::int8` casts]
 #
 # --------------------------------------------------------------------------
 # BLOCKED -- verified NEW-DIFF against the current server (2026-07-01), each

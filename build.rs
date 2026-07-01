@@ -134,11 +134,28 @@ fn parse_dat(text: &str) -> Vec<Proc> {
     let mut i = 0;
     while let Some(open) = buf[i..].find('{') {
         let start = i + open + 1;
-        let close = buf[start..].find('}').map(|p| start + p);
+        // Find the record's closing '}', skipping any '}' inside a quoted value
+        // (e.g. proargmodes => '{i,i,o,o,o,o}'), which would otherwise truncate the
+        // record before later keys like prosrc.
+        let rec_bytes = &bytes[start..];
+        let mut j = 0;
+        let mut in_quote = false;
+        let mut close = None;
+        while j < rec_bytes.len() {
+            match rec_bytes[j] {
+                b'\\' if in_quote => j += 1, // skip escaped char
+                b'\'' => in_quote = !in_quote,
+                b'}' if !in_quote => {
+                    close = Some(start + j);
+                    break;
+                }
+                _ => {}
+            }
+            j += 1;
+        }
         let Some(close) = close else { break };
         procs.push(parse_record(&buf[start..close]));
         i = close + 1;
-        let _ = bytes;
     }
     procs.into_iter().flatten().collect()
 }
@@ -475,6 +492,9 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("ftoi4", "crate::backend::utils::adt::float::ftoi4"),
     ("generate_series_int4", "crate::backend::utils::adt::int::generate_series_int4"),
     ("generate_series_int4_support", "crate::backend::utils::adt::int::generate_series_int4_support"),
+    ("generate_series_step_int4", "crate::backend::utils::adt::int::generate_series_step_int4"),
+    ("generate_series_int8", "crate::backend::utils::adt::int::generate_series_int8"),
+    ("generate_series_step_int8", "crate::backend::utils::adt::int::generate_series_step_int8"),
     ("hashbool", "crate::backend::utils::adt::bool::hashbool"),
     ("hashboolextended", "crate::backend::utils::adt::bool::hashboolextended"),
     ("i2tod", "crate::backend::utils::adt::float::i2tod"),
@@ -575,10 +595,12 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     // int8.c (step 25B subset): count/sum/min/max support over bigint.
     ("int2_sum", "crate::backend::utils::adt::int::int2_sum"),
     ("int4_sum", "crate::backend::utils::adt::int::int4_sum"),
+    ("int8gcd", "crate::backend::utils::adt::int::int8gcd"),
     ("int8in", "crate::backend::utils::adt::int::int8in"),
     ("int8inc", "crate::backend::utils::adt::int::int8inc"),
     ("int8inc_any", "crate::backend::utils::adt::int::int8inc_any"),
     ("int8larger", "crate::backend::utils::adt::int::int8larger"),
+    ("int8lcm", "crate::backend::utils::adt::int::int8lcm"),
     ("int8out", "crate::backend::utils::adt::int::int8out"),
     ("int8pl", "crate::backend::utils::adt::int::int8pl"),
     ("int8smaller", "crate::backend::utils::adt::int::int8smaller"),
@@ -1038,9 +1060,27 @@ fn parse_records(text: &str) -> Vec<std::collections::HashMap<String, String>> {
     }
     let mut recs = Vec::new();
     let mut i = 0;
+    let all_bytes = buf.as_bytes();
     while let Some(open) = buf[i..].find('{') {
         let start = i + open + 1;
-        let Some(close) = buf[start..].find('}').map(|p| start + p) else { break };
+        // Closing '}' that is not inside a quoted value (e.g. '{i,i,o,o}').
+        let rec_bytes = &all_bytes[start..];
+        let mut k = 0;
+        let mut in_quote = false;
+        let mut close_opt = None;
+        while k < rec_bytes.len() {
+            match rec_bytes[k] {
+                b'\\' if in_quote => k += 1,
+                b'\'' => in_quote = !in_quote,
+                b'}' if !in_quote => {
+                    close_opt = Some(start + k);
+                    break;
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        let Some(close) = close_opt else { break };
         let mut kv = std::collections::HashMap::new();
         let rec = &buf[start..close];
         let b = rec.as_bytes();
@@ -1530,6 +1570,21 @@ const M3_PROC_NAMES: &[&str] = &[
     "booleq", "boolne", "boollt", "boolgt", "boolle", "boolge",
     // soft-error type-validation SRF/scalar functions (misc.rs).
     "pg_input_is_valid", "pg_input_error_info",
+    // int8 gcd/lcm (int.rs) -- unique names among int8 in pg_proc.dat? No: gcd/lcm
+    // are overloaded (int4/int8), so those two overloads are seeded by OID via
+    // M3_PROC_OIDS below.
+];
+
+/// pg_proc rows M3 seeds BY OID, for overloaded builtins whose name has several
+/// pg_proc.dat entries (generate_series, gcd, lcm). Each OID picks the exact
+/// overload; the row's proname/argtypes/prosrc are read from that record.
+const M3_PROC_OIDS: &[u32] = &[
+    1066, // generate_series(int4, int4, int4) -> setof int4 [generate_series_step_int4]
+    1067, // generate_series(int4, int4)       -> setof int4 [generate_series_int4]
+    1068, // generate_series(int8, int8, int8) -> setof int8 [generate_series_step_int8]
+    1069, // generate_series(int8, int8)       -> setof int8 [generate_series_int8]
+    5045, // gcd(int8, int8) -> int8 [int8gcd]
+    5047, // lcm(int8, int8) -> int8 [int8lcm]
 ];
 
 /// The pg_operator entries M3 seeds: the int4-on-int4 arithmetic and comparison
@@ -1950,6 +2005,7 @@ fn gen_m12_window_seeds(
 
 /// Emit the M3 resolved seed tables for pg_proc and pg_operator. Symbolic type /
 /// proc names in the `.dat` are resolved to numeric OIDs (genbki's BKI_LOOKUP).
+#[allow(clippy::too_many_lines, reason = "codegen for the pg_proc + pg_operator seed rows, kept in one place")]
 fn gen_m3_operator_proc_seeds(
     inc: &Path,
     types: &std::collections::HashMap<String, TypeProps>,
@@ -2015,6 +2071,27 @@ fn gen_m3_operator_proc_seeds(
         let arglist = argtypes.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
         out.push_str(&format!(
             "    M3Proc {{ oid: {oid}, name: \"{pname}\", rettype: {rettype}, \
+             argtypes: &[{arglist}], strict: {strict}, retset: {retset}, prosrc: \"{prosrc}\" }},\n",
+        ));
+    }
+    // Overloaded builtins seeded by OID (the exact pg_proc.dat record).
+    for &want_oid in M3_PROC_OIDS {
+        let rec = proc_recs
+            .iter()
+            .find(|r| r.get("oid").and_then(|s| s.parse::<u32>().ok()) == Some(want_oid))
+            .unwrap_or_else(|| panic!("M3 seed: proc oid {want_oid} not in pg_proc.dat"));
+        let pname = rec.get("proname").map_or("", String::as_str);
+        let rettype = type_oid(rec.get("prorettype").map_or("", String::as_str));
+        let argtypes: Vec<u32> = rec
+            .get("proargtypes")
+            .map(|s| s.split_whitespace().map(&type_oid).collect())
+            .unwrap_or_default();
+        let strict = rec.get("proisstrict").is_none_or(|s| s == "t");
+        let retset = rec.get("proretset").is_some_and(|s| s == "t");
+        let prosrc = rec.get("prosrc").cloned().unwrap_or_else(|| pname.to_string());
+        let arglist = argtypes.iter().map(u32::to_string).collect::<Vec<_>>().join(", ");
+        out.push_str(&format!(
+            "    M3Proc {{ oid: {want_oid}, name: \"{pname}\", rettype: {rettype}, \
              argtypes: &[{arglist}], strict: {strict}, retset: {retset}, prosrc: \"{prosrc}\" }},\n",
         ));
     }

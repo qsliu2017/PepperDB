@@ -203,7 +203,7 @@ fn local_fcinfo(
     nargs: i16,
     collation: Oid,
     context: Option<Box<Node>>,
-    resultinfo: Option<Box<Node>>,
+    resultinfo: Option<Box<crate::nodes::execnodes::ReturnSetInfo>>,
 ) -> FunctionCallInfoBaseData {
     let mut fcinfo = FunctionCallInfoBaseData {
         flinfo: None,

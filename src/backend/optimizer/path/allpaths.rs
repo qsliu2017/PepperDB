@@ -106,8 +106,22 @@ fn set_rel_pathlist(root: &mut PlannerInfo, rel: &mut RelOptInfo, rte: &RangeTbl
     match rel.rtekind {
         RTEKind::RELATION => set_plain_rel_pathlist(root, rel, rte),
         RTEKind::VALUES => set_values_pathlist(root, rel, rte),
+        RTEKind::FUNCTION => set_function_pathlist(root, rel, rte),
         other => not_yet_reachable(&format!("set_rel_pathlist: RTE kind {other:?}")),
     }
+}
+
+/// PG `set_function_pathlist`: build the single access path for a function RTE.
+/// `required_outer` is the rel's lateral_relids (the milestone functions have none).
+fn set_function_pathlist(root: &mut PlannerInfo, rel: &mut RelOptInfo, _rte: &RangeTblEntry) {
+    let required_outer = &rel.lateral_relids;
+    let path = crate::backend::optimizer::util::pathnode::create_functionscan_path(
+        root,
+        rel,
+        required_outer,
+    );
+    add_path(rel, path);
+    set_cheapest(rel);
 }
 
 /// PG `set_values_pathlist`: build the single access path for a VALUES RTE.

@@ -228,6 +228,43 @@ pub fn create_valuesscan_path(
     Box::new(path)
 }
 
+/// PG `create_functionscan_path`: build the single `Path` for a function-in-FROM
+/// RTE. Always unordered; no parameterization on the milestone (LATERAL grows).
+/// `cost_functionscan` is not translated; the lightweight default cost suffices
+/// (a single path's cost does not affect plan choice).
+pub fn create_functionscan_path(
+    _root: &mut PlannerInfo,
+    rel: &RelOptInfo,
+    required_outer: &Option<crate::nodes::pathnodes::Relids>,
+) -> Box<Path> {
+    if required_outer.is_some() {
+        not_yet_reachable("create_functionscan_path: parameterized function scan (LATERAL refs)");
+    }
+    let Some(target) = rel.reltarget.as_ref().map(|t| (**t).clone()) else {
+        not_yet_reachable("create_functionscan_path: missing reltarget");
+    };
+
+    let per_tuple = DEFAULT_CPU_TUPLE_COST + target.cost.per_tuple;
+    let path = Path {
+        pathtype: PathType::FunctionScan,
+        parent: Some(Box::new(rel.parent_snapshot())),
+        pathtarget: Some(Box::new(target)),
+        param_info: None,
+        parallel_aware: false,
+        parallel_safe: rel.consider_parallel,
+        parallel_workers: 0,
+        rows: rel.rows,
+        disabled_nodes: 0,
+        startup_cost: 0.0,
+        total_cost: rel.rows * per_tuple,
+        pathkeys: Vec::new(),
+        index_detail: None,
+        join_detail: None,
+    };
+
+    Box::new(path)
+}
+
 /// PG `create_index_path`: build an `IndexPath` over `index` for the base relation
 /// `rel`, with the matched `indexclauses`. The path's selectivity is the product of
 /// the clause selectivities; `cost_index` fills its costs. M6 has no

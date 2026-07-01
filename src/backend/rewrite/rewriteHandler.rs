@@ -128,7 +128,10 @@ fn fire_rir_rules(mut parsetree: Query, active_rirs: &mut Vec<crate::postgres_ex
             // RESULT: planner placeholder, nothing to expand. CTE: the body is held
             // in cteList (recursed below), not in this RTE; nothing to expand here.
             // VALUES: an in-line row list with no ON SELECT rule; nothing to expand.
-            RTEKind::RESULT | RTEKind::CTE | RTEKind::VALUES => {}
+            // FUNCTION: a function-in-FROM; PG recurses RIR into its funcexprs (for
+            // views referenced in function arguments), but the step-08 SRFs take only
+            // literal/scalar args -- no RTE to expand -- so it is a pass-through.
+            RTEKind::RESULT | RTEKind::CTE | RTEKind::VALUES | RTEKind::FUNCTION => {}
             _ => not_yet_reachable("fireRIRrules: range-table / view / RLS expansion"),
         }
         rt_index += 1;

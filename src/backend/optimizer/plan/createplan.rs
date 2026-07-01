@@ -40,6 +40,9 @@ pub fn create_plan_recurse(root: &mut PlannerInfo, best_path: &Path) -> Node {
         PathType::ValuesScan => {
             Node::ValuesScan(Box::new(create_valuesscan_plan(root, best_path)))
         }
+        PathType::FunctionScan => {
+            Node::FunctionScan(Box::new(create_functionscan_plan(root, best_path)))
+        }
         PathType::IndexScan => Node::IndexScan(Box::new(create_indexscan_plan(root, best_path))),
         PathType::BitmapHeapScan => {
             Node::BitmapHeapScan(Box::new(create_bitmap_scan_plan(root, best_path)))
@@ -630,6 +633,63 @@ fn create_valuesscan_plan(
     plan
 }
 
+/// PG `create_functionscan_plan`: build the `FunctionScan` plan node from a
+/// function RTE's `functions` list. Mirrors `create_valuesscan_plan`.
+fn create_functionscan_plan(
+    root: &mut PlannerInfo,
+    best_path: &Path,
+) -> crate::nodes::plannodes::FunctionScan {
+    use crate::nodes::nodes::Node;
+
+    let parent = best_path
+        .parent
+        .as_ref()
+        .unwrap_or_else(|| not_yet_reachable("create_functionscan_plan: missing parent rel"));
+    let scan_relid = parent.relid;
+    crate::assert!(scan_relid > 0);
+
+    if best_path.param_info.is_some() {
+        not_yet_reachable("create_functionscan_plan: parameterized function scan (nestloop params)");
+    }
+
+    let Node::RangeTblEntry(rte) = &root.parse.rtable[scan_relid - 1] else {
+        not_yet_reachable("create_functionscan_plan: rangetable entry is not an RTE");
+    };
+    crate::assert!(rte.rtekind == crate::nodes::parsenodes::RTEKind::FUNCTION);
+    let functions = rte.functions.clone();
+    let funcordinality = rte.funcordinality;
+
+    let scan_clauses: Vec<crate::nodes::pathnodes::RestrictInfo> =
+        parent.baserestrictinfo.iter().map(|ri| (**ri).clone()).collect();
+    let qual = crate::backend::optimizer::util::restrictinfo::extract_actual_clauses(
+        &scan_clauses,
+        false,
+    );
+
+    let tlist = build_path_tlist(root, best_path);
+    let mut plan = make_functionscan(tlist, qual, scan_relid, functions, funcordinality);
+    copy_generic_path_info(&mut plan.scan.plan, best_path);
+    plan
+}
+
+/// PG `make_functionscan`: construct a `FunctionScan` plan node.
+fn make_functionscan(
+    tlist: Vec<Node>,
+    qual: Vec<Node>,
+    scanrelid: crate::nodes::primnodes::Index,
+    functions: Vec<Node>,
+    funcordinality: bool,
+) -> crate::nodes::plannodes::FunctionScan {
+    crate::nodes::plannodes::FunctionScan {
+        scan: Scan {
+            plan: empty_plan(tlist, qual),
+            scanrelid,
+        },
+        functions,
+        funcordinality,
+    }
+}
+
 /// PG `make_valuesscan`: construct a `ValuesScan` plan node.
 fn make_valuesscan(
     tlist: Vec<Node>,
@@ -868,6 +928,8 @@ fn top_plan_tlist_mut(plan: &mut Node) -> &mut Vec<Node> {
         Node::IndexScan(s) => &mut s.scan.plan.targetlist,
         Node::IndexOnlyScan(s) => &mut s.scan.plan.targetlist,
         Node::BitmapHeapScan(s) => &mut s.scan.plan.targetlist,
+        Node::ValuesScan(v) => &mut v.scan.plan.targetlist,
+        Node::FunctionScan(f) => &mut f.scan.plan.targetlist,
         Node::NestLoop(n) => &mut n.join.plan.targetlist,
         Node::MergeJoin(m) => &mut m.join.plan.targetlist,
         Node::HashJoin(h) => &mut h.join.plan.targetlist,

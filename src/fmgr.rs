@@ -63,8 +63,11 @@ pub struct FunctionCallInfoBaseData {
     /// `*mut Node`); `None` on every live path (only set by trigger/agg/SRF
     /// callers that don't exist yet), so the struct stays genuinely `Send`.
     pub context: Option<Box<Node>>, // pass info about context of call
-    /// Result-info node, or `None`. Same owned representation as `context`.
-    pub resultinfo: Option<Box<Node>>, // pass or return extra info about result
+    /// Result-info, or `None`. C: `fmNodePtr resultinfo` -- always a
+    /// `ReturnSetInfo` on the live path (set only by set-returning-function
+    /// callers), so this port carries it as an owned `Option<Box<ReturnSetInfo>>`
+    /// rather than the generic Node pointer.
+    pub resultinfo: Option<Box<crate::nodes::execnodes::ReturnSetInfo>>, // pass or return extra info about result
     pub fncollation: Oid,              // collation for function to use
     pub isnull: bool,                  // function must set true if result is NULL
     pub nargs: i16,                    // # arguments actually passed
@@ -85,7 +88,7 @@ pub fn InitFunctionCallInfoData(
     nargs: i16,
     collation: Oid,
     context: Option<Box<Node>>,
-    resultinfo: Option<Box<Node>>,
+    resultinfo: Option<Box<crate::nodes::execnodes::ReturnSetInfo>>,
 ) {
     fcinfo.flinfo = flinfo;
     fcinfo.context = context;

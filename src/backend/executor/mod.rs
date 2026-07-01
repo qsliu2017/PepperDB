@@ -25,6 +25,7 @@ pub mod nodeBitmapHeapscan;
 pub mod nodeBitmapIndexscan;
 pub mod nodeBitmapOr;
 pub mod nodeCtescan;
+pub mod nodeFunctionscan;
 pub mod nodeGroup;
 pub mod nodeHash;
 pub mod nodeHashjoin;

@@ -86,6 +86,9 @@ pub fn query_planner(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback)
         crate::nodes::parsenodes::RTEKind::VALUES => {
             build_values_rel_with_path(root, rti, reltarget)
         }
+        crate::nodes::parsenodes::RTEKind::FUNCTION => {
+            build_function_rel_with_path(root, rti, reltarget)
+        }
         other => not_yet_reachable(&format!("query_planner: FROM item RTE kind {other:?}")),
     };
 
@@ -241,6 +244,29 @@ fn build_values_rel_with_path(
     rel.rtekind = crate::nodes::parsenodes::RTEKind::VALUES;
     // set_values_size_estimates: rel->tuples = list_length(values_lists).
     rel.tuples = nrows as f64;
+
+    distribute_jointree_quals_to_baserel(root, &mut rel);
+
+    root.simple_rel_array[rti] = Some(Box::new(rel));
+
+    let joinlist = jointree_fromlist(root);
+    crate::backend::optimizer::path::allpaths::make_one_rel(root, &joinlist)
+}
+
+/// Build the base rel + FunctionScan path for a function-in-FROM RTE. Mirrors
+/// `build_values_rel_with_path`. `set_function_size_estimates` uses PG's default
+/// per-function row estimate (100) when the function has no support-node estimate.
+fn build_function_rel_with_path(
+    root: &mut PlannerInfo,
+    rti: usize,
+    reltarget: PathTarget,
+) -> RelOptInfo {
+    setup_simple_rel_arrays(root);
+
+    let mut rel = make_base_rel(rti, reltarget);
+    rel.rtekind = crate::nodes::parsenodes::RTEKind::FUNCTION;
+    // set_function_size_estimates: PG's default per-function row estimate.
+    rel.tuples = 100.0;
 
     distribute_jointree_quals_to_baserel(root, &mut rel);
 
@@ -451,6 +477,7 @@ fn top_plan_tlist_mut(plan: &mut crate::nodes::nodes::Node) -> &mut Vec<crate::n
         Node::IndexOnlyScan(s) => &mut s.scan.plan.targetlist,
         Node::BitmapHeapScan(s) => &mut s.scan.plan.targetlist,
         Node::ValuesScan(v) => &mut v.scan.plan.targetlist,
+        Node::FunctionScan(f) => &mut f.scan.plan.targetlist,
         Node::NestLoop(n) => &mut n.join.plan.targetlist,
         Node::MergeJoin(m) => &mut m.join.plan.targetlist,
         Node::HashJoin(h) => &mut h.join.plan.targetlist,

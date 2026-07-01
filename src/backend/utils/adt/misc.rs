@@ -39,17 +39,24 @@ pub fn pg_input_is_valid(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
 
 /// PG `pg_input_error_info`: the error info for a failed input of `txt` as
 /// `typname`, as a `(message, detail, hint, sql_error_code)` row (all NULL when
-/// the input is valid). Returns the composite Datum.
-///
-/// NOTE: this is a record-returning function invoked as `SELECT * FROM
-/// pg_input_error_info(...)`; the function-in-FROM (RangeFunction) machinery and
-/// `heap_form_tuple`/`get_call_result_type` composite plumbing it needs are not
-/// wired yet (owned by the SRF/funcapi step), so reaching this function raises
-/// through that path rather than here. The soft-error extraction below is the
-/// faithful body for when that lands.
+/// the input is valid). Returns the composite rowtype Datum. Invoked as
+/// `SELECT * FROM pg_input_error_info(...)` (the record-returning function-in-FROM
+/// path).
 pub fn pg_input_error_info(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    use crate::backend::access::common::heaptuple::heap_form_tuple;
+    use crate::funcapi::{get_call_result_type, HeapTupleGetDatum, TypeFuncClass};
+
     let txt = pg_getarg_text_str(fcinfo, 0);
     let typname = pg_getarg_text_str(fcinfo, 1);
+
+    // Build a tuple descriptor for our result type (the OUT parameters).
+    let info = get_call_result_type(fcinfo);
+    if info.class != TypeFuncClass::Composite {
+        crate::elog!(crate::utils::elog::ERROR, "return type must be a row type".to_string());
+    }
+    let tupdesc = info
+        .result_tuple_desc
+        .unwrap_or_else(|| unreachable!("pg_input_error_info result is composite"));
 
     let mut escontext = ErrorSaveContext::new();
     escontext.details_wanted = true;
@@ -70,12 +77,20 @@ pub fn pg_input_error_info(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
         )
     };
 
-    // heap_form_tuple over the 4-column result tupdesc (needs get_call_result_type
-    // + the composite tuple builder from the funcapi/heaptuple path).
-    let _ = (message, detail, hint, sqlstate, cstring_to_text);
-    unimplemented!(
-        "pg_input_error_info needs get_call_result_type + heap_form_tuple (record-returning fn / funcapi)"
-    )
+    // Fill the 4-column (message, detail, hint, sql_error_code) row: each text
+    // column is a text Datum, or SQL NULL.
+    let cols: Vec<Option<String>> = vec![message, detail, hint, sqlstate];
+    let mut values = [Datum(0); 4];
+    let mut isnull = [true; 4];
+    for (i, col) in cols.into_iter().enumerate() {
+        if let Some(s) = col {
+            values[i] = PointerGetDatum(cstring_to_text(&s).cast::<u8>());
+            isnull[i] = false;
+        }
+    }
+
+    let tuple = heap_form_tuple(&tupdesc, &values, &isnull);
+    HeapTupleGetDatum(tuple)
 }
 
 /// PG `pg_input_is_valid_common`: shared body of the two probes. Parses the type

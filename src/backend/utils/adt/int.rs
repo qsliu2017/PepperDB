@@ -32,7 +32,7 @@
               family is an allowed port-inherent lint per rules.md s11)"
 )]
 
-use crate::c::{bytea, PG_INT16_MAX, PG_INT16_MIN, PG_INT32_MAX, PG_INT32_MIN};
+use crate::c::{bytea, PG_INT16_MAX, PG_INT16_MIN, PG_INT32_MAX, PG_INT32_MIN, PG_INT64_MIN};
 use crate::common::int::{
     pg_add_s16_overflow, pg_add_s32_overflow, pg_add_s64_overflow, pg_mul_s16_overflow,
     pg_mul_s32_overflow, pg_neg_u16_overflow, pg_neg_u32_overflow, pg_sub_s16_overflow,
@@ -1142,42 +1142,165 @@ pub fn int2shr(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
 //   non-persistent numeric series generator
 // ===========================================================================
 
+/// Cross-call state for the integer generate_series SRFs (C `generate_series_fctx`).
+struct GenerateSeriesFctx<T> {
+    current: T,
+    finish: T,
+    step: T,
+}
+
 /// PG `generate_series_int4`: generate_series with implicit step 1.
 pub fn generate_series_int4(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     generate_series_step_int4(fcinfo)
 }
 
 /// PG `generate_series_step_int4`: the SRF generate_series(int4, int4 [, int4]).
-///
-/// The SRF multi-call context (`SRF_FIRSTCALL_INIT`/`SRF_PERCALL_SETUP`/
-/// `MemoryContextSwitchTo` and the `funcctx->user_fctx` state) is not yet
-/// translated; the funcapi helpers it needs are `unimplemented!()` stubs we
-/// reach here (rules.md s4). The NARGS/step-zero validation that runs before the
-/// first-call machinery is translated faithfully.
+/// ValuePerCall: the first call reads (start, finish, step) into the cross-call
+/// [`crate::funcapi::FuncCallContext`] `user_fctx`; each call returns the current
+/// value and advances, ending when the series is exhausted.
 pub fn generate_series_step_int4(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
-    use crate::funcapi::{SRF_IS_FIRSTCALL, SRF_FIRSTCALL_INIT, SRF_PERCALL_SETUP};
+    use crate::funcapi::{SRF_FIRSTCALL_INIT, SRF_IS_FIRSTCALL, SRF_PERCALL_SETUP, SRF_RETURN_DONE, SRF_RETURN_NEXT};
 
     if SRF_IS_FIRSTCALL(fcinfo) {
-        let _start = pg_getarg_int32(fcinfo, 0);
-        let _finish = pg_getarg_int32(fcinfo, 1);
-        // see if we were given an explicit step size
-        let step = if PG_NARGS(fcinfo) == 3 {
-            pg_getarg_int32(fcinfo, 2)
-        } else {
-            1
-        };
+        let start = pg_getarg_int32(fcinfo, 0);
+        let finish = pg_getarg_int32(fcinfo, 1);
+        let step = if PG_NARGS(fcinfo) == 3 { pg_getarg_int32(fcinfo, 2) } else { 1 };
         if step == 0 {
             ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
-                e.errcode(ERRCODE_INVALID_PARAMETER_VALUE)
-                    .errmsg("step size cannot equal zero");
+                e.errcode(ERRCODE_INVALID_PARAMETER_VALUE).errmsg("step size cannot equal zero");
             });
         }
-        let _funcctx = SRF_FIRSTCALL_INIT(fcinfo);
-        unimplemented!("generate_series_step_int4 needs the SRF multi-call context (funcapi)")
+        let funcctx = SRF_FIRSTCALL_INIT(fcinfo);
+        funcctx.user_fctx = Some(Box::new(GenerateSeriesFctx { current: start, finish, step }));
     }
 
-    let _funcctx = SRF_PERCALL_SETUP(fcinfo);
-    unimplemented!("generate_series_step_int4 needs the SRF multi-call context (funcapi)")
+    let funcctx = SRF_PERCALL_SETUP(fcinfo);
+    let fctx = funcctx
+        .user_fctx
+        .as_mut()
+        .and_then(|b| b.downcast_mut::<GenerateSeriesFctx<i32>>())
+        .unwrap_or_else(|| unreachable!("generate_series_step_int4: user_fctx set on first call"));
+    let result = fctx.current;
+
+    if (fctx.step > 0 && fctx.current <= fctx.finish) || (fctx.step < 0 && fctx.current >= fctx.finish) {
+        // Increment; if the next-value computation overflows, this is the final result.
+        match pg_add_s32_overflow(fctx.current, fctx.step) {
+            Some(next) => fctx.current = next,
+            None => fctx.step = 0,
+        }
+        SRF_RETURN_NEXT(fcinfo, Int32GetDatum(result))
+    } else {
+        SRF_RETURN_DONE(fcinfo)
+    }
+}
+
+/// PG `generate_series_int8`: generate_series with implicit step 1.
+pub fn generate_series_int8(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    generate_series_step_int8(fcinfo)
+}
+
+/// PG `generate_series_step_int8`: the SRF generate_series(int8, int8 [, int8]).
+pub fn generate_series_step_int8(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    use crate::funcapi::{SRF_FIRSTCALL_INIT, SRF_IS_FIRSTCALL, SRF_PERCALL_SETUP, SRF_RETURN_DONE, SRF_RETURN_NEXT};
+
+    if SRF_IS_FIRSTCALL(fcinfo) {
+        let start = pg_getarg_int64(fcinfo, 0);
+        let finish = pg_getarg_int64(fcinfo, 1);
+        let step = if PG_NARGS(fcinfo) == 3 { pg_getarg_int64(fcinfo, 2) } else { 1 };
+        if step == 0 {
+            ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(ERRCODE_INVALID_PARAMETER_VALUE).errmsg("step size cannot equal zero");
+            });
+        }
+        let funcctx = SRF_FIRSTCALL_INIT(fcinfo);
+        funcctx.user_fctx = Some(Box::new(GenerateSeriesFctx { current: start, finish, step }));
+    }
+
+    let funcctx = SRF_PERCALL_SETUP(fcinfo);
+    let fctx = funcctx
+        .user_fctx
+        .as_mut()
+        .and_then(|b| b.downcast_mut::<GenerateSeriesFctx<i64>>())
+        .unwrap_or_else(|| unreachable!("generate_series_step_int8: user_fctx set on first call"));
+    let result = fctx.current;
+
+    if (fctx.step > 0 && fctx.current <= fctx.finish) || (fctx.step < 0 && fctx.current >= fctx.finish) {
+        match pg_add_s64_overflow(fctx.current, fctx.step) {
+            Some(next) => fctx.current = next,
+            None => fctx.step = 0,
+        }
+        SRF_RETURN_NEXT(fcinfo, Int64GetDatum(result))
+    } else {
+        SRF_RETURN_DONE(fcinfo)
+    }
+}
+
+/// PG `int8gcd_internal`: gcd(arg1, arg2) with INT64_MIN special-casing (int8.c).
+#[allow(
+    clippy::suboptimal_flops,
+    reason = "1:1 port: int8.c computes -abs() in NEGATIVE space so INT64_MIN doesn't overflow; `-x.abs()` would panic on INT64_MIN"
+)]
+fn int8gcd_internal(mut arg1: i64, mut arg2: i64) -> i64 {
+    // Put the greater absolute value in arg1, working in negative space to handle
+    // INT64_MIN.
+    let a1 = if arg1 < 0 { arg1 } else { -arg1 };
+    let a2 = if arg2 < 0 { arg2 } else { -arg2 };
+    if a1 > a2 {
+        std::mem::swap(&mut arg1, &mut arg2);
+    }
+
+    if arg1 == PG_INT64_MIN {
+        if arg2 == 0 || arg2 == PG_INT64_MIN {
+            bigint_out_of_range();
+        }
+        // gcd(INT64_MIN, -1) = 1 (guard the INT64_MIN % -1 trap).
+        if arg2 == -1 {
+            return 1;
+        }
+    }
+
+    // Iterate: arg1 = gcd so far, arg2 = remainder.
+    while arg2 != 0 {
+        let rem = arg1 % arg2;
+        arg1 = arg2;
+        arg2 = rem;
+    }
+
+    // Absolute value of the result (arg1 may be negative here).
+    if arg1 < 0 {
+        arg1 = arg1.checked_neg().unwrap_or_else(|| bigint_out_of_range());
+    }
+    arg1
+}
+
+/// PG `int8gcd`: greatest common divisor of two bigints.
+pub fn int8gcd(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let arg1 = pg_getarg_int64(fcinfo, 0);
+    let arg2 = pg_getarg_int64(fcinfo, 1);
+    Int64GetDatum(int8gcd_internal(arg1, arg2))
+}
+
+/// PG `int8lcm`: least common multiple of two bigints.
+pub fn int8lcm(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let arg1 = pg_getarg_int64(fcinfo, 0);
+    let arg2 = pg_getarg_int64(fcinfo, 1);
+
+    // lcm(x, 0) = lcm(0, x) = 0.
+    if arg1 == 0 || arg2 == 0 {
+        return Int64GetDatum(0);
+    }
+
+    // lcm(x, y) = abs(x / gcd(x, y) * y).
+    let gcd = int8gcd_internal(arg1, arg2);
+    let a1 = arg1 / gcd;
+    let mut result = crate::common::int::pg_mul_s64_overflow(a1, arg2).unwrap_or_else(|| bigint_out_of_range());
+    if result == PG_INT64_MIN {
+        bigint_out_of_range();
+    }
+    if result < 0 {
+        result = -result;
+    }
+    Int64GetDatum(result)
 }
 
 /// PG `generate_series_int4_support`: planner support estimating result rows.
@@ -1354,6 +1477,26 @@ mod tests {
         // int2
         let mut f = fc(&[Int16GetDatum(3), Int16GetDatum(3)]);
         assert!(DatumGetBool(int2ge(&mut f)));
+    }
+
+    #[test]
+    fn int8_gcd_lcm() {
+        let mut f = fc(&[Int64GetDatum(1071), Int64GetDatum(462)]);
+        assert_eq!(DatumGetInt64(int8gcd(&mut f)), 21);
+        let mut f = fc(&[Int64GetDatum(6), Int64GetDatum(4)]);
+        assert_eq!(DatumGetInt64(int8lcm(&mut f)), 12);
+        // lcm(x, 0) = 0.
+        let mut f = fc(&[Int64GetDatum(5), Int64GetDatum(0)]);
+        assert_eq!(DatumGetInt64(int8lcm(&mut f)), 0);
+        // gcd(INT64_MIN, 0) overflows.
+        assert!(catch_unwind(|| {
+            let mut f = fc(&[Int64GetDatum(PG_INT64_MIN), Int64GetDatum(0)]);
+            int8gcd(&mut f)
+        })
+        .is_err());
+        // gcd(INT64_MIN, -1) = 1 (no FPE).
+        let mut f = fc(&[Int64GetDatum(PG_INT64_MIN), Int64GetDatum(-1)]);
+        assert_eq!(DatumGetInt64(int8gcd(&mut f)), 1);
     }
 
     #[test]

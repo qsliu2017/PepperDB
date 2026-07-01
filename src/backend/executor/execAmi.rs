@@ -74,6 +74,9 @@ pub fn exec_rescan(shared: &Arc<SharedState>, node: &mut PlanStateNode) {
         PlanStateNode::ValuesScan(v) => {
             crate::backend::executor::nodeValuesscan::exec_rescan_values_scan(v);
         }
+        PlanStateNode::FunctionScan(f) => {
+            crate::backend::executor::nodeFunctionscan::exec_rescan_function_scan(f);
+        }
         PlanStateNode::WorkTableScan(w) => {
             crate::backend::executor::nodeWorktablescan::exec_rescan_work_table_scan(w);
         }

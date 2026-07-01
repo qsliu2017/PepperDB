@@ -169,6 +169,221 @@ pub fn add_range_table_entry_for_values(
     build_ns_item_from_coltypes(rte_ref, rtindex)
 }
 
+/// PG `addRangeTableEntryForFunction`: build an `RTE_FUNCTION` from the
+/// transformed function expression(s), determine each function's result columns
+/// (scalar -> a single column named after the function; composite/record -> the
+/// result rowtype's columns), assemble the merged scan tupdesc, add the RTE to the
+/// rangetable, and return a `ParseNamespaceItem`. Functions are never
+/// permission-checked (no `addRTEPermissionInfo`). M8 reaches the single-function,
+/// no-ordinality path; ROWS FROM() / coldeflists / ordinality grow later.
+#[allow(clippy::too_many_arguments, reason = "1:1 port of addRangeTableEntryForFunction's arg set")]
+pub fn add_range_table_entry_for_function(
+    pstate: &mut ParseState,
+    funcnames: &[String],
+    funcexprs: Vec<Node>,
+    coldeflists: &[Vec<Node>],
+    rangefunc: &crate::nodes::parsenodes::RangeFunction,
+    lateral: bool,
+    in_from_cl: bool,
+) -> ParseNamespaceItem {
+    use crate::access::tupdesc::{TupleDesc, TupleDescData};
+    use crate::backend::nodes::nodeFuncs::{exprCollation, exprTypmod};
+    use crate::funcapi::{get_expr_result_type, TypeFuncClass};
+    use crate::nodes::parsenodes::RangeTblFunction;
+
+    if rangefunc.alias.is_some() {
+        not_yet_reachable("addRangeTableEntryForFunction: alias clause");
+    }
+    if rangefunc.ordinality {
+        not_yet_reachable("addRangeTableEntryForFunction: WITH ORDINALITY");
+    }
+    let nfuncs = funcexprs.len();
+    if nfuncs != 1 {
+        not_yet_reachable("addRangeTableEntryForFunction: multiple functions (ROWS FROM)");
+    }
+
+    // RTE alias name defaults to the first function's name.
+    let aliasname = funcnames.first().cloned().unwrap_or_default();
+    let mut eref = makeAlias(&aliasname, Vec::new());
+
+    let mut functions: Vec<Node> = Vec::with_capacity(nfuncs);
+    let mut functupdescs: Vec<TupleDesc> = Vec::with_capacity(nfuncs);
+
+    for (funcno, funcexpr) in funcexprs.into_iter().enumerate() {
+        let coldeflist = coldeflists.get(funcno).map_or(&[][..], Vec::as_slice);
+        let mut rtfunc = RangeTblFunction {
+            funcexpr: Some(funcexpr.clone()),
+            funccolcount: 0,
+            funccolnames: Vec::new(),
+            funccoltypes: Vec::new(),
+            funccoltypmods: Vec::new(),
+            funccolcollations: Vec::new(),
+            funcparams: None,
+        };
+
+        let info = get_expr_result_type(&funcexpr);
+        if !coldeflist.is_empty() {
+            not_yet_reachable("addRangeTableEntryForFunction: column definition list (RECORD result)");
+        }
+
+        let tupdesc: TupleDesc = match info.class {
+            TypeFuncClass::Composite | TypeFuncClass::CompositeDomain => info
+                .result_tuple_desc
+                .unwrap_or_else(|| unreachable!("composite function result has a tupdesc")),
+            TypeFuncClass::Scalar => {
+                let funcrettype = info
+                    .result_type_id
+                    .unwrap_or_else(|| unreachable!("scalar function result has a type OID"));
+                let colname = choose_scalar_function_alias(&funcexpr, &funcnames[funcno], nfuncs);
+                let mut td = TupleDescData::create_template(1);
+                td.init_builtin_entry(1, &colname, funcrettype, exprTypmod(&funcexpr), 0);
+                td.init_entry_collation(1, exprCollation(&funcexpr));
+                std::sync::Arc::new(td)
+            }
+            TypeFuncClass::Record => {
+                crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                    e.errcode(crate::utils::errcodes::ERRCODE_SYNTAX_ERROR).errmsg(
+                        "a column definition list is required for functions returning \"record\"".to_string(),
+                    );
+                });
+                unreachable!("ereport(ERROR) diverges");
+            }
+            TypeFuncClass::Other => {
+                crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                    e.errcode(crate::utils::errcodes::ERRCODE_DATATYPE_MISMATCH).errmsg(format!(
+                        "function \"{}\" in FROM has unsupported return type",
+                        funcnames[funcno]
+                    ));
+                });
+                unreachable!("ereport(ERROR) diverges");
+            }
+        };
+
+        rtfunc.funccolcount = tupdesc.natts;
+        functions.push(Node::RangeTblFunction(Box::new(rtfunc)));
+        functupdescs.push(tupdesc);
+    }
+
+    // Single function, no ordinality: the scan tupdesc is the function's tupdesc.
+    let tupdesc = functupdescs.into_iter().next().unwrap_or_else(|| unreachable!("one function tupdesc"));
+
+    // buildRelationAliases: fill eref->colnames from the tupdesc.
+    build_relation_aliases(&tupdesc, &mut eref);
+    let tupdesc: &crate::access::tupdesc::TupleDescData = &tupdesc;
+
+    // Expose the merged column types on the RTE (the coltypes-based paths read them).
+    let coltypes: Vec<Oid> = (0..tupdesc.natts as usize).map(|i| tupdesc.attr(i).atttypid).collect();
+    let coltypmods: Vec<i32> = (0..tupdesc.natts as usize).map(|i| tupdesc.attr(i).atttypmod).collect();
+    let colcollations: Vec<Oid> = (0..tupdesc.natts as usize).map(|i| tupdesc.attr(i).attcollation).collect();
+
+    let rte = make_function_rte(functions, rangefunc.ordinality, coltypes, coltypmods, colcollations, eref, lateral, in_from_cl);
+
+    pstate.p_rtable.push(rte);
+    let rtindex = pstate.p_rtable.len() as i32;
+    let rte_ref = &pstate.p_rtable[(rtindex - 1) as usize];
+    build_ns_item_for_function(rte_ref, rtindex, tupdesc)
+}
+
+/// `makeNode(RangeTblEntry)` for an `RTE_FUNCTION`.
+#[allow(clippy::too_many_arguments, reason = "1:1 port: mirrors addRangeTableEntryForFunction's field set")]
+fn make_function_rte(
+    functions: Vec<Node>,
+    funcordinality: bool,
+    coltypes: Vec<Oid>,
+    coltypmods: Vec<i32>,
+    colcollations: Vec<Oid>,
+    eref: crate::nodes::primnodes::Alias,
+    lateral: bool,
+    in_from_cl: bool,
+) -> RangeTblEntry {
+    RangeTblEntry {
+        alias: None,
+        eref: Some(Box::new(eref)),
+        rtekind: RTEKind::FUNCTION,
+        relid: InvalidOid,
+        inh: false,
+        relkind: 0,
+        rellockmode: 0,
+        perminfoindex: 0,
+        tablesample: None,
+        subquery: None,
+        security_barrier: false,
+        jointype: JoinType::INNER,
+        joinmergedcols: 0,
+        joinaliasvars: Vec::new(),
+        joinleftcols: Vec::new(),
+        joinrightcols: Vec::new(),
+        join_using_alias: None,
+        functions,
+        funcordinality,
+        tablefunc: None,
+        values_lists: Vec::new(),
+        ctename: None,
+        ctelevelsup: 0,
+        self_reference: false,
+        coltypes,
+        coltypmods,
+        colcollations,
+        enrname: None,
+        enrtuples: 0.0,
+        groupexprs: Vec::new(),
+        lateral,
+        inFromCl: in_from_cl,
+        securityQuals: Vec::new(),
+    }
+}
+
+/// PG `chooseScalarFunctionAlias`: the column name for a scalar-returning function
+/// in FROM. With a single function and no alias, the column takes the function's
+/// display name (`funcname`); the multi-function `columnN` fallback is a grow guard.
+fn choose_scalar_function_alias(_funcexpr: &Node, funcname: &str, nfuncs: usize) -> String {
+    if nfuncs == 1 {
+        return funcname.to_owned();
+    }
+    not_yet_reachable("chooseScalarFunctionAlias: multi-function ROWS FROM naming");
+}
+
+/// PG `buildNSItemFromTupleDesc` for an `RTE_FUNCTION`: build the nsitem's per-column
+/// array from the function's result tupdesc. Functions carry no `perminfo`.
+fn build_ns_item_for_function(
+    rte: &RangeTblEntry,
+    rtindex: i32,
+    tupdesc: &crate::access::tupdesc::TupleDescData,
+) -> ParseNamespaceItem {
+    let nscolumns = (0..tupdesc.natts as usize)
+        .map(|i| {
+            let attr = tupdesc.attr(i);
+            let attno = (i + 1) as AttrNumber;
+            ParseNamespaceColumn {
+                varno: rtindex as crate::c::Index,
+                varattno: attno,
+                vartype: attr.atttypid,
+                vartypmod: attr.atttypmod,
+                varcollid: attr.attcollation,
+                varreturningtype: VarReturningType::DEFAULT,
+                varnosyn: rtindex as crate::c::Index,
+                varattnosyn: attno,
+                dontexpand: false,
+            }
+        })
+        .collect();
+
+    ParseNamespaceItem {
+        names: Box::new(
+            rte.eref.as_ref().unwrap_or_else(|| unreachable!("function RTE has an eref")).as_ref().clone(),
+        ),
+        rte: Box::new(rte.clone()),
+        rtindex,
+        perminfo: None,
+        nscolumns,
+        rel_visible: true,
+        cols_visible: true,
+        lateral_only: false,
+        lateral_ok: true,
+        returning_type: VarReturningType::DEFAULT,
+    }
+}
+
 /// `makeNode(RangeTblEntry)` for an `RTE_VALUES` with the VALUES-relevant fields set.
 #[allow(clippy::too_many_arguments, reason = "1:1 port: mirrors addRangeTableEntryForValues' field set")]
 fn make_values_rte(

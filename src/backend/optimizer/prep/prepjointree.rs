@@ -115,9 +115,9 @@ fn pull_up_subqueries_recurse(root: &mut PlannerInfo, jtnode: Node, in_outer_joi
             if rte.rtekind == RTEKind::VALUES && !in_outer_join && is_simple_values(root, rte) {
                 not_yet_reachable("pull_up_subqueries_recurse: simple VALUES pullup");
             }
-            if rte.rtekind == RTEKind::FUNCTION {
-                not_yet_reachable("pull_up_subqueries_recurse: constant FUNCTION inlining");
-            }
+            // A FUNCTION RTE is scanned by a FunctionScan; PG only "pulls up" a
+            // function that inlines to a constant (`pull_up_constant_function`), which
+            // the step-08 SRFs never do -- so it stays a FUNCTION RTE (pass-through).
             // Otherwise, do nothing at this node.
             jtnode
         }

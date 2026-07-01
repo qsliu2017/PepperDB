@@ -364,6 +364,29 @@ pub fn make_alias(name: String) -> crate::nodes::primnodes::Alias {
     crate::nodes::primnodes::Alias { aliasname: Some(name), colnames: Vec::new() }
 }
 
+/// gram.y `table_ref: func_table func_alias_clause` (the simple
+/// `func_expr_windowless opt_ordinality` case): a function call appearing in FROM
+/// becomes a `RangeFunction`. `func` is the single `func_expr_windowless` node (a
+/// FuncCall or a common-subexpr call); `ordinality` is the WITH ORDINALITY flag;
+/// `alias` the optional table/column alias. ROWS FROM(), per-function coldeflists,
+/// and LATERAL grow at their milestones. In PG `functions` is a list of
+/// (fexpr, coldeflist) pairs; the single-function case has an empty coldeflist, so
+/// this port stores just the fexpr.
+pub fn make_range_function(
+    func: Node,
+    ordinality: bool,
+    alias: Option<crate::nodes::primnodes::Alias>,
+) -> Node {
+    Node::RangeFunction(Box::new(crate::nodes::parsenodes::RangeFunction {
+        lateral: false,
+        ordinality,
+        is_rowsfrom: false,
+        functions: vec![func],
+        alias: alias.map(Box::new),
+        coldeflist: Vec::new(),
+    }))
+}
+
 /// Apply an optional alias to a FROM-item RangeVar (sets `RangeVar.alias`).
 pub fn apply_rangevar_alias(
     mut relation: RangeVar,

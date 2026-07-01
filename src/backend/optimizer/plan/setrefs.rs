@@ -89,6 +89,9 @@ fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
         Node::Append(a) => Node::Append(Box::new(set_append_refs(root, *a, rtoffset))),
         Node::SetOp(s) => Node::SetOp(Box::new(set_setop_refs(root, *s, rtoffset))),
         Node::ValuesScan(v) => Node::ValuesScan(Box::new(set_valuesscan_refs(root, *v, rtoffset))),
+        Node::FunctionScan(f) => {
+            Node::FunctionScan(Box::new(set_functionscan_refs(root, *f, rtoffset)))
+        }
         Node::CteScan(c) => Node::CteScan(Box::new(set_ctescan_refs(root, *c, rtoffset))),
         Node::RecursiveUnion(r) => {
             Node::RecursiveUnion(Box::new(set_recursiveunion_refs(root, *r, rtoffset)))
@@ -166,6 +169,28 @@ fn set_valuesscan_refs(
     fix_scan_qual_identity(&plan.scan.plan.qual, rtoffset);
     for row in &plan.values_lists {
         fix_scan_expr_identity(Some(row));
+    }
+    plan
+}
+
+/// PG `set_plan_refs` T_FunctionScan arm: offset the scanrelid, assign the node id,
+/// and identity-validate the tlist/qual and the RangeTblFunction funcexprs. With
+/// rtoffset 0 (single query) the scanrelid and Var varnos are unchanged; the
+/// funcexprs' argument Vars (LATERAL) would be offset here (none on the milestone).
+fn set_functionscan_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::FunctionScan,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::FunctionScan {
+    plan.scan.scanrelid += rtoffset as crate::nodes::primnodes::Index;
+    plan.scan.plan.plan_node_id = next_plan_node_id(root);
+
+    fix_scan_tlist_identity(&plan.scan.plan.targetlist, rtoffset);
+    fix_scan_qual_identity(&plan.scan.plan.qual, rtoffset);
+    for f in &plan.functions {
+        if let Node::RangeTblFunction(rtf) = f {
+            fix_scan_expr_identity(rtf.funcexpr.as_ref());
+        }
     }
     plan
 }

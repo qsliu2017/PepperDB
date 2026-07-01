@@ -113,6 +113,7 @@ fn plan_targetlist(planstate: &PlanState) -> Vec<crate::nodes::nodes::Node> {
         Node::BitmapHeapScan(s) => s.scan.plan.targetlist.clone(),
         Node::WorkTableScan(w) => w.scan.plan.targetlist.clone(),
         Node::ValuesScan(v) => v.scan.plan.targetlist.clone(),
+        Node::FunctionScan(f) => f.scan.plan.targetlist.clone(),
         Node::CteScan(c) => c.scan.plan.targetlist.clone(),
         other => unimplemented!("plan_targetlist: {other:?} not reachable for this milestone"),
     }
