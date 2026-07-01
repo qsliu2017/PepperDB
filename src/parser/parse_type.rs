@@ -167,12 +167,51 @@ pub fn typeStringToTypeName(_str: &str, _escontext: Option<&mut Node>) -> Box<Ty
     unimplemented!()
 }
 
-/// `typeid_p`/`typmod_p` out-params -> returned tuple on success.
-pub fn parseTypeString(
-    _str: &str,
-    _escontext: Option<&mut Node>,
-) -> Option<(Oid, i32)> {
-    unimplemented!()
+/// PG `parseTypeString`: parse a type-name string to `(typeOid, typmod)`.
+///
+/// PG runs the raw parser in type-name mode (`typeStringToTypeName`) then
+/// `typenameTypeIdAndMod`. The raw parser's type-name mode is not wired yet, so
+/// this handles the common form the current callers need -- a bare or
+/// `pg_catalog`-qualified type name with no typmod, array bounds, or `%TYPE` --
+/// by building the `TypeName` directly and resolving it through the (warm)
+/// TYPENAMENSP syscache. Forms needing the grammar (typmods like `numeric(10,2)`,
+/// arrays like `int[]`, `SETOF`) are deferred to the type-name grammar mode.
+///
+/// The `_escontext` out-param folds to the returned `Option`: `None` on a lookup
+/// miss (mirroring C's soft-error return). typeOid/typmod out-params -> tuple.
+pub fn parseTypeString(str: &str, _escontext: Option<&mut Node>) -> Option<(Oid, i32)> {
+    use crate::nodes::value::String_;
+
+    let name = str.trim();
+    // Reject anything the bare-name fast path cannot faithfully handle; those need
+    // the type-name grammar (typmod, arrays, SETOF, %TYPE, quoted identifiers).
+    if name.is_empty()
+        || name.contains(['(', ')', '[', ']', '"', '%', ' ', '\t', '\n'])
+        || name.to_ascii_lowercase().starts_with("setof")
+    {
+        unimplemented!("parseTypeString: type-name grammar forms (typmod/array/SETOF) deferred");
+    }
+
+    // A bare or `schema.type` dotted name -> the TypeName.names parts.
+    let parts: Vec<String_> = name
+        .split('.')
+        .map(|p| String_ { sval: p.to_owned() })
+        .collect();
+    let type_name = TypeName {
+        names: parts,
+        typeOid: InvalidOid,
+        setof: false,
+        pct_type: false,
+        typmods: Vec::new(),
+        typemod: -1,
+        arrayBounds: Vec::new(),
+        location: -1,
+    };
+    // typenameTypeIdAndMod raises ERROR on an unknown type (hard error); here that
+    // is the intended behavior for the `pg_input_is_valid` typname argument (a bad
+    // TYPE NAME is a hard error, distinct from a bad VALUE which is the soft one).
+    let mut pstate = crate::parser::parse_node::make_parsestate(None);
+    Some(typenameTypeIdAndMod(&mut pstate, &type_name))
 }
 
 /// true if typeid is composite, or domain over composite, but not RECORD

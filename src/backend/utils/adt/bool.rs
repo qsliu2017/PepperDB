@@ -10,18 +10,29 @@
 //! `fn(&mut FunctionCallInfoBaseData) -> Datum`. Output functions return a leaked
 //! C string (no MemoryContext yet, like int.rs). Bad input raises via `ereport!`.
 
-use crate::ereport;
+use crate::ereturn;
 use crate::fmgr::FunctionCallInfoBaseData;
+use crate::nodes::miscnodes::ErrorSaveContext;
+use crate::nodes::nodes::Node;
 use crate::postgres::{
     BoolGetDatum, CStringGetDatum, Datum, DatumGetBool, DatumGetCString, Int32GetDatum,
 };
 use crate::backend::utils::adt::varlena::cstring_to_text;
-use crate::utils::elog::ERROR;
 use crate::utils::errcodes::ERRCODE_INVALID_TEXT_REPRESENTATION;
 
 #[inline]
 fn pg_getarg_bool(fcinfo: &FunctionCallInfoBaseData, n: usize) -> bool {
     DatumGetBool(fcinfo.args[n].value)
+}
+
+/// The call's soft-error context (`fcinfo->context` cast to `ErrorSaveContext`),
+/// or `None` for the hard-error path.
+#[inline]
+fn fcinfo_escontext(fcinfo: &mut FunctionCallInfoBaseData) -> Option<&mut ErrorSaveContext> {
+    match fcinfo.context.as_deref_mut() {
+        Some(Node::ErrorSaveContext(e)) => Some(e),
+        _ => None,
+    }
 }
 
 /// PG `PG_GETARG_CSTRING(n)`: the argument as an owned UTF-8 string.
@@ -90,18 +101,20 @@ fn prefix_match(s: &str, full: &str) -> bool {
 //   USER I/O ROUTINES
 // ===========================================================================
 
-/// PG `boolin`: input function for type boolean.
+/// PG `boolin`: input function for type boolean. Reports an invalid value through
+/// the call's soft-error context (`fcinfo->context`) via `ereturn` -- soft when a
+/// context is supplied, otherwise a hard ERROR.
 pub fn boolin(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     let in_str = pg_getarg_cstring(fcinfo, 0);
     let trimmed = in_str.trim_matches(|c: char| c.is_ascii_whitespace());
     if let Some(result) = parse_bool_with_len(trimmed, trimmed.len()) {
         return BoolGetDatum(result);
     }
-    ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
+    let esc = fcinfo_escontext(fcinfo);
+    ereturn!(esc, Datum(0), |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(ERRCODE_INVALID_TEXT_REPRESENTATION)
             .errmsg(format!("invalid input syntax for type boolean: \"{in_str}\""));
     });
-    unreachable!()
 }
 
 /// PG `boolout`: converts 1 or 0 to "t" or "f".
@@ -271,6 +284,34 @@ mod tests {
         let mut f = fc(&[cstr_datum("notabool")]);
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| boolin(&mut f)));
         assert!(r.is_err());
+    }
+
+    /// With an ErrorSaveContext in fcinfo.context, an invalid boolean routes into
+    /// the context (no unwind); a valid one leaves it untouched.
+    #[test]
+    fn boolin_soft_error_routes_to_context() {
+        // invalid input -> error recorded, no panic.
+        let mut f = fc(&[cstr_datum("nay")]);
+        f.context = Some(Box::new(Node::ErrorSaveContext(Box::new(
+            ErrorSaveContext { details_wanted: true, ..ErrorSaveContext::new() },
+        ))));
+        let _ = boolin(&mut f);
+        let Some(Node::ErrorSaveContext(e)) = f.context.as_deref() else {
+            panic!("context present");
+        };
+        assert!(e.error_occurred);
+        let edata = e.error_data.as_deref().expect("details_wanted -> error_data");
+        assert_eq!(edata.message.as_deref(), Some("invalid input syntax for type boolean: \"nay\""));
+        assert_eq!(edata.sqlerrcode, ERRCODE_INVALID_TEXT_REPRESENTATION);
+
+        // valid input -> no error recorded.
+        let mut g = fc(&[cstr_datum("yes")]);
+        g.context = Some(Box::new(Node::ErrorSaveContext(Box::new(ErrorSaveContext::new()))));
+        assert!(DatumGetBool(boolin(&mut g)));
+        let Some(Node::ErrorSaveContext(e)) = g.context.as_deref() else {
+            panic!("context present");
+        };
+        assert!(!e.error_occurred);
     }
 
     #[test]

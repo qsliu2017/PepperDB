@@ -213,6 +213,75 @@ macro_rules! elog {
 }
 
 // ---------------------------------------------------------------------------
+// errsave! / ereturn! -- the "soft error" reporting macros (elog.h). The first
+// argument is the soft-error context (`Option<&mut ErrorSaveContext>`); the rest
+// is the same build closure as ereport!. With a context that requests soft
+// handling this records the error WITHOUT unwinding; otherwise it raises ERROR.
+//
+//   errsave!(escontext, |e| e.errcode(...).errmsg(format!(...)));
+//   ereturn!(escontext, <dummy>, |e| e.errcode(...).errmsg(format!(...)));
+//
+// `ereturn!` additionally `return`s the dummy value (PG's "return dummy_value")
+// -- so the calling function short-circuits after a soft error just as it does
+// after the hard ereport(ERROR) it replaces.
+// ---------------------------------------------------------------------------
+
+#[macro_export]
+macro_rules! errsave {
+    ($context:expr, $build:expr) => {{
+        // Reborrow so the caller keeps its &mut for a later SOFT_ERROR_OCCURRED.
+        let __ctx: ::core::option::Option<&mut $crate::nodes::miscnodes::ErrorSaveContext> =
+            $context;
+        match __ctx {
+            ::core::option::Option::Some(__c) => {
+                // Reborrow across the two calls: errsave_start borrows first, then
+                // errsave_finish. Neither borrow is held across the other.
+                if let Some(mut __edata) = $crate::utils::elog::errsave_start(
+                    ::core::option::Option::Some(&mut *__c),
+                    None,
+                ) {
+                    let __build: &dyn Fn(&mut $crate::utils::elog::ErrorData) = &$build;
+                    __build(&mut __edata);
+                    #[allow(deprecated)]
+                    $crate::utils::elog::errsave_finish(
+                        ::core::option::Option::Some(&mut *__c),
+                        __edata,
+                        file!(),
+                        line!() as i32,
+                        "",
+                    );
+                }
+            }
+            ::core::option::Option::None => {
+                // No context: hard-error path, exactly ereport!(ERROR).
+                if let Some(mut __edata) =
+                    $crate::utils::elog::errsave_start(::core::option::Option::None, None)
+                {
+                    let __build: &dyn Fn(&mut $crate::utils::elog::ErrorData) = &$build;
+                    __build(&mut __edata);
+                    #[allow(deprecated)]
+                    $crate::utils::elog::errsave_finish(
+                        ::core::option::Option::None,
+                        __edata,
+                        file!(),
+                        line!() as i32,
+                        "",
+                    );
+                }
+            }
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! ereturn {
+    ($context:expr, $dummy:expr, $build:expr) => {{
+        $crate::errsave!($context, $build);
+        return $dummy;
+    }};
+}
+
+// ---------------------------------------------------------------------------
 // OrElog (error.md s3.3). The sanctioned replacement for bare
 // `unwrap`/`expect`/`panic!` in non-test code: on None/Err it raises the named
 // severity through the elog path (capturing the `Err` Display as errdetail)

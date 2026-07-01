@@ -37,6 +37,8 @@ use std::cell::RefCell;
 use std::fmt::Write as _;
 use std::io::Write;
 
+use crate::nodes::miscnodes::ErrorSaveContext;
+
 use crate::utils::elog::{
     pg_unsixbit, CLIENT_MIN_MESSAGES, DEBUG1, DEBUG2, DEBUG3, DEBUG4, DEBUG5, ERROR,
     ERRCODE_INTERNAL_ERROR, ERRCODE_SUCCESSFUL_COMPLETION, ERRCODE_WARNING, ErrorContextCallback,
@@ -487,29 +489,79 @@ fn set_stack_entry_filename(filename: &str) -> String {
         .to_owned()
 }
 
-// errsave / ereturn soft-error path. `context` is a *Node (ErrorSaveContext) or
-// NULL; modeled as Option. With None it behaves like ereport(ERROR).
-#[allow(clippy::needless_pass_by_value, reason = "context consumed (ErrorSaveContext stash); mirrors C signature")]
-pub fn errsave_start(context: Option<&mut ()>, domain: Option<&str>) -> Option<ErrorData> {
-    // TODO: real ErrorSaveContext stashes the error and returns without raising.
-    let _ = context;
-    errstart(ERROR, domain)
+// errsave / ereturn soft-error path (elog.c errsave_start/errsave_finish).
+// `context` is a *Node (ErrorSaveContext) or NULL; modeled here as an optional
+// mutable ErrorSaveContext. With None it behaves exactly like ereport(ERROR):
+// errsave_start punts to errstart(ERROR) and errsave_finish to errfinish. With a
+// context it records that a soft error occurred and (if details_wanted) builds an
+// ErrorData to hand back to the caller -- never unwinding.
+
+/// PG `errsave_start`: begin a soft-error report. Returns `Some(ErrorData)` when
+/// the caller should build message details, `None` to short-circuit (no details
+/// wanted). When `context` is `None` this is `errstart(ERROR, domain)`.
+pub fn errsave_start(
+    context: Option<&mut ErrorSaveContext>,
+    domain: Option<&str>,
+) -> Option<ErrorData> {
+    // No context (or not requesting soft handling): behave like errstart(ERROR).
+    let Some(escontext) = context else {
+        return errstart(ERROR, domain);
+    };
+
+    // Report that a soft error was detected.
+    escontext.error_occurred = true;
+
+    // Nothing else to do if the caller wants no further details.
+    if !escontext.details_wanted {
+        return None;
+    }
+
+    // Crank up a build target to store the info in. errsave_finish packages it
+    // into the context (it is NOT the single in-flight >=ERROR slot, so it does
+    // not touch ERROR_STATE.in_flight). Default the errcode to the assumed ERROR
+    // elevel's internal-error, matching elog.c.
+    let dom = domain.unwrap_or("postgres").to_owned();
+    Some(ErrorData {
+        // LOG signals errsave_finish that this is the soft path (elog.c sets
+        // elevel = LOG in errsave_start, then bumps it to ERROR in finish).
+        elevel: LOG,
+        output_to_server: false,
+        output_to_client: false,
+        context_domain: Some(dom.clone()),
+        domain: Some(dom),
+        sqlerrcode: ERRCODE_INTERNAL_ERROR,
+        saved_errno: std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
+        ..Default::default()
+    })
 }
 
 #[deprecated(note = "TODO(panic): migrate to Result + ?")]
-#[allow(clippy::needless_pass_by_value, reason = "consumes context + edata; mirrors C signature")]
+#[allow(clippy::needless_pass_by_value, reason = "consumes edata; mirrors errfinish signature (moved into panic_any / the context stash)")]
 pub fn errsave_finish(
-    context: Option<&mut ()>,
-    edata: ErrorData,
+    context: Option<&mut ErrorSaveContext>,
+    mut edata: ErrorData,
     filename: &str,
     lineno: i32,
     funcname: &str,
 ) {
-    // TODO(panic): if context is a real ErrorSaveContext, stash edata and return;
-    // otherwise behave like errfinish(ERROR).
-    let _ = context;
-    #[allow(deprecated)]
-    errfinish(edata, filename, lineno, funcname);
+    // No context: this is the hard-error path -- punt to errfinish (raises ERROR).
+    // (errsave_start already returned Some via errstart, so edata is the in-flight
+    // >=ERROR slot.)
+    let Some(escontext) = context else {
+        #[allow(deprecated)]
+        errfinish(edata, filename, lineno, funcname);
+        return;
+    };
+
+    // details_wanted was false: errsave_start returned None, so no edata was
+    // built and this path is unreachable for that case. Here details_wanted is
+    // true: package the built stack entry and deliver it to the caller. Record
+    // the raise location and replace the LOG marker with ERROR (elog.c).
+    edata.filename = Some(set_stack_entry_filename(filename));
+    edata.lineno = lineno;
+    edata.funcname = (!funcname.is_empty()).then(|| funcname.to_owned());
+    edata.elevel = ERROR;
+    escontext.error_data = Some(Box::new(edata));
 }
 
 // Build a one-shot frame and raise it as a panic (used for internal PANICs that

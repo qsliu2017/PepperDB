@@ -822,6 +822,7 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("overlaps_timestamp", "crate::backend::utils::adt::timestamp::overlaps_timestamp"),
     ("overlaps_timetz", "crate::backend::utils::adt::date::overlaps_timetz"),
     ("pg_conf_load_time", "crate::backend::utils::adt::timestamp::pg_conf_load_time"),
+    ("pg_input_is_valid", "crate::backend::utils::adt::misc::pg_input_is_valid"),
     ("pg_postmaster_start_time", "crate::backend::utils::adt::timestamp::pg_postmaster_start_time"),
     ("statement_timestamp", "crate::backend::utils::adt::timestamp::statement_timestamp"),
     ("time_cmp", "crate::backend::utils::adt::date::time_cmp"),

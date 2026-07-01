@@ -78,6 +78,11 @@ pub enum Node {
     FromExpr(Box<crate::nodes::primnodes::FromExpr>),
     OnConflictExpr(Box<crate::nodes::primnodes::OnConflictExpr>),
 
+    // from nodes/miscnodes.rs -- the soft-error escape hatch passed through
+    // FunctionCallInfo.context (an input function reports a conversion failure
+    // into this instead of raising).
+    ErrorSaveContext(Box<crate::nodes::miscnodes::ErrorSaveContext>),
+
     // from nodes/replnodes.rs
     IdentifySystemCmd(Box<crate::nodes::replnodes::IdentifySystemCmd>),
     BaseBackupCmd(Box<crate::nodes::replnodes::BaseBackupCmd>),

@@ -37,10 +37,21 @@ test: test_setup
 #
 # Tier-1 simple types -- all NEW-DIFF:
 #   char, varchar   [char(n)/varchar(n) typmod not parsed -- string step (10)]
-#   int2, int4      [missing `LINE n:`/caret error context (soft-error input,
-#                    step 07); note: these tests currently CRASH the backend]
+#   boolean, int2, int4
+#                   [soft-error input API DONE (step 07): the crash/SIGSEGV that
+#                    dropped the backend on bad int2/int4/float input is fixed
+#                    (InputFunctionCall NUL-termination + make_const T_Float now a
+#                    catchable ERROR), and int2in/int4in/boolin + InputFunctionCall
+#                    Safe route through ErrorSaveContext. STILL BLOCKED on parser +
+#                    later-step features they exercise: typed literals (`bool 'x'`,
+#                    `int2 '0'`), `AS <keyword>`/`AS f(a,b)` column-list aliases,
+#                    `LINE n:`/caret error position, `pg_input_error_info(...)` in
+#                    FROM (record-returning SRF, step 08), int2vector input, and
+#                    function-by-name resolution (`pg_input_is_valid` -- func_get_
+#                    detail not warmed yet). Re-add when those land.]
 #   int8            [int8 INSERT path bugs ("syscache not warm", literal typing)]
-#   float4, float8  [float input crashes/soft-error context -- steps 07/12]
+#   float4, float8  [float/numeric input -- numeric step (12); T_Float literal now
+#                    a catchable ERROR (no longer crashes) but not yet computed]
 #   text            [text INSERT "syscache not warm"; string funcs -- step 10]
 #   union           [UNION/UNION ALL set-op execution -- large diff]
 #   delete          [inline PRIMARY KEY constraint + DELETE table alias/USING]

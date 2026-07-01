@@ -210,14 +210,34 @@ pub fn make_const(_pstate: &mut ParseState, aconst: &A_Const) -> Box<Const> {
             con.location = aconst.location;
             return Box::new(con);
         }
-        ValUnion::Float(_f) => {
-            // Could be an oversize integer or a true float; PG runs
-            // pg_strtoint64_safe then falls back to numeric_in. Both reach
-            // not-yet-translated numeric machinery.
-            unimplemented!("make_const T_Float: pg_strtoint64_safe / numeric_in deferred")
+        ValUnion::Float(f) => {
+            // T_Float carries an oversize integer OR a true float/numeric literal;
+            // PG runs pg_strtoint64_safe then falls back to numeric_in. Both reach
+            // the not-yet-translated int8/numeric input machinery (owned by the
+            // numeric step). Raise a catchable ERROR rather than dropping the
+            // connection: any bad float literal (e.g. `1.5`) must not kill the
+            // backend. TODO(numeric): resolve to int8/numeric like PG.
+            let lit = f.fval.clone();
+            crate::ereport!(
+                crate::utils::elog::ERROR,
+                |e: &mut crate::utils::elog::ErrorData| {
+                    e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+                        .errmsg(format!(
+                            "numeric literal \"{lit}\" not supported yet (int8/numeric input)"
+                        ));
+                }
+            );
+            unreachable!("ereport(ERROR) diverges");
         }
         ValUnion::BitString(_b) => {
-            unimplemented!("make_const T_BitString: bit_in deferred")
+            crate::ereport!(
+                crate::utils::elog::ERROR,
+                |e: &mut crate::utils::elog::ErrorData| {
+                    e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+                        .errmsg("bit-string literal not supported yet (bit input)");
+                }
+            );
+            unreachable!("ereport(ERROR) diverges");
         }
         ValUnion::Node(_) => {
             crate::elog!(

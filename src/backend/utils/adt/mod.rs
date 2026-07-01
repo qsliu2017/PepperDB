@@ -7,6 +7,7 @@ pub mod datetime;
 pub mod float;
 pub mod formatting;
 pub mod int;
+pub mod misc;
 pub mod name;
 pub mod numeric;
 pub mod oid;

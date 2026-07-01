@@ -44,6 +44,7 @@ use crate::{elog, ereport};
 use crate::fmgr::{
     FmgrInfo, FunctionCallInfoBaseData, InitFunctionCallInfoData, PGFunction, Pg_finfo_record,
 };
+use crate::nodes::miscnodes::{ErrorSaveContext, SOFT_ERROR_OCCURRED};
 use crate::nodes::nodes::Node;
 use crate::postgres::{
     CStringGetDatum, Datum, DatumGetCString, Int32GetDatum, ObjectIdGetDatum,
@@ -445,6 +446,17 @@ pub fn empty_flinfo() -> FmgrInfo {
 // Datatype I/O convenience invocations.
 // ---------------------------------------------------------------------------
 
+/// A `char *` argument for an input function: an owned NUL-terminated buffer we
+/// keep alive for the call. `str.as_ptr()` on a Rust `&str` is NOT
+/// NUL-terminated, so passing it straight through would make the callee's
+/// `CStr::from_ptr` read past the end (an out-of-bounds read / crash). We build a
+/// real C string; any interior NUL truncates (C-string semantics), which cannot
+/// happen for scanner-produced literals.
+fn cstring_arg(str: &str) -> std::ffi::CString {
+    let end = str.bytes().position(|b| b == 0).unwrap_or(str.len());
+    std::ffi::CString::new(&str.as_bytes()[..end]).unwrap_or_default()
+}
+
 /// PG `InputFunctionCall`: call a looked-up input function. `str` may be NULL
 /// (reading a SQL NULL); a strict function then short-circuits to a NULL result.
 /// `None` arg models C's `str == NULL`.
@@ -464,7 +476,9 @@ pub fn InputFunctionCall(
         None,
         None,
     );
-    set_arg(&mut fcinfo, 0, CStringGetDatum(str.as_ptr().cast::<i8>()));
+    // Keep the NUL-terminated buffer alive across the call (the callee borrows it).
+    let cstr = cstring_arg(str);
+    set_arg(&mut fcinfo, 0, CStringGetDatum(cstr.as_ptr()));
     set_arg(&mut fcinfo, 1, ObjectIdGetDatum(typioparam));
     set_arg(&mut fcinfo, 2, Int32GetDatum(typmod));
 
@@ -481,29 +495,119 @@ pub fn InputFunctionCall(
     Some(result)
 }
 
-/// PG `InputFunctionCallSafe`: soft-error variant; reaches `SOFT_ERROR_OCCURRED`
-/// on the not-yet-translated `ErrorSaveContext`.
+/// PG `InputFunctionCallSafe`: soft-error variant of [`InputFunctionCall`]. The
+/// input function is called with `escontext` as its call context; on a soft error
+/// it returns `None` (C returns false) instead of raising, having recorded the
+/// error into the `ErrorSaveContext`. On success it returns `Some(datum)`.
+///
+/// C threads `str == NULL` (a strict function short-circuits to a null result);
+/// that path is reached via `OidInputFunctionCall`'s wrappers, so this `&str`
+/// variant always has a real string.
 #[allow(deprecated)]
 pub fn InputFunctionCallSafe(
-    _flinfo: &mut FmgrInfo,
-    _str: &str,
-    _typioparam: Oid,
-    _typmod: i32,
-    _escontext: *mut Node,
+    flinfo: &mut FmgrInfo,
+    str: &str,
+    typioparam: Oid,
+    typmod: i32,
+    escontext: Option<&mut ErrorSaveContext>,
 ) -> Option<Datum> {
-    unimplemented!("InputFunctionCallSafe needs ErrorSaveContext (miscnodes)")
+    // The soft-error context rides in fcinfo.context as an ErrorSaveContext node
+    // (only when the caller supplied one -- with None the input fn sees a NULL
+    // context and raises hard, exactly like C passing escontext == NULL).
+    let mut fcinfo = local_fcinfo(
+        Some(Box::new(clone_flinfo(flinfo))),
+        3,
+        InvalidOid,
+        escontext_node(&escontext),
+        None,
+    );
+    let cstr = cstring_arg(str);
+    set_arg(&mut fcinfo, 0, CStringGetDatum(cstr.as_ptr()));
+    set_arg(&mut fcinfo, 1, ObjectIdGetDatum(typioparam));
+    set_arg(&mut fcinfo, 2, Int32GetDatum(typmod));
+
+    let func = fcinfo
+        .flinfo
+        .as_ref()
+        .and_then(|fi| fi.fn_addr)
+        .unwrap_or_else(|| panic!("input function flinfo has no installed fn_addr"));
+    let result = call_with_escontext(func, &mut fcinfo, escontext);
+
+    // Result is garbage / possibly null if a soft error was reported.
+    finish_input_call_safe(&fcinfo, result)
 }
 
-/// PG `DirectInputFunctionCallSafe`: soft-error variant by direct fn pointer.
+/// PG `DirectInputFunctionCallSafe`: like [`InputFunctionCallSafe`] but with a
+/// direct pointer to the C function (assumed strict, needs no `FmgrInfo`).
 #[allow(deprecated)]
 pub fn DirectInputFunctionCallSafe(
-    _func: PGFunction,
-    _str: &str,
-    _typioparam: Oid,
-    _typmod: i32,
-    _escontext: *mut Node,
+    func: PGFunction,
+    str: &str,
+    typioparam: Oid,
+    typmod: i32,
+    escontext: Option<&mut ErrorSaveContext>,
 ) -> Option<Datum> {
-    unimplemented!("DirectInputFunctionCallSafe needs ErrorSaveContext (miscnodes)")
+    let mut fcinfo = local_fcinfo(None, 3, InvalidOid, escontext_node(&escontext), None);
+    let cstr = cstring_arg(str);
+    set_arg(&mut fcinfo, 0, CStringGetDatum(cstr.as_ptr()));
+    set_arg(&mut fcinfo, 1, ObjectIdGetDatum(typioparam));
+    set_arg(&mut fcinfo, 2, Int32GetDatum(typmod));
+
+    let result = call_with_escontext(func, &mut fcinfo, escontext);
+    finish_input_call_safe(&fcinfo, result)
+}
+
+/// A fresh in-fcinfo `ErrorSaveContext` node when the caller supplied a context,
+/// else `None` (so the callee sees a NULL context and raises hard). The in-fcinfo
+/// node is a scratch copy; `call_with_escontext` copies any recorded soft error
+/// back to the caller's context after the call.
+fn escontext_node(escontext: &Option<&mut ErrorSaveContext>) -> Option<Box<Node>> {
+    escontext
+        .as_ref()
+        .map(|_| Box::new(Node::ErrorSaveContext(Box::new(ErrorSaveContext::new()))))
+}
+
+/// Invoke `func` with the caller's `ErrorSaveContext` installed into
+/// `fcinfo.context`, then copy any soft-error state back out to the caller's
+/// context. The context lives in the fcinfo (as a Node) for the duration of the
+/// call because the input function reaches it through `fcinfo.context`; we seed it
+/// from the caller's flags (details_wanted) and read the result back afterwards.
+fn call_with_escontext(
+    func: PGFunction,
+    fcinfo: &mut FunctionCallInfoBaseData,
+    escontext: Option<&mut ErrorSaveContext>,
+) -> Datum {
+    // Seed the in-fcinfo context from the caller's request (details_wanted).
+    if let (Some(caller), Some(Node::ErrorSaveContext(inner))) =
+        (&escontext, fcinfo.context.as_deref_mut())
+    {
+        inner.details_wanted = caller.details_wanted;
+    }
+
+    let result = func(fcinfo);
+
+    // Copy any recorded soft-error state back to the caller's context.
+    if let (Some(caller), Some(Node::ErrorSaveContext(inner))) =
+        (escontext, fcinfo.context.as_deref_mut())
+        && inner.error_occurred
+    {
+        caller.error_occurred = true;
+        caller.error_data = inner.error_data.take();
+    }
+    result
+}
+
+/// Shared tail of the *Safe input calls: if a soft error was reported the result
+/// is garbage (return `None`); otherwise a non-null datum must have come back.
+fn finish_input_call_safe(fcinfo: &FunctionCallInfoBaseData, result: Datum) -> Option<Datum> {
+    if SOFT_ERROR_OCCURRED(fcinfo.context.as_deref()) {
+        return None;
+    }
+    // str is always non-null here, so a null result is a bug in the input fn.
+    if fcinfo.isnull {
+        elog!(ERROR, "input function returned NULL".to_string());
+    }
+    Some(result)
 }
 
 /// PG `OidInputFunctionCall`: fmgr_info() then InputFunctionCall().
@@ -824,5 +928,59 @@ mod tests {
         }
         let out = DirectFunctionCall1Coll(double_it, InvalidOid, Datum(21));
         assert_eq!(out, Some(Datum(42)));
+    }
+
+    /// DirectInputFunctionCallSafe over int2in: a valid value returns Some; a bad
+    /// one returns None with the caller's ErrorSaveContext populated, never
+    /// unwinding. This also exercises the NUL-termination fix (empty string was a
+    /// SIGSEGV before).
+    #[test]
+    #[allow(deprecated)]
+    fn input_function_call_safe_soft_and_hard() {
+        use crate::backend::utils::adt::int::int2in;
+        use crate::postgres::DatumGetInt16;
+
+        // Valid: Some, no error.
+        let mut ok = ErrorSaveContext::new();
+        let d = DirectInputFunctionCallSafe(int2in, "123", InvalidOid, -1, Some(&mut ok));
+        assert_eq!(d.map(DatumGetInt16), Some(123));
+        assert!(!ok.error_occurred);
+
+        // Invalid syntax: None, error recorded (details).
+        let mut bad = ErrorSaveContext { details_wanted: true, ..ErrorSaveContext::new() };
+        let d = DirectInputFunctionCallSafe(int2in, "asdf", InvalidOid, -1, Some(&mut bad));
+        assert!(d.is_none());
+        assert!(bad.error_occurred);
+        assert_eq!(
+            bad.error_data.as_deref().and_then(|e| e.message.as_deref()),
+            Some("invalid input syntax for type smallint: \"asdf\"")
+        );
+
+        // Empty string (previously an out-of-bounds read / crash): soft None.
+        let mut empty = ErrorSaveContext::new();
+        assert!(DirectInputFunctionCallSafe(int2in, "", InvalidOid, -1, Some(&mut empty)).is_none());
+        assert!(empty.error_occurred);
+
+        // Overflow: None, out-of-range code recorded.
+        let mut ovf = ErrorSaveContext { details_wanted: true, ..ErrorSaveContext::new() };
+        assert!(DirectInputFunctionCallSafe(int2in, "100000", InvalidOid, -1, Some(&mut ovf)).is_none());
+        assert!(ovf.error_occurred);
+        assert_eq!(
+            ovf.error_data.as_deref().map(|e| e.sqlerrcode),
+            Some(crate::utils::errcodes::ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE)
+        );
+    }
+
+    /// With no context, InputFunctionCallSafe raises (hard error path).
+    #[test]
+    #[allow(deprecated)]
+    fn input_function_call_safe_no_context_raises() {
+        use crate::backend::utils::adt::int::int2in;
+        crate::utils::elog::flush_error_state();
+        let r = std::panic::catch_unwind(|| {
+            DirectInputFunctionCallSafe(int2in, "asdf", InvalidOid, -1, None)
+        });
+        assert!(r.is_err(), "no context -> hard ERROR (unwind)");
+        crate::utils::elog::flush_error_state();
     }
 }

@@ -38,8 +38,10 @@ use crate::common::int::{
     pg_mul_s32_overflow, pg_neg_u16_overflow, pg_neg_u32_overflow, pg_sub_s16_overflow,
     pg_sub_s32_overflow,
 };
-use crate::ereport;
+use crate::{ereport, ereturn};
 use crate::fmgr::{FunctionCallInfoBaseData, PG_ARGISNULL, PG_NARGS};
+use crate::nodes::miscnodes::ErrorSaveContext;
+use crate::nodes::nodes::Node;
 use crate::postgres::{
     BoolGetDatum, CStringGetDatum, Datum, DatumGetBool, DatumGetCString, DatumGetInt16,
     DatumGetInt32, DatumGetInt64, Int16GetDatum, Int32GetDatum, Int64GetDatum,
@@ -92,6 +94,17 @@ fn pg_getarg_cstring(fcinfo: &FunctionCallInfoBaseData, n: usize) -> String {
     // that outlives the call (InputFunctionCall keeps the source alive).
     let cstr = unsafe { core::ffi::CStr::from_ptr(p) };
     cstr.to_string_lossy().into_owned()
+}
+
+/// The call's soft-error context (`fcinfo->context` cast to `ErrorSaveContext`),
+/// or `None` when the caller did not supply one (the hard-error path). Shared by
+/// the type input functions that use `ereturn` (int2in/int4in).
+#[inline]
+fn fcinfo_escontext(fcinfo: &mut FunctionCallInfoBaseData) -> Option<&mut ErrorSaveContext> {
+    match fcinfo.context.as_deref_mut() {
+        Some(Node::ErrorSaveContext(e)) => Some(e),
+        _ => None,
+    }
 }
 
 /// PG `PG_RETURN_CSTRING(s)`: hand back an owned C string as a `Datum`.
@@ -236,62 +249,67 @@ fn is_base_digit(c: u8, base: u64) -> bool {
     }
 }
 
-/// PG numutils `pg_strtoint16`: parse a string to int16 or raise.
-fn strtoint16(s: &str) -> i16 {
+/// PG numutils `pg_strtoint16_safe`: parse a string to int16. On error the report
+/// is routed through `escontext` -- soft (records + returns `None`) if the caller
+/// supplied an `ErrorSaveContext`, else hard (ereport ERROR, diverges). C's
+/// out-param + bool folds to `Option`.
+fn strtoint16_safe(s: &str, escontext: Option<&mut ErrorSaveContext>) -> Option<i16> {
     match parse_int_str(s) {
         Ok((tmp, neg)) => {
             if neg {
                 match pg_neg_u16_overflow(tmp as u16) {
-                    Some(r) if u64::from(tmp as u16) == tmp => r,
-                    _ => out_of_range(s, "smallint"),
+                    Some(r) if u64::from(tmp as u16) == tmp => Some(r),
+                    _ => out_of_range(s, "smallint", escontext),
                 }
             } else if tmp <= PG_INT16_MAX as u64 {
-                tmp as i16
+                Some(tmp as i16)
             } else {
-                out_of_range(s, "smallint")
+                out_of_range(s, "smallint", escontext)
             }
         }
-        Err(ParseErr::OutOfRange) => out_of_range(s, "smallint"),
-        Err(ParseErr::InvalidSyntax) => invalid_syntax(s, "smallint"),
+        Err(ParseErr::OutOfRange) => out_of_range(s, "smallint", escontext),
+        Err(ParseErr::InvalidSyntax) => invalid_syntax(s, "smallint", escontext),
     }
 }
 
-/// PG numutils `pg_strtoint32`: parse a string to int32 or raise.
-fn strtoint32(s: &str) -> i32 {
+/// PG numutils `pg_strtoint32_safe`: like [`strtoint16_safe`] but for int32.
+fn strtoint32_safe(s: &str, escontext: Option<&mut ErrorSaveContext>) -> Option<i32> {
     match parse_int_str(s) {
         Ok((tmp, neg)) => {
             if neg {
                 match pg_neg_u32_overflow(tmp as u32) {
-                    Some(r) if u64::from(tmp as u32) == tmp => r,
-                    _ => out_of_range(s, "integer"),
+                    Some(r) if u64::from(tmp as u32) == tmp => Some(r),
+                    _ => out_of_range(s, "integer", escontext),
                 }
             } else if tmp <= PG_INT32_MAX as u64 {
-                tmp as i32
+                Some(tmp as i32)
             } else {
-                out_of_range(s, "integer")
+                out_of_range(s, "integer", escontext)
             }
         }
-        Err(ParseErr::OutOfRange) => out_of_range(s, "integer"),
-        Err(ParseErr::InvalidSyntax) => invalid_syntax(s, "integer"),
+        Err(ParseErr::OutOfRange) => out_of_range(s, "integer", escontext),
+        Err(ParseErr::InvalidSyntax) => invalid_syntax(s, "integer", escontext),
     }
 }
 
-fn out_of_range(s: &str, typname: &str) -> ! {
+/// numutils.c `out_of_range:` label -- `ereturn(escontext, 0, ...)`. Generic over
+/// the caller's result width (`Option<T>`): the soft path returns `None`, the hard
+/// path raises ERROR.
+fn out_of_range<T>(s: &str, typname: &str, escontext: Option<&mut ErrorSaveContext>) -> Option<T> {
     let (sv, tv) = (s.to_owned(), typname.to_owned());
-    ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
+    ereturn!(escontext, None, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE)
             .errmsg(format!("value \"{sv}\" is out of range for type {tv}"));
     });
-    unreachable!()
 }
 
-fn invalid_syntax(s: &str, typname: &str) -> ! {
+/// numutils.c `invalid_syntax:` label -- `ereturn(escontext, 0, ...)`.
+fn invalid_syntax<T>(s: &str, typname: &str, escontext: Option<&mut ErrorSaveContext>) -> Option<T> {
     let (sv, tv) = (s.to_owned(), typname.to_owned());
-    ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
+    ereturn!(escontext, None, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(ERRCODE_INVALID_TEXT_REPRESENTATION)
             .errmsg(format!("invalid input syntax for type {tv}: \"{sv}\""));
     });
-    unreachable!()
 }
 
 /// Raise the standard "integer out of range" / "smallint out of range" error.
@@ -320,10 +338,14 @@ fn division_by_zero() -> ! {
 //   USER I/O ROUTINES
 // ===========================================================================
 
-/// PG `int2in`: converts "num" to int16.
+/// PG `int2in`: converts "num" to int16. Routes any error through the call's
+/// soft-error context (`fcinfo->context`) via `pg_strtoint16_safe`. On a soft
+/// error the returned datum is garbage (0, the ereturn dummy); the caller checks
+/// the context before trusting it.
 pub fn int2in(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     let num = pg_getarg_cstring(fcinfo, 0);
-    Int16GetDatum(strtoint16(&num))
+    let esc = fcinfo_escontext(fcinfo);
+    Int16GetDatum(strtoint16_safe(&num, esc).unwrap_or(0))
 }
 
 /// PG `int2out`: converts int16 to "num".
@@ -362,10 +384,12 @@ pub fn int2vectorsend(_fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     unimplemented!("int2vectorsend needs array_send")
 }
 
-/// PG `int4in`: converts "num" to int32.
+/// PG `int4in`: converts "num" to int32. Routes errors through the call's
+/// soft-error context (`fcinfo->context`) via `pg_strtoint32_safe`.
 pub fn int4in(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     let num = pg_getarg_cstring(fcinfo, 0);
-    Int32GetDatum(strtoint32(&num))
+    let esc = fcinfo_escontext(fcinfo);
+    Int32GetDatum(strtoint32_safe(&num, esc).unwrap_or(0))
 }
 
 /// PG `int4out`: converts int32 to "num".
