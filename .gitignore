@@ -17,5 +17,17 @@ Cargo.lock
 /pg_xact/
 /pg_subtrans/
 
-ai/harness/
+# Ignore ai/harness/* but keep the pg_regress conformance harness (plan 004
+# step 05) checked in. Re-include the directory chain first, then the subtree;
+# git will not descend into a fully-excluded directory otherwise.
+ai/harness/*
+!ai/harness/regress/
+ai/harness/regress/*
+!ai/harness/regress/run.sh
+!ai/harness/regress/pepper_schedule
+!ai/harness/regress/known_diffs/
+# except the built pg_regress binary and pg_regress run output.
+ai/harness/regress/.build/
+ai/harness/regress/.run/
+
 ai/tmp/

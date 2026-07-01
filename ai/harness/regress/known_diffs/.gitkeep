@@ -1,0 +1,4 @@
+# KNOWN-DIFF snapshots for pg_regress conformance (plan 004).
+# A NAME.out here documents an accepted output gap: the harness classifies a
+# test KNOWN-DIFF when its output matches NAME.out (vs a PASS against upstream
+# expected/NAME.out). Regenerate with run.sh --update-known. Empty for now.

@@ -1,0 +1,22 @@
+# PepperDB starting schedule for pg_regress (plan 004).
+#
+# pg_regress schedule format: `test: NAME [NAME...]` runs the named tests in
+# order (each line's group could run in parallel upstream; the harness pins
+# --max-connections=1 so ordering is deterministic here).
+#
+# This is the MINIMAL step-05 seed -- just enough READY, self-contained tests to
+# exercise the harness end to end. Step 06 curates the real starting subset and
+# ships the trimmed test_setup fixtures. Tests that need the upstream test_setup
+# tables (onek/tenk1/int8_tbl/...), which is not loadable yet, are intentionally
+# LEFT OUT for now and noted below.
+#
+# Included (README Phase-0 exit list, minus test_setup-dependent ones):
+test: comments
+test: sanity_check
+test: misc_sanity
+test: select_having
+test: combocid
+#
+# Deferred to step 06 (need the test_setup tables, not yet loadable):
+#   bitmapops   -- builds a large indexed table, relies on onek-style data
+#   portals_p2  -- SELECT * FROM onek (test_setup table)
