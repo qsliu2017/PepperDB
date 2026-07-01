@@ -332,11 +332,16 @@ fn should_output_to_server(elevel: i32) -> bool {
 }
 
 fn should_output_to_client(elevel: i32) -> bool {
-    // PG checks whereToSendOutput == DestRemote (a connected frontend). With no
-    // frontend wired up yet, route nothing to the client; the server log path
-    // is what's exercised. TODO: honor whereToSendOutput / ClientAuthInProgress.
-    let _ = elevel;
-    false
+    // PG: whereToSendOutput == DestRemote && elevel != LOG_SERVER_ONLY, then honor
+    // client_min_messages. Our `whereToSendOutput == DestRemote` equivalent is a
+    // connected frontend (MyProcPort != NULL -> a PqComm in scope). Auth is trust
+    // and complete by the time the command loop runs, so ClientAuthInProgress is
+    // effectively false: send when elevel >= client_min_messages || elevel == INFO
+    // (this already includes ERROR/FATAL/PANIC, which sort above NOTICE).
+    if elevel == LOG_SERVER_ONLY || !crate::backend::libpq::pqcomm::has_comm() {
+        return false;
+    }
+    elevel >= CLIENT_MIN_MESSAGES || elevel == INFO
 }
 
 // message_level_is_interesting -- would ereport/elog do anything?
@@ -975,10 +980,91 @@ fn send_message_to_server_log(edata: &ErrorData) {
     }
 }
 
-// send_message_to_frontend: the protocol-encoded client send is deferred (needs
-// the libpq be-side + connected frontend). TODO(panic): wire to pqcomm.
-fn send_message_to_frontend(_edata: &ErrorData) {
-    // TODO: deferred -- pq_beginmessage/pq_sendstring/pq_endmessage frontend send.
+// send_message_to_frontend: build an ErrorResponse ('E') / NoticeResponse ('N')
+// from `edata` and buffer it to the frontend. Only the protocol >= 3.0 new-style
+// path is supported (PepperDB speaks only protocol 3.0). Field order matches PG:
+// S(severity) V(nonlocalized severity) C(sqlstate) M(message, required) then the
+// optional D/H/W/s/t/c/d/n/P/p/q/F/L/R fields, terminated by a zero byte.
+// NOTICE/WARNING/lower -> 'N'; ERROR/FATAL/PANIC -> 'E'. Buffered SYNC via
+// pq_putmessage_sync; the command loop flushes (PG flushes here, but our flush is
+// async and the loop drives it after the sync recovery handler returns).
+fn send_message_to_frontend(edata: &ErrorData) {
+    use crate::backend::libpq::pqcomm::{has_comm, pq_putmessage_sync, ErrorFields};
+    use crate::libpq::protocol::{PQMSG_ERROR_RESPONSE, PQMSG_NOTICE_RESPONSE};
+    use crate::postgres_ext::{
+        PG_DIAG_COLUMN_NAME, PG_DIAG_CONSTRAINT_NAME, PG_DIAG_CONTEXT, PG_DIAG_DATATYPE_NAME,
+        PG_DIAG_INTERNAL_POSITION, PG_DIAG_INTERNAL_QUERY, PG_DIAG_MESSAGE_DETAIL,
+        PG_DIAG_MESSAGE_HINT, PG_DIAG_MESSAGE_PRIMARY, PG_DIAG_SCHEMA_NAME, PG_DIAG_SEVERITY,
+        PG_DIAG_SEVERITY_NONLOCALIZED, PG_DIAG_SOURCE_FILE, PG_DIAG_SOURCE_FUNCTION,
+        PG_DIAG_SOURCE_LINE, PG_DIAG_SQLSTATE, PG_DIAG_STATEMENT_POSITION, PG_DIAG_TABLE_NAME,
+    };
+
+    // No connected frontend (MyProcPort == NULL): nothing to send.
+    if !has_comm() {
+        return;
+    }
+
+    // 'N' (Notice) for nonfatal conditions, 'E' for errors.
+    let msgtype = if edata.elevel < ERROR { PQMSG_NOTICE_RESPONSE } else { PQMSG_ERROR_RESPONSE };
+
+    let sev = error_severity(edata.elevel);
+    let mut f = ErrorFields::new();
+    // Localized + non-localized severity are the same here (no NLS).
+    f.field(PG_DIAG_SEVERITY, sev);
+    f.field(PG_DIAG_SEVERITY_NONLOCALIZED, sev);
+    f.field(PG_DIAG_SQLSTATE, &unpack_sql_state(edata.sqlerrcode));
+
+    // M field is required per protocol, so always send something.
+    match edata.message.as_deref() {
+        Some(m) => f.field(PG_DIAG_MESSAGE_PRIMARY, &substitute_errno(m, edata.saved_errno)),
+        None => f.field(PG_DIAG_MESSAGE_PRIMARY, "missing error text"),
+    };
+
+    // detail_log is intentionally not used here (server-log only).
+    if let Some(d) = edata.detail.as_deref() {
+        f.field(PG_DIAG_MESSAGE_DETAIL, d);
+    }
+    if let Some(h) = edata.hint.as_deref() {
+        f.field(PG_DIAG_MESSAGE_HINT, h);
+    }
+    if let Some(c) = edata.context.as_deref() {
+        f.field(PG_DIAG_CONTEXT, c);
+    }
+    if let Some(s) = edata.schema_name.as_deref() {
+        f.field(PG_DIAG_SCHEMA_NAME, s);
+    }
+    if let Some(t) = edata.table_name.as_deref() {
+        f.field(PG_DIAG_TABLE_NAME, t);
+    }
+    if let Some(c) = edata.column_name.as_deref() {
+        f.field(PG_DIAG_COLUMN_NAME, c);
+    }
+    if let Some(d) = edata.datatype_name.as_deref() {
+        f.field(PG_DIAG_DATATYPE_NAME, d);
+    }
+    if let Some(n) = edata.constraint_name.as_deref() {
+        f.field(PG_DIAG_CONSTRAINT_NAME, n);
+    }
+    if edata.cursorpos > 0 {
+        f.field(PG_DIAG_STATEMENT_POSITION, &edata.cursorpos.to_string());
+    }
+    if edata.internalpos > 0 {
+        f.field(PG_DIAG_INTERNAL_POSITION, &edata.internalpos.to_string());
+    }
+    if let Some(q) = edata.internalquery.as_deref() {
+        f.field(PG_DIAG_INTERNAL_QUERY, q);
+    }
+    if let Some(file) = edata.filename.as_deref() {
+        f.field(PG_DIAG_SOURCE_FILE, file);
+    }
+    if edata.lineno > 0 {
+        f.field(PG_DIAG_SOURCE_LINE, &edata.lineno.to_string());
+    }
+    if let Some(func) = edata.funcname.as_deref() {
+        f.field(PG_DIAG_SOURCE_FUNCTION, func);
+    }
+
+    pq_putmessage_sync(msgtype, &f.finish());
 }
 
 // write_console: raw write to stderr (PG's non-win32 path).

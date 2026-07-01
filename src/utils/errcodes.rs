@@ -25,9 +25,16 @@ pub const fn make_sqlstate_str(s: &[u8]) -> i32 {
     make_sqlstate(s[0], s[1], s[2], s[3], s[4])
 }
 
+/// make_sqlstate over a 5-char SQLSTATE `&str` (the `errcodes.txt` code column).
+/// Takes `&str` so the errcode table can list plain string literals; the
+/// byte-extraction happens inside, avoiding a `.as_bytes()` at each call site.
+pub const fn make_sqlstate_code(code: &str) -> i32 {
+    make_sqlstate_str(code.as_bytes())
+}
+
 macro_rules! define_errcodes {
     ($(($name:ident, $code:literal)),* $(,)?) => {
-        $( pub const $name: i32 = make_sqlstate_str(b"XX002"); )*
+        $( pub const $name: i32 = make_sqlstate_code($code); )*
     };
 }
 

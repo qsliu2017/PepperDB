@@ -1932,6 +1932,81 @@ mod wire_tests {
             .expect("supervisor task ok");
     }
 
+    /// Step 03: a failing query returns an ErrorResponse ('E') carrying a SQLSTATE
+    /// and message, the ReadyForQuery reports idle ('I') after the autocommit
+    /// rollback, and the SAME session stays usable -- a following SELECT 1 returns
+    /// its row (the connection is not dropped).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn m3_error_response_then_session_survives_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        // A reference to a nonexistent relation raises ERROR undefined_table (42P01).
+        let err = simple_query(&mut client, &mut buf, "SELECT * FROM no_such_table").await;
+        let types: Vec<u8> = err.iter().map(|m| m.ty).collect();
+        assert_eq!(types, vec![b'E', b'Z'], "ErrorResponse + ReadyForQuery");
+
+        // The 'E' body is a field list; find the M (primary message) and C (sqlstate)
+        // fields, then the terminating zero.
+        let e = &err[0];
+        let fields = decode_error_fields(&e.body);
+        assert_eq!(
+            fields.iter().find(|(t, _)| *t == b'C').map(|(_, v)| v.as_str()),
+            Some("42P01"),
+            "SQLSTATE undefined_table"
+        );
+        assert_eq!(
+            fields.iter().find(|(t, _)| *t == b'S').map(|(_, v)| v.as_str()),
+            Some("ERROR"),
+            "severity ERROR"
+        );
+        let msg = fields.iter().find(|(t, _)| *t == b'M').map(|(_, v)| v.as_str());
+        assert!(
+            msg.is_some_and(|m| m.contains("no_such_table")),
+            "primary message names the missing relation: {msg:?}"
+        );
+
+        // The autocommit transaction was rolled back: idle status, not 'E'.
+        assert_eq!(err[1].body, b"I", "ReadyForQuery idle after rollback");
+
+        // THE POINT: the same session is still usable.
+        let ok = simple_query(&mut client, &mut buf, "SELECT 1").await;
+        let types: Vec<u8> = ok.iter().map(|m| m.ty).collect();
+        assert_eq!(
+            types,
+            vec![b'T', b'D', b'C', b'Z'],
+            "session survives: SELECT 1 returns a row"
+        );
+        assert_eq!(ok[2].body, b"SELECT 1\0");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
+    /// Decode an ErrorResponse/NoticeResponse field list into (tag, value) pairs.
+    fn decode_error_fields(body: &[u8]) -> Vec<(u8, String)> {
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < body.len() && body[i] != 0 {
+            let tag = body[i];
+            i += 1;
+            let start = i;
+            while i < body.len() && body[i] != 0 {
+                i += 1;
+            }
+            out.push((tag, String::from_utf8_lossy(&body[start..i]).into_owned()));
+            i += 1; // skip the field NUL
+        }
+        out
+    }
+
     /// Decode the single-column int4 text value of a DataRow message body. The
     /// body is `int16 ncols` then per column `int32 len` + `len` bytes of text.
     fn datarow_single_text(body: &[u8]) -> String {
@@ -3238,8 +3313,12 @@ mod wire_tests {
         assert_eq!(datarow_single_text(&d.body), "7", "SELECT from schema-qualified table");
 
         // IF NOT EXISTS on the existing schema is a no-op (still CREATE SCHEMA tag).
+        // PG emits a "schema already exists, skipping" NoticeResponse ('N') first,
+        // so match the CommandComplete ('C') rather than the leading message.
         let r = simple_query(&mut client, &mut buf, "CREATE SCHEMA IF NOT EXISTS s").await;
-        assert_eq!(r[0].body, b"CREATE SCHEMA\0", "IF NOT EXISTS no-op");
+        let cc = r.iter().find(|m| m.ty == b'C').expect("CommandComplete");
+        assert_eq!(cc.body, b"CREATE SCHEMA\0", "IF NOT EXISTS no-op");
+        assert!(r.iter().any(|m| m.ty == b'N'), "IF NOT EXISTS emits a NoticeResponse");
 
         // Drop the contained table, then the (now-empty) schema (pg_depend-driven
         // CASCADE to contained objects stages with dependency recording).

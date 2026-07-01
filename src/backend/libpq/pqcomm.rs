@@ -760,6 +760,44 @@ pub async fn pq_send_backend_key_data(pid: i32, cancel_key: &[u8]) {
 }
 
 // ---------------------------------------------------------------------------
+// ErrorResponse ('E') / NoticeResponse ('N') field-list wire encoding
+// (backend/utils/error/elog.c send_message_to_frontend, protocol >= 3.0). Each
+// field is one type byte (a PG_DIAG_* tag) followed by a NUL-terminated value;
+// the field list is terminated by a single zero byte. Buffered SYNC via
+// pq_putmessage_sync; the command loop flushes.
+// ---------------------------------------------------------------------------
+
+/// A builder for the 'E'/'N' field list. `field` appends `tag` + `value\0`;
+/// `finish` appends the terminating zero byte and returns the assembled body.
+/// Mirrors C's `pq_sendbyte(PG_DIAG_*)` + `err_sendstring(value)` sequence.
+#[derive(Default)]
+pub struct ErrorFields {
+    body: Vec<u8>,
+}
+
+impl ErrorFields {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Append one diagnostic field: the type byte then the NUL-terminated value.
+    pub fn field(&mut self, tag: u8, value: &str) -> &mut Self {
+        self.body.push(tag);
+        self.body.extend_from_slice(value.as_bytes());
+        self.body.push(0);
+        self
+    }
+
+    /// Append the terminating zero byte and yield the message body.
+    #[must_use]
+    pub fn finish(mut self) -> Vec<u8> {
+        self.body.push(0);
+        self.body
+    }
+}
+
+// ---------------------------------------------------------------------------
 // re-export the startup max for callers that referenced the C symbol via pqcomm
 // ---------------------------------------------------------------------------
 
@@ -778,6 +816,19 @@ mod tests {
         v.extend_from_slice(&((body.len() as u32 + 4).to_be_bytes()));
         v.extend_from_slice(body);
         v
+    }
+
+    #[test]
+    fn error_fields_encodes_tag_value_pairs_and_zero_terminator() {
+        let mut f = ErrorFields::new();
+        f.field(b'S', "ERROR").field(b'C', "42P01").field(b'M', "boom");
+        // Each field: tag byte + value bytes + NUL; list ends with a single 0.
+        assert_eq!(f.finish(), b"SERROR\0C42P01\0Mboom\0\0");
+    }
+
+    #[test]
+    fn error_fields_empty_is_just_the_terminator() {
+        assert_eq!(ErrorFields::new().finish(), b"\0");
     }
 
     async fn with_comm<S, F, Fut, T>(stream: S, f: F) -> T
