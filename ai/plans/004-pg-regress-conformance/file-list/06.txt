@@ -1,0 +1,9 @@
+# Step 06 -- trimmed test_setup + curated starting subset.
+# Phase P1. Depends on: 05. Parallel: no. Deliverable: a test_setup that seeds ONLY
+# supported-type fixtures (drop geometry/INHERITS/range/SQL-fn/C-fn), and the
+# pepper_schedule = the 6 IN-SCOPE tests + Tier-1 (char/varchar/int2/4/8/float4/8/
+# text/union/delete) in dependency order. EXIT of P1: run.sh prints a conformance
+# % + regression.diffs over the subset.
+# Disposition: new=harness fixture.
+ai/harness/regress/test_setup_pepper.sql  # new -- trimmed shared fixtures
+ai/harness/regress/pepper_schedule        # grow -- add Tier-0 + Tier-1 tests

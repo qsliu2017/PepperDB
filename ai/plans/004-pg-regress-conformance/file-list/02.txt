@@ -1,0 +1,10 @@
+# Step 02 -- complete the startup handshake (THE gate to real psql).
+# Phase P0. Depends on: 01. Parallel: no. Deliverable: real libpq/psql completes
+# the v3 startup: StartupMessage -> AuthenticationOk(trust) -> ParameterStatus(set)
+# -> non-empty BackendKeyData -> ReadyForQuery.
+# Disposition: grow=spine.
+src/backend/tcop/backend_startup.rs  # grow -- AuthenticationOk (trust), ParameterStatus
+                                     #         (server_version/client_encoding/DateStyle/
+                                     #          integer_datetimes/standard_conforming_strings/
+                                     #          TimeZone/...), non-empty BackendKeyData
+src/backend/libpq/pqcomm.rs          # grow -- serialize the auth/paramstatus/keydata msgs

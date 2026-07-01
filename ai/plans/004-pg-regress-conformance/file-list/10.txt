@@ -1,0 +1,11 @@
+# Step 10 -- Phase 4: string functions (varlena breadth + regexp + like + crypto).
+# Effort: L. Depends on: 07 (soft-error), grammar CHAR/VARCHAR + dollar-quote (name).
+# Unblocks: strings, text, varchar, char, name, md5, select_implicit.
+src/backend/utils/adt/varlena.rs          # full -- concat/format/quote_*/reverse/left/right/
+                                          #          lpad/rpad/translate/split_part/to_bin|oct|hex/
+                                          #          encode/decode/bit|byte/LIKE glue
+src/backend/utils/adt/regexp.rs           # full -- regexp_* functions
+src/regex/regex.rs                        # full -- Spencer regex engine
+src/backend/utils/adt/like.rs             # full -- LIKE/ILIKE match
+src/backend/utils/adt/cryptohashfuncs.rs  # full -- md5/sha/crc
+src/backend/utils/adt/formatting.rs       # grow -- str_tolower/str_toupper

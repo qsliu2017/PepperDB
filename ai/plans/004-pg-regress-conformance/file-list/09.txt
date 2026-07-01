@@ -1,0 +1,5 @@
+# Step 09 -- Phase 3: CREATE TABLE AS / SELECT INTO.
+# Effort: M. Depends on: 08 (generate_series used in CTAS bodies).
+# Unblocks: select_into, select_distinct (core CTAS sections).
+src/backend/commands/createas.rs   # full -- ExecCreateTableAs, CreateIntoRelDestReceiver,
+                                   #          GetIntoRelEFlags

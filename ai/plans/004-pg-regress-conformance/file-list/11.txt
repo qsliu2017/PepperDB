@@ -1,0 +1,8 @@
+# Step 11 -- Phase 5: datetime type cluster.
+# Effort: M. Depends on: 07 (soft-error), 08 (generate_series(timestamp)).
+# Named-IANA-zone resolution stays deferred -> timestamptz/horology/interval remain
+# out until a tz-DB campaign. Unblocks: date, time, timetz, timestamp.
+src/backend/utils/adt/date.rs       # grow -- date I/O + ops (soft-error tail)
+src/backend/utils/adt/time.rs       # grow -- time/timetz I/O + ops
+src/backend/utils/adt/timestamp.rs  # grow -- timestamp ops, generate_series_timestamp, extract
+src/backend/utils/adt/datetime.rs   # grow -- shared datetime parse helpers

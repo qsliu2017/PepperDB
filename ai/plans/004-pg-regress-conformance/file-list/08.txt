@@ -1,0 +1,6 @@
+# Step 08 -- Phase 2: set-returning-function context + generate_series.
+# Effort: M. Depends on: 07. generate_series populates most test tables.
+# Unblocks: select_distinct_on; tail of int8 (int8gcd/int8lcm) + select_distinct.
+src/funcapi.rs                             # grow -- FuncCallContext ValuePerCall (SRF)
+src/backend/executor/nodeFunctionscan.rs   # grow -- SRF materialize/value-per-call
+src/backend/utils/adt/int.rs               # grow -- generate_series_step_int4/int8, gcd/lcm

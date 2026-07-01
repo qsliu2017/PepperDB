@@ -1,0 +1,18 @@
+# Step 23 -- Campaign: SQL-language + PL/pgSQL function-body EXECUTION.
+# Effort: XL (PL is ~19.9k C lines; pl_exec.c 9.1k). Highest extended leverage.
+# Depends on: plan-003 SPI (done) + fmgr language dispatch; unblocks parts of 24/27.
+# Unblocks (~11 full): plpgsql, create_function_sql, create_procedure, rangefuncs,
+# polymorphism, domain, merge, aggregates, create_aggregate, create_cast, plancache.
+# Internal sub-steps (detail: analysis/plpgsql.md):
+#   P1 prolang dispatch skeleton + seed plpgsql lang OID (S)
+#   P2 SQL-language function execution end-to-end via SPI (M)  [smaller substrate first]
+#   P3 CREATE FUNCTION param-mode + default gaps (M)
+#   P4 CALL + procedures (M)
+#   P5 PL/pgSQL lexer + grammar, parse-only (XL; sub-split by grammar section)
+#   P6 interpreter core: control flow (XL)
+#   P7 SPI-backed statements: cursors, SRF (L)
+#   P8 exceptions/RAISE + trigger firing (XL; PG exception-blocks vs Rust unwind = design)
+#   P9 DO anonymous blocks (S)
+src/executor/functions.rs            # full -- SQL-language function executor
+src/backend/utils/fmgr/fmgr.rs       # grow -- match-prolang language-handler dispatch
+# + src/pl/plpgsql/**  (new -- lexer/parser/interpreter; no dynamic loader: hardcode the arm)

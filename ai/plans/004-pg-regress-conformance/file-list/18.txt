@@ -1,0 +1,8 @@
+# Step 18 -- Phase 12: roles (pg_authid / pg_auth_members).
+# Effort: L. CREATE ROLE/USER do not parse today; aclchk only handles TABLE targets.
+# Unblocks: roleattributes; enables privileges (partial -- also needs large objects +
+# REASSIGN/DROP OWNED). Foundational for privilege-enforcement tests later.
+src/backend/parser/gram.lalrpop      # grow -- CreateRoleStmt/AlterRole/DropRole, SET ROLE
+src/backend/commands/user.rs         # full -- CreateRole/AlterRole/DropRole, pg_auth_members
+src/backend/catalog/pg_authid.rs     # new  -- seed + role catalog
+src/backend/catalog/aclchk.rs        # grow -- non-table GRANT/REVOKE object types

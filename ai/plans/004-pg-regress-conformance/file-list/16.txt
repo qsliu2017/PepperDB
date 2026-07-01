@@ -1,0 +1,5 @@
+# Step 16 -- Phase 10: aggregates breadth + CREATE AGGREGATE.
+# Effort: M. Depends on: 12 (var/stddev accum), 11 (arrays feed array_agg -> phase 11).
+# Unblocks: aggregates, create_aggregate.
+src/backend/commands/aggregatecmds.rs   # full -- DefineAggregate (pg_aggregate rows)
+src/backend/executor/nodeAgg.rs         # grow -- ordered-set/hypothetical/FILTER breadth

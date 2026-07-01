@@ -1,0 +1,12 @@
+# Step 05 -- the pg_regress installcheck harness + double-baseline classifier.
+# Phase P1. Depends on: P0 (04). Parallel: no. Deliverable: ai/harness/regress/run.sh
+# starts a fresh PepperDB server, drives PG's own pg_regress in installcheck mode
+# against real psql, reuses ref/postgres sql/+expected/ directly, and classifies
+# each test PASS / KNOWN-DIFF / NEW-DIFF.
+# Disposition: new=harness (no .c counterpart).
+ai/harness/regress/run.sh                 # new -- server up/down, env pinning
+                                          #        (PGTZ/PGDATESTYLE/LC_MESSAGES=C),
+                                          #        createdb regression, pg_regress
+                                          #        installcheck wiring, diff classify
+ai/harness/regress/known_diffs/           # new -- checked-in KNOWN-DIFF snapshots
+ai/harness/regress/pepper_schedule        # new -- curated starting schedule (grows)

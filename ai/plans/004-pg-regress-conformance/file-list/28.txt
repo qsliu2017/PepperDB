@@ -1,0 +1,22 @@
+# Step 28 -- Campaign: declarative partitioning (+ table inheritance prerequisite).
+# Effort: XL (partbounds.c 5.0k, partprune.c 3.8k, execPartition.c 2.6k). Depends on:
+# plan-003 tablecmds/planner/executor Append (btree indexes only). Unblocks (~9): create_table,
+# alter_table, insert, indexing, hash_part, partition_join, partition_prune, partition_aggregate,
+# partition_info (+ partial inherit/identity). Partition-wise join/agg = optional (EXPLAIN-only).
+# Internal (detail: analysis/partitioning.md):
+#   P1 pg_inherits real impl + grammar PARTITION BY/OF  [shared inheritance prerequisite]
+#   P2 partition-bound construction/validation (hash/list/range) -- the algorithmic core
+#   P3 CREATE TABLE partitioned + partition DDL
+#   P4 ATTACH/DETACH PARTITION
+#   P5 tuple routing on INSERT (execPartition)
+#   P6 Append-based scan expansion for SELECT (shared w/ inheritance, optimizer/inherit.rs)
+#   P7 partition pruning (planner)
+#   P8 partitioned indexes
+#   P9 (optional) partition-wise join/aggregate
+src/catalog/pg_inherits.rs              # full -- inheritance catalog (prerequisite)
+src/partitioning/partbounds.rs          # full -- bound construct/validate
+src/partitioning/partdesc.rs            # full -- partition descriptor cache
+src/partitioning/partprune.rs           # full -- pruning
+src/executor/execPartition.rs           # full -- tuple routing
+src/backend/commands/tablecmds.rs       # grow -- PARTITION BY/OF/ATTACH/DETACH
+src/optimizer/inherit.rs                # full -- relation expansion (shared w/ inheritance)

@@ -1,0 +1,14 @@
+# Step 27 -- Campaign: event triggers.
+# Effort: M. Framework lands without PL; full green needs 23 (trigger bodies are plpgsql).
+# Depends on: plan-003 utility/ProcessUtility dispatch. Unblocks: event_trigger,
+# event_trigger_login (both -> KNOWN-DIFF until 23, then PASS).
+# WARNING: wire the LIVE dispatcher src/backend/tcop/utility.rs (NOT the dead src/tcop/utility.rs).
+# Internal (detail: analysis/event-triggers.md):
+#   A catalog + grammar (CREATE/ALTER/DROP EVENT TRIGGER) + event_trigger pseudo-type (M)
+#   B firing framework: ~20 ProcessUtility call sites + evtcache + EventTriggerData call conv (L)
+#   C table_rewrite event + pg_event_trigger_*() support functions (M)
+#   D login event: dathasloginevt flag + PostgresMain call site (S)
+src/backend/commands/event_trigger.rs  # full -- create + firing framework
+src/backend/catalog/pg_event_trigger.rs # grow -- indexes + syscaches
+src/backend/tcop/utility.rs            # grow -- ddl_command_start/end + sql_drop firing hooks
+src/backend/parser/gram.lalrpop        # grow -- CreateEventTrigStmt

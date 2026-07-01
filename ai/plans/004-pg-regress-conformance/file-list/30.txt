@@ -1,0 +1,26 @@
+# Step 30 -- Deferred register (not implemented in this plan). Ordered future work,
+# each a self-contained subsystem gating out-of-scope tests. Two entries (parallel
+# query, predicate/SSI) were analyzed and deferred here for ~0 pg_regress yield --
+# their detailed breakdowns are kept for whoever picks them up.
+#
+# ZERO-pg_regress-yield (architectural completeness; move to a separate plan):
+#   parallel query        # 0 immediate: every parallel test co-blocked by inheritance/PL;
+#                         #   recommended approach Option B (plan-faithful sequential Gather).
+#                         #   detail: analysis/parallel.md
+#   predicate / SSI locks # 0 core-regress tests: all SSI coverage is in the isolation
+#                         #   suite (out of scope). detail: analysis/ssi.md
+#
+# Large type/format + index subsystems (gate the out-of-scope tail):
+#   geometry types (geo_ops.c ~5.5k)     # point/line/lseg/box/path/polygon/circle, geometry
+#   json/jsonb/jsonpath                   # json*, jsonb*, sqljson*
+#   ranges / multiranges                  # rangetypes, multirangetypes, without_overlaps
+#   table inheritance (INHERITS)          # inherit, typed_table (pg_inherits also a step-28 prereq)
+#   non-btree index AMs                   # gin, gist, spgist, brin*, hash_index (+ AM framework)
+#   XML                                   # xml, xmlmap
+#   full-text search                      # tsearch, tsdicts, tstypes, tsrf
+#   foreign data wrappers                 # foreign_data
+#   publication / subscription            # publication, subscription
+#   per-code SQLSTATE (errcodes.rs)       # cross-cutting: *_error_info tails
+#   remaining utils/adt breadth           # inet/cidr, uuid, bit/varbit, interval + tz-DB,
+#                                         #   bytea, largeobject, macaddr8, collation(ICU)/encoding
+#   table sampling / extended stats / stats_import / memoize / incremental sort

@@ -1,0 +1,3 @@
+| test | verdict | surface | blocking modules | fixtures |
+|---|---|---|---|---|
+| numa | OUT_OF_SCOPE | `pg_numa_available()`, `pg_shmem_allocations_numa` system view, psql `\gset`/`\if`/`\quit` meta-commands, `\c -` reconnect | `pg_shmem_allocations_numa` / NUMA introspection -- MISSING: this is a whole OS/libnuma shared-memory introspection subsystem (`src/backend/storage/ipc/shmem.c` NUMA view + `port/pg_numa.c`); no equivalent exists anywhere in PepperDB's single-process async architecture, which has no NUMA-aware shared memory model at all. Also requires psql meta-commands (`\gset`, `\if`/`\endif`, `\c`) which are client-side, not server-side, but the underlying view/function is the real blocker. | self-contained |

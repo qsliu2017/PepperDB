@@ -1,0 +1,8 @@
+# Step 07 -- Phase 1: soft-error input-validation API. [MILESTONE: fastest in-scope phase]
+# Effort: S. Depends on: P0. Highest cheap leverage (~20 type tests call
+# pg_input_is_valid/pg_input_error_info at their tail, otherwise fully translated).
+# Unblocks: boolean, int2, int4, date (tail); foundational for float4/float8/oid/tid/
+# time/timestamp/timetz/varchar in later phases.
+src/backend/utils/fmgr/fmgr.rs   # grow -- InputFunctionCallSafe / DirectInputFunctionCallSafe
+src/nodes/miscnodes.rs           # grow -- ErrorSaveContext (soft-error escape hatch)
+# (impl agent: verify exact paths; wire pg_input_is_valid/pg_input_error_info builtins)

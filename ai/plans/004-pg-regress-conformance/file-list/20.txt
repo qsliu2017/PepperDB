@@ -1,0 +1,4 @@
+# Step 20 -- Phase 14: CTE SEARCH/CYCLE + recursive views.
+# Effort: M. Depends on: the M12 CTE substrate (plan 003). Unblocks: with.
+src/backend/parser/parse_cte.rs         # grow -- SEARCH/CYCLE clause transform
+src/backend/optimizer/plan/subselect.rs # grow -- SEARCH/CYCLE columns in RecursiveUnion

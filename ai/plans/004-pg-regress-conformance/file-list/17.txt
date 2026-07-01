@@ -1,0 +1,4 @@
+# Step 17 -- Phase 11: arrays cluster.
+# Effort: M. Unblocks: arrays; array_agg/unnest feed aggregates + tsrf.
+src/backend/utils/adt/arrayfuncs.rs       # full -- array I/O, subscript, concat, ops
+src/backend/utils/adt/array_userfuncs.rs  # full -- array_append/cat/agg/unnest/dims

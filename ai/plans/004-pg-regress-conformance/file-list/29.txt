@@ -1,0 +1,19 @@
+# Step 29 -- Campaign: TOAST + compression (pglz, lz4). CAPPED test yield.
+# Effort: L. TOAST is NOT implemented today (only varlena bit-format + catalog columns).
+# Compression sits ON TOP of the TOAST store, so TOAST must land first. Depends on: plan-003
+# heap/varlena. Unblocks: delete (via TOAST externalize). NOTE the 3 compression tests
+# (compression, compression_pglz, indirect_toast) ALSO need C-loader/PL/matviews -> they stay
+# KNOWN-DIFF even after this campaign. Value here is TOAST INFRASTRUCTURE (large-value storage),
+# not the compression test files.
+# Internal (detail: analysis/toast-compression.md):
+#   T1 toast table creation/DDL wiring (toasting.rs, called from CREATE TABLE)
+#   T2 external chunk store/fetch (toast_save/delete_datum)
+#   T3 detoast fetch + heap_toast_insert_or_update decision engine wired into heapam (unblocks delete)
+#   T4 pglz compress/decompress (algorithm) + compressed-varlena format (byte-exact header)
+#   T5 lz4 (lz4_flex crate, block API) + SET COMPRESSION/STORAGE DDL + attcompression
+src/access/toast_internals.rs        # full -- chunk store/fetch
+src/access/detoast.rs                # full -- detoast fetch
+src/access/heaptoast.rs              # full -- insert/update TOAST decision engine
+src/common/pg_lzcompress.rs          # full -- pglz algorithm
+src/access/toast_compression.rs      # full -- pglz/lz4 varlena wrappers
+src/catalog/toasting.rs              # full -- toast table creation

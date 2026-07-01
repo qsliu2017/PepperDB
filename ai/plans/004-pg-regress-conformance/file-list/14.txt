@@ -1,0 +1,8 @@
+# Step 14 -- Phase 8: EXPLAIN command + text format (COSTS OFF).
+# Effort: L (explain.c is 5k lines). EXPLAIN is ENTIRELY ABSENT today (no explain.rs,
+# no ExplainStmt handling) and gates every plan-pinning test. FORMAT JSON/YAML +
+# ANALYZE can be partial. Unblocks: expressions, tidrangescan, case (partial),
+# predicate (partial -- also needs predtest + inheritance, deferred).
+src/backend/commands/explain.rs        # full -- ExplainStmt dispatch + plan walk
+src/backend/commands/explain_format.rs # full -- text format (COSTS OFF subset)
+src/backend/parser/gram.lalrpop        # grow -- ExplainStmt production

@@ -1,0 +1,10 @@
+# Step 04 -- no connection-dropping panics on the query path + SHOW returns a value.
+# Phase P0. Depends on: 03. Parallel: no. Deliverable: multi-row VALUES and
+# multi-statement simple-query strings raise CATCHABLE ereports (not panic/drop);
+# SHOW <guc> returns its value over the wire. EXIT of P0: real psql -c "SELECT 1"
+# works, a failing query returns ErrorResponse, session survives, multi-row VALUES
+# + multi-statement don't drop the connection.
+# Disposition: grow=spine.
+src/backend/parser/analyze.rs        # grow -- multi-row VALUES (was unimplemented!)
+src/backend/tcop/postgres.rs         # grow -- multi-statement simple-query loop;
+                                     #         SHOW over the wire; panic->ereport guard

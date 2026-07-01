@@ -1,0 +1,3 @@
+| test | verdict | surface | blocking modules | fixtures |
+|---|---|---|---|---|
+| numeric_big | NEEDS_MODULES | Same operation set as `numeric` but at extreme precision (`numeric(1000,800)`): add/sub/mul/div, `sqrt`/`ln`/`log`/`power(10,ln(x))`, plus a large `log(x)` accuracy suite using `generate_series`/CTEs with `VALUES` | `src/backend/utils/adt/numeric.rs` -- STUB: `numeric_sqrt`, `numeric_ln`, `numeric_log`, `numeric_power` are all `unimplemented!()` ("transcendental, not yet reachable"); this is the sole blocking module since the test's arithmetic (+,-,*,/) and CTE/generate_series(int) machinery are otherwise supported. | self-contained (recreates num_data/num_exp_* tables dropped from a prior run) |

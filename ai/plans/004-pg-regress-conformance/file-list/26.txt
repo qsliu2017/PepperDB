@@ -1,0 +1,16 @@
+# Step 26 -- Campaign: row-level security.
+# Effort: L. Depends on: step 18 (roles: has_privs_of_role/rolbypassrls/SET ROLE) + plan-003
+# rewriteHandler (fireRIRrules). Role-context primitives (GetUserId/SetUserIdAndSecContext)
+# already exist. Unblocks: rowsecurity (largest single test file).
+# Internal (detail: analysis/rls.md):
+#   R1 grammar (CREATE/ALTER/DROP POLICY, ALTER TABLE ENABLE/FORCE RLS) + row_security GUC
+#   R2 pg_policy catalog bootstrap
+#   R3 RelationBuildRowSecurity + relcache wiring
+#   R4 policy CRUD commands
+#   R5 check_enable_rls / BYPASSRLS
+#   R6 qual + WithCheckOption injection into fireRIRrules (2nd rangetable loop after view expand)
+#   R7 executor WITH CHECK OPTION enforcement
+src/backend/rewrite/rowsecurity.rs   # full -- get_row_security_policies qual/WCO injection
+src/backend/commands/policy.rs       # full -- CREATE/ALTER/DROP POLICY
+src/backend/catalog/pg_policy.rs     # new  -- policy catalog
+src/backend/parser/gram.lalrpop      # grow -- CreatePolicyStmt + ENABLE/FORCE RLS

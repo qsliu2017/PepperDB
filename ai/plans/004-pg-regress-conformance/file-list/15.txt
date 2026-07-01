@@ -1,0 +1,8 @@
+# Step 15 -- Phase 9: scalar type modules.
+# Effort: M. Depends on: 07 (soft-error). Unblocks: pg_lsn, oid, tid, tidscan,
+# tidrangescan, dbsize, macaddr.
+src/backend/utils/adt/pg_lsn.rs   # full -- pg_lsn I/O + ops
+src/backend/utils/adt/oid.rs      # grow -- oid/oidvector I/O (soft-error)
+src/backend/utils/adt/tid.rs      # full -- tid I/O + ops (feeds tidscan/tidrangescan)
+src/backend/utils/adt/mac.rs      # full -- macaddr I/O + hash opclass
+src/backend/utils/adt/dbsize.rs   # full -- pg_*_size / size-pretty

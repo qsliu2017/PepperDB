@@ -1,0 +1,15 @@
+# Step 25 -- Campaign: two-phase commit.
+# Effort: M. Grammar/AST/WAL structs (GIDSIZE=200, xl_xact_twophase, TransactionStmtKind)
+# already translated in plan 003; execution path is stubbed. Depends on: plan-003 xact/
+# WAL/clog/M14-recovery + SharedState process-slot arena. Unblocks: prepared_xacts, temp.
+# Internal (detail: analysis/twophase.md):
+#   T1 max_prepared_transactions GUC + gxact table on SharedState
+#   T2 PrepareTransaction: gxact + AtPrepare_* callbacks + EndPrepare WAL PREPARE record
+#      (WAL-only first; skip on-disk pg_twophase state file -- it's a checkpoint optimization)
+#   T3 FinishPreparedTransaction: COMMIT/ROLLBACK PREPARED
+#   T4 pg_prepared_xacts view (pg_prepared_xact SRF oid 1065)
+#   T5 recovery redo: PrepareRedoAdd/Remove + RecoverPreparedTransactions
+src/backend/access/transam/xact.rs   # grow -- PrepareTransaction (replace stub), block-state
+src/access/twophase.rs               # full -- gxact lifecycle, Finish, recovery
+src/access/twophase_rmgr.rs          # full -- lock/pgstat/multixact recover+postcommit callbacks
+src/backend/storage/lmgr/lock.rs     # grow -- AtPrepare_Locks/PostPrepare_Locks (lock transfer)

@@ -1,0 +1,10 @@
+# Step 01 -- runnable server entry (port + datadir + bootstrap + listen).
+# Phase P0 (server gate). Depends on: plan 003 (foundation postmaster/bootstrap).
+# Parallel: no (steps 01-04 sequential). Deliverable: a server binary/entry that
+# initializes a fresh data directory, bootstraps catalogs, and listens on a chosen
+# TCP port -- the prerequisite for pointing psql at it.
+# Disposition: grow=dispatcher; new=entry.
+src/main.rs                          # grow -- accept host/port/datadir (not hardcoded 5432)
+src/backend/postmaster/postmaster.rs # grow -- bind chosen port; datadir-driven startup
+src/backend/bootstrap/bootstrap.rs   # grow -- initdb-equivalent on an empty datadir
+src/backend/utils/init/postinit.rs   # grow -- per-connection init against the datadir

@@ -1,0 +1,6 @@
+# Step 22 -- Phase 16: misc smaller modules.
+# Effort: M. Unblocks: money, enum (partial), foreign_key (MATCH FULL), functional_deps.
+src/backend/utils/adt/cash.rs      # full -- money I/O + ops
+src/backend/utils/adt/enum.rs      # grow -- enum ops + pg_enum label storage
+src/backend/utils/adt/ri_triggers.rs  # grow -- FK MATCH FULL + ON UPDATE actions
+src/backend/optimizer/plan/initsplan.rs # grow -- functional-dependency group relaxation

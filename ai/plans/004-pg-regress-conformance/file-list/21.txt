@@ -1,0 +1,4 @@
+# Step 21 -- Phase 15: scrollable cursors / portals.
+# Effort: M. Unblocks: limit, portals (partial).
+src/backend/tcop/pquery.rs      # grow -- scrollable portal (backward fetch beyond materialize)
+src/backend/commands/portalcmds.rs  # grow -- SCROLL cursor declare/fetch

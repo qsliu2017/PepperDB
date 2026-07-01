@@ -1,0 +1,12 @@
+# Step 03 -- ErrorResponse / NoticeResponse over the wire (highest value).
+# Phase P0. Depends on: 02. Parallel: no. Deliverable: server-side ERROR/NOTICE
+# reach the client as proper 'E'/'N' messages; message TEXT already correct.
+# Pays down the M10/M12/M14 "ErrorResponse not sent" debt.
+# Disposition: grow=spine.
+src/backend/utils/error/elog.rs      # grow -- send_message_to_frontend (was stub) ->
+                                     #         build ErrorResponse/NoticeResponse fields
+                                     #         S(severity) V C(sqlstate) M(message)
+                                     #         P(position=LINE/caret) D(detail) H(hint)
+src/backend/tcop/postgres.rs         # grow -- flush ErrorResponse in the command loop;
+                                     #         NoticeResponse mid-command; RFQ status 'E'
+src/backend/libpq/pqcomm.rs          # grow -- 'E'/'N' field-list wire encoding

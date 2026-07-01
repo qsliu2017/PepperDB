@@ -1,0 +1,7 @@
+# Step 12 -- Phase 6: numeric transcendental + variance/stddev aggregates.
+# Effort: L (numeric.c is 12.6k lines; basic arithmetic already works).
+# Depends on: 07 (soft-error), 08 (generate_series). Unblocks: numeric, numeric_big;
+# feeds the statistical-aggregate portion of the aggregates test.
+src/backend/utils/adt/numeric.rs   # grow -- sqrt/ln/log/power/exp/fac, var/stddev accum,
+                                   #          numeric_avg, width_bucket, generate_series(numeric)
+src/backend/parser/scan.rs         # grow -- '^' power operator lexer token

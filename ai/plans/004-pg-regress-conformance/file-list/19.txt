@@ -1,0 +1,5 @@
+# Step 19 -- Phase 13: operator / cast DDL.
+# Effort: M. Unblocks: create_cast, create_operator, drop_operator, alter_operator.
+src/backend/commands/operatorcmds.rs   # full -- DefineOperator/AlterOperator/RemoveOperator
+src/backend/commands/typecmds.rs       # grow -- CREATE CAST (cast catalog)
+src/backend/commands/functioncmds.rs   # grow -- support-function bits DDL needs

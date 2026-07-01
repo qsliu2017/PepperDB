@@ -1,0 +1,17 @@
+# Step 24 -- Campaign: generated + identity columns (+ inline column constraints).
+# Effort: M-L. Depends on: plan-003 sequences/nodeModifyTable/DEFAULT; fast_default green
+# needs 23 (PL helpers). Unblocks: generated_stored, generated_virtual, identity
+# (fast_default -> KNOWN-DIFF until 23). PREREQUISITE: fixes that ColumnDef can't express
+# inline DEFAULT/NOT NULL/CHECK and ALTER ADD COLUMN DEFAULT panics -- valuable on its own.
+# Internal (detail: analysis/generated-identity.md):
+#   G1 grammar: inline column constraints (foundational)
+#   G2 catalog: attgenerated/attidentity/atthasmissing/attmissingval
+#   G3 identity backing-sequence + OVERRIDING
+#   G4 executor: NextValueExpr + fast-default (attmissingval) rewrite path
+#   G5 stored-generated compute (nodeModifyTable) + virtual-generated expand (prepjointree)
+#   G6 information_schema.columns/.sequences slice + pg_get_serial_sequence
+src/backend/parser/gram.lalrpop      # grow -- inline column constraints, GENERATED/IDENTITY
+src/backend/commands/tablecmds.rs    # grow -- generated/identity/missingval DDL
+src/backend/executor/nodeModifyTable.rs # grow -- ExecComputeStoredGenerated, NextValueExpr
+src/backend/optimizer/prep/prepjointree.rs # grow -- expand_virtual_generated_columns
+src/backend/catalog/pg_attrdef.rs    # grow -- generated-expr + missingval storage

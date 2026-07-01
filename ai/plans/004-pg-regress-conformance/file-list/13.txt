@@ -1,0 +1,5 @@
+# Step 13 -- Phase 7: reloptions framework.
+# Effort: M. No cross-deps; cheap early green. Unblocks: reloptions,
+# btree_index (WITH(...) portions).
+src/backend/access/common/reloptions.rs  # full -- transformRelOptions, default_reloptions,
+                                         #          StdRdOptions (fillfactor/autovacuum/toast.*)
