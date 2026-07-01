@@ -361,7 +361,12 @@ pub async fn clog_redo(clog: &SlruCtl, info: u8, main_data: &[u8]) {
     match info & 0xF0 {
         crate::access::clog::CLOG_ZEROPAGE => {
             // main data = the page number to zero (int).
-            debug_assert!(main_data.len() >= 4);
+            if main_data.len() < 4 {
+                crate::elog!(
+                    crate::utils::elog::ERROR,
+                    format!("clog_redo: short ZEROPAGE record ({} bytes)", main_data.len())
+                );
+            }
             let pageno = i64::from(i32::from_ne_bytes([
                 main_data[0], main_data[1], main_data[2], main_data[3],
             ]));
@@ -370,7 +375,12 @@ pub async fn clog_redo(clog: &SlruCtl, info: u8, main_data: &[u8]) {
         }
         crate::access::clog::CLOG_TRUNCATE => {
             // xl_clog_truncate: pageno (i64) then oldestXact (u32) then db oid.
-            debug_assert!(main_data.len() >= 8);
+            if main_data.len() < 8 {
+                crate::elog!(
+                    crate::utils::elog::ERROR,
+                    format!("clog_redo: short TRUNCATE record ({} bytes)", main_data.len())
+                );
+            }
             let mut p = [0u8; 8];
             p.copy_from_slice(&main_data[0..8]);
             let pageno = i64::from_ne_bytes(p);
@@ -476,5 +486,21 @@ mod tests {
         assert_eq!(clog.get_status(parent).await.0, XidStatus::Committed);
         assert_eq!(clog.get_status(sub_same).await.0, XidStatus::Committed);
         assert_eq!(clog.get_status(sub_other).await.0, XidStatus::Committed);
+    }
+
+    // Fix 4: a short (truncated) ZEROPAGE record must ereport, not index out of
+    // bounds / panic in release. clog_redo raises a catchable ERROR (unwind).
+    #[tokio::test(flavor = "multi_thread")]
+    #[should_panic]
+    #[allow(
+        clippy::should_panic_without_expect,
+        reason = "elog!(ERROR) unwinds with a typed (non-string) payload, so no message can be matched"
+    )]
+    async fn clog_redo_short_zeropage_ereports() {
+        let shared = temp_shared("short");
+        let clog = shared.clog();
+        clog.boot_strap_clog().await;
+        // Only 2 bytes: fewer than the 4-byte page number the record needs.
+        clog_redo(clog, crate::access::clog::CLOG_ZEROPAGE, &[0u8, 0u8]).await;
     }
 }

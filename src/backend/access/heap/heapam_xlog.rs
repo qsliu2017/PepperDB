@@ -8,8 +8,9 @@
 //! change is applied here, the page LSN is stamped with the record's end LSN so a
 //! re-run of the same record is a no-op.
 //!
-//! INSERT, DELETE and UPDATE (the paths a running system exercises for ordinary
-//! DML) are implemented. MULTI_INSERT and the `heap2` variants (prune, vacuum,
+//! INSERT, DELETE, UPDATE and LOCK (the paths a running system exercises for
+//! ordinary DML + row locks) are implemented -- every heap opcode the write path
+//! emits is replayable. MULTI_INSERT and the `heap2` variants (prune, vacuum,
 //! visible, freeze) are staged: their apply logic is not ported, so reaching one
 //! during replay raises a catchable error rather than silently skipping a change.
 //!
@@ -21,16 +22,19 @@
 use std::sync::Arc;
 
 use crate::access::heapam_xlog::{
-    xl_heap_delete, xl_heap_header, xl_heap_insert, xl_heap_update, SizeOfHeapDelete,
-    SizeOfHeapHeader, SizeOfHeapInsert, SizeOfHeapUpdate, XLH_UPDATE_CONTAINS_NEW_TUPLE,
-    XLOG_HEAP_DELETE, XLOG_HEAP_INIT_PAGE, XLOG_HEAP_INSERT, XLOG_HEAP_OPMASK, XLOG_HEAP_UPDATE,
+    xl_heap_delete, xl_heap_header, xl_heap_insert, xl_heap_lock, xl_heap_update, SizeOfHeapDelete,
+    SizeOfHeapHeader, SizeOfHeapInsert, SizeOfHeapLock, SizeOfHeapUpdate,
+    XLH_UPDATE_CONTAINS_NEW_TUPLE, XLOG_HEAP_DELETE, XLOG_HEAP_INIT_PAGE, XLOG_HEAP_INSERT,
+    XLOG_HEAP_LOCK, XLOG_HEAP_OPMASK, XLOG_HEAP_UPDATE,
 };
 use crate::access::htup_details::{
-    SizeofHeapTupleHeader, HEAP_XMAX_BITS, HEAP_XMAX_EXCL_LOCK, HEAP_XMAX_IS_MULTI,
+    SizeofHeapTupleHeader, HEAP_COMBOCID, HEAP_HOT_UPDATED, HEAP_KEYS_UPDATED, HEAP_MOVED,
+    HEAP_XMAX_BITS, HEAP_XMAX_EXCL_LOCK, HEAP_XMAX_IS_LOCKED_ONLY, HEAP_XMAX_IS_MULTI,
     HEAP_XMAX_KEYSHR_LOCK, HEAP_XMAX_LOCK_ONLY,
 };
 use crate::access::heapam_xlog::{
-    XLHL_XMAX_EXCL_LOCK, XLHL_XMAX_IS_MULTI, XLHL_XMAX_KEYSHR_LOCK, XLHL_XMAX_LOCK_ONLY,
+    XLHL_KEYS_UPDATED, XLHL_XMAX_EXCL_LOCK, XLHL_XMAX_IS_MULTI, XLHL_XMAX_KEYSHR_LOCK,
+    XLHL_XMAX_LOCK_ONLY,
 };
 use crate::access::xlogreader::DecodedXLogRecord;
 use crate::backend::access::transam::xlogutils::{
@@ -52,6 +56,7 @@ pub async fn heap_redo(shared: &Arc<SharedState>, record: &DecodedXLogRecord) {
         XLOG_HEAP_INSERT => heap_xlog_insert(shared, record).await,
         XLOG_HEAP_DELETE => heap_xlog_delete(shared, record).await,
         XLOG_HEAP_UPDATE => heap_xlog_update(shared, record, false).await,
+        XLOG_HEAP_LOCK => heap_xlog_lock(shared, record).await,
         // HOT update shares the update path; other opcodes are staged.
         other => crate::elog!(
             crate::utils::elog::ERROR,
@@ -185,16 +190,12 @@ async fn heap_xlog_delete(shared: &Arc<SharedState>, record: &DecodedXLogRecord)
 
         let item_id = page.get_item_id(xlrec.offnum);
         let tuple_off = item_id_offset(item_id);
+        let (_, _, blkno) = record.get_block_tag(0);
         let bytes = page.as_mut_bytes();
-        // Clear the old xmax-related infomask bits, then set the new ones.
-        let mut infomask = u16::from_ne_bytes([bytes[tuple_off + 20], bytes[tuple_off + 21]]);
-        infomask &= !HEAP_XMAX_BITS;
-        infomask |= compute_infobits(xlrec.infobits_set);
-        bytes[tuple_off + 20..tuple_off + 22].copy_from_slice(&infomask.to_ne_bytes());
-        // xmax = deleting xid (offset 4..8 in the tuple header).
-        bytes[tuple_off + 4..tuple_off + 8].copy_from_slice(&xlrec.xmax.0.to_ne_bytes());
-        // cmax = FirstCommandId (field3, offset 8..12).
-        bytes[tuple_off + 8..tuple_off + 12].copy_from_slice(&FIRST_COMMAND_ID.to_ne_bytes());
+        // Stamp xmax + cmax + infobits, clearing HOT-updated (ClearHotUpdated).
+        stamp_xmax_infobits(bytes, tuple_off, xlrec.xmax, xlrec.infobits_set);
+        // Make sure t_ctid is set correctly (self link; no partition-move here).
+        set_tuple_ctid(bytes, tuple_off, blkno, xlrec.offnum);
 
         page.set_lsn(record.next_lsn);
         drop(guard);
@@ -234,13 +235,12 @@ async fn heap_xlog_update(shared: &Arc<SharedState>, record: &DecodedXLogRecord,
         let page = unsafe { pool.block_mut(buf_id) };
         let item_id = page.get_item_id(xlrec.old_offnum);
         let tuple_off = item_id_offset(item_id);
+        let (_, _, newblk) = record.get_block_tag(1);
         let bytes = page.as_mut_bytes();
-        let mut infomask = u16::from_ne_bytes([bytes[tuple_off + 20], bytes[tuple_off + 21]]);
-        infomask &= !HEAP_XMAX_BITS;
-        infomask |= compute_infobits(xlrec.old_infobits_set);
-        bytes[tuple_off + 20..tuple_off + 22].copy_from_slice(&infomask.to_ne_bytes());
-        bytes[tuple_off + 4..tuple_off + 8].copy_from_slice(&xlrec.old_xmax.0.to_ne_bytes());
-        bytes[tuple_off + 8..tuple_off + 12].copy_from_slice(&FIRST_COMMAND_ID.to_ne_bytes());
+        // Stamp xmax + cmax + infobits (non-HOT update: ClearHotUpdated).
+        stamp_xmax_infobits(bytes, tuple_off, xlrec.old_xmax, xlrec.old_infobits_set);
+        // Set the forward chain link in t_ctid to the new version's TID.
+        set_tuple_ctid(bytes, tuple_off, newblk, xlrec.new_offnum);
         page.set_lsn(record.next_lsn);
         drop(guard);
         pool.mark_buffer_dirty(rb_old.buffer);
@@ -287,25 +287,106 @@ async fn heap_xlog_update(shared: &Arc<SharedState>, record: &DecodedXLogRecord,
     }
 }
 
-/// PG `fix_infomask_from_infobits`: map an `xl_heap_delete.infobits_set` byte to
-/// the heap tuple `t_infomask` bits it sets.
-fn compute_infobits(infobits: u8) -> u16 {
-    let mut mask = 0u16;
+/// PG `heap_xlog_lock`: stamp a row-lock's xmax + lock bits on the tuple. Clears
+/// HEAP_XMAX_BITS|HEAP_MOVED (infomask) and HEAP_KEYS_UPDATED (infomask2), applies
+/// `infobits`, and -- when the resulting xmax is lock-only -- clears HOT-updated +
+/// self-links t_ctid. Sets xmax + cmax = FirstCommandId (combo-cid cleared).
+async fn heap_xlog_lock(shared: &Arc<SharedState>, record: &DecodedXLogRecord) {
+    let main = record.get_data().unwrap_or_panic_with(|| "heap lock redo: missing main data");
+    assert!(main.len() >= SizeOfHeapLock);
+    let xlrec = xl_heap_lock {
+        xmax: TransactionId(u32::from_ne_bytes([main[0], main[1], main[2], main[3]])),
+        offnum: u16::from_ne_bytes([main[4], main[5]]),
+        infobits_set: main[6],
+        flags: main[7],
+    };
+
+    let rb = xlog_read_buffer_for_redo(shared, record, 0).await;
+    if rb.action == XLogRedoAction::BLK_NEEDS_REDO {
+        let pool = shared.buffers();
+        let buf_id = rb.buffer.as_global().unwrap_or_panic_with(|| "redo: shared buffer expected") as i32;
+        let (_, _, blkno) = record.get_block_tag(0);
+        let guard = pool.content_exclusive(rb.buffer);
+        // SAFETY: content-exclusive lock held; sole writer.
+        let page = unsafe { pool.block_mut(buf_id) };
+        let item_id = page.get_item_id(xlrec.offnum);
+        let tuple_off = item_id_offset(item_id);
+        let bytes = page.as_mut_bytes();
+
+        let mut infomask = u16::from_ne_bytes([bytes[tuple_off + 20], bytes[tuple_off + 21]]);
+        let mut infomask2 = u16::from_ne_bytes([bytes[tuple_off + 18], bytes[tuple_off + 19]]);
+        infomask &= !(HEAP_XMAX_BITS | HEAP_MOVED);
+        infomask2 &= !HEAP_KEYS_UPDATED;
+        fix_infomask_from_infobits(xlrec.infobits_set, &mut infomask, &mut infomask2);
+        // Lock-only xmax carries no update: clear HOT-updated + self-link t_ctid.
+        if HEAP_XMAX_IS_LOCKED_ONLY(infomask) {
+            infomask2 &= !HEAP_HOT_UPDATED;
+            set_tuple_ctid(bytes, tuple_off, blkno, xlrec.offnum);
+        }
+        // cmax = FirstCommandId, iscombo = false -> clear HEAP_COMBOCID.
+        infomask &= !HEAP_COMBOCID;
+        bytes[tuple_off + 18..tuple_off + 20].copy_from_slice(&infomask2.to_ne_bytes());
+        bytes[tuple_off + 20..tuple_off + 22].copy_from_slice(&infomask.to_ne_bytes());
+        bytes[tuple_off + 4..tuple_off + 8].copy_from_slice(&xlrec.xmax.0.to_ne_bytes());
+        bytes[tuple_off + 8..tuple_off + 12].copy_from_slice(&FIRST_COMMAND_ID.to_ne_bytes());
+
+        page.set_lsn(record.next_lsn);
+        drop(guard);
+        pool.mark_buffer_dirty(rb.buffer);
+    }
+    release_if_valid(shared, rb.buffer);
+}
+
+/// PG `fix_infomask_from_infobits`: clear the xmax-lock bits from `infomask` and
+/// HEAP_KEYS_UPDATED from `infomask2`, then set the bits the `infobits` byte
+/// requests (the reverse of `compute_infobits`).
+fn fix_infomask_from_infobits(infobits: u8, infomask: &mut u16, infomask2: &mut u16) {
+    *infomask &=
+        !(HEAP_XMAX_IS_MULTI | HEAP_XMAX_LOCK_ONLY | HEAP_XMAX_KEYSHR_LOCK | HEAP_XMAX_EXCL_LOCK);
+    *infomask2 &= !HEAP_KEYS_UPDATED;
+
     if infobits & XLHL_XMAX_IS_MULTI != 0 {
-        mask |= HEAP_XMAX_IS_MULTI;
+        *infomask |= HEAP_XMAX_IS_MULTI;
     }
     if infobits & XLHL_XMAX_LOCK_ONLY != 0 {
-        mask |= HEAP_XMAX_LOCK_ONLY;
+        *infomask |= HEAP_XMAX_LOCK_ONLY;
     }
     if infobits & XLHL_XMAX_EXCL_LOCK != 0 {
-        mask |= HEAP_XMAX_EXCL_LOCK;
+        *infomask |= HEAP_XMAX_EXCL_LOCK;
     }
+    // note HEAP_XMAX_SHR_LOCK isn't considered here
     if infobits & XLHL_XMAX_KEYSHR_LOCK != 0 {
-        mask |= HEAP_XMAX_KEYSHR_LOCK;
+        *infomask |= HEAP_XMAX_KEYSHR_LOCK;
     }
-    // KEYS_UPDATED lives in t_infomask2; the delete/update redo path here only
-    // rewrites t_infomask (matching C fix_infomask_from_infobits for xmax bits).
-    mask
+    if infobits & XLHL_KEYS_UPDATED != 0 {
+        *infomask2 |= HEAP_KEYS_UPDATED;
+    }
+}
+
+/// The delete/non-HOT-update redo tuple stamping shared by both paths: clear
+/// HEAP_XMAX_BITS + HEAP_MOVED (infomask) and HEAP_KEYS_UPDATED + HEAP_HOT_UPDATED
+/// (infomask2), apply `infobits`, then set xmax and cmax = FirstCommandId with the
+/// combo-cid flag cleared. Mirrors the common prologue of C `heap_xlog_delete` /
+/// `heap_xlog_update` (non-HOT: ClearHotUpdated).
+fn stamp_xmax_infobits(bytes: &mut [u8], tuple_off: usize, xmax: TransactionId, infobits: u8) {
+    let mut infomask = u16::from_ne_bytes([bytes[tuple_off + 20], bytes[tuple_off + 21]]);
+    let mut infomask2 = u16::from_ne_bytes([bytes[tuple_off + 18], bytes[tuple_off + 19]]);
+    infomask &= !(HEAP_XMAX_BITS | HEAP_MOVED);
+    infomask2 &= !(HEAP_KEYS_UPDATED | HEAP_HOT_UPDATED);
+    fix_infomask_from_infobits(infobits, &mut infomask, &mut infomask2);
+    // cmax = FirstCommandId, iscombo = false -> clear HEAP_COMBOCID.
+    infomask &= !HEAP_COMBOCID;
+    bytes[tuple_off + 18..tuple_off + 20].copy_from_slice(&infomask2.to_ne_bytes());
+    bytes[tuple_off + 20..tuple_off + 22].copy_from_slice(&infomask.to_ne_bytes());
+    // xmax = deleting/updating xid (offset 4..8), cmax = FirstCommandId (field3, 8..12).
+    bytes[tuple_off + 4..tuple_off + 8].copy_from_slice(&xmax.0.to_ne_bytes());
+    bytes[tuple_off + 8..tuple_off + 12].copy_from_slice(&FIRST_COMMAND_ID.to_ne_bytes());
+}
+
+/// Set a tuple header's t_ctid = (blk, off) (offsets 12..16 = block, 16..18 = off).
+fn set_tuple_ctid(bytes: &mut [u8], tuple_off: usize, blk: u32, off: OffsetNumber) {
+    bytes[tuple_off + 12..tuple_off + 16].copy_from_slice(&blk.to_ne_bytes());
+    bytes[tuple_off + 16..tuple_off + 18].copy_from_slice(&off.to_ne_bytes());
 }
 
 /// The byte offset of a tuple on its page, from its ItemId (`lp_off`).

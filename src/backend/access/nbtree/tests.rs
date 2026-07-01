@@ -661,6 +661,96 @@ async fn btbulkdelete_removes_dead_index_entries() {
     .await;
 }
 
+/// Fix 1 (recovery safety): a second index-tuple insert into the SAME leaf page
+/// (page_lsn > 0) must produce a self-contained WAL record. Without a
+/// checkpointer the LSN-based FPI heuristic would omit the image, leaving the
+/// record unreplayable; emit_insert_wal forces a full-page image so btree_redo
+/// always restores via BLK_RESTORED and the leaf keeps both tuples.
+#[tokio::test(flavor = "multi_thread")]
+async fn second_leaf_insert_record_replays_with_both_tuples() {
+    use crate::access::nbtxlog::XLOG_BTREE_INSERT_LEAF;
+    use crate::backend::access::index::indexam::index_insert;
+    use crate::backend::access::nbtree::nbtree::btbuildempty;
+    use crate::backend::access::nbtree::nbtxlog::btree_redo;
+    use crate::backend::access::transam::xlogreader::XLogReader;
+    use crate::backend::access::transam::xlogutils::{
+        xlog_read_buffer_for_redo, XLogRedoAction,
+    };
+
+    let shared = new_shared();
+    in_all_scopes(shared, |shared| async move {
+        StartTransactionCommand(&shared).await;
+        crate::backend::utils::time::snapmgr::PushActiveSnapshot(GetTransactionSnapshot(&shared));
+        let iloc = rloc(108);
+        create_main_fork(&shared, iloc).await;
+        let mut index = make_relation(iloc, one_int4_desc(), RELKIND_INDEX);
+        init_index_support(Arc::get_mut(&mut index).unwrap(), 1);
+        btbuildempty(&shared, &index).await;
+
+        let tid = |v: u32| {
+            let mut t = crate::storage::itemptr::ItemPointerData {
+                blkid: crate::storage::block::BlockIdData { hi: 0, lo: 0 },
+                posid: 0,
+            };
+            t.set(0, (v + 1) as u16);
+            t
+        };
+
+        // First insert creates the leaf tuple (leaf page LSN goes from 0 -> nonzero).
+        index_insert(&shared, &index, &[Int32GetDatum(10)], &[false], &tid(10)).await;
+
+        // Capture the WAL position, then insert a SECOND tuple into the same leaf.
+        let before_second = shared.xlog().get_xlog_insert_rec_ptr();
+        index_insert(&shared, &index, &[Int32GetDatum(20)], &[false], &tid(20)).await;
+        let end = shared.xlog().get_xlog_insert_rec_ptr();
+        shared.xlog().xlog_flush(end).await;
+
+        // Read the second insert record off the on-disk WAL.
+        let page_read = shared.xlog().make_recovery_page_reader().expect("page reader");
+        let mut reader = XLogReader::new(shared.xlog().wal_segment_size(), page_read);
+        reader.set_system_identifier(0);
+        reader.begin_read(before_second);
+        let rec = loop {
+            let r = reader.read_record().unwrap().expect("a record").clone();
+            if r.header.rmid == crate::access::rmgrlist::RmgrId::Btree as u8
+                && (r.info() & 0xF0) == XLOG_BTREE_INSERT_LEAF
+            {
+                break r;
+            }
+        };
+
+        // Core of the fix: the second insert carries a full-page image.
+        assert!(
+            rec.has_block_image_for(0),
+            "second leaf insert must carry a full-page image (else unreplayable)"
+        );
+
+        // Replay it: the write/redo consistency check -- it must restore, not error.
+        let rb = xlog_read_buffer_for_redo(&shared, &rec, 0).await;
+        assert_eq!(
+            rb.action,
+            XLogRedoAction::BLK_RESTORED,
+            "second leaf insert redo must restore from the image"
+        );
+
+        // The restored leaf holds both index tuples.
+        let pool = shared.buffers();
+        let max_off = {
+            let _g = pool.content_share(rb.buffer);
+            pool.buffer_get_page(rb.buffer).get_max_offset_number()
+        };
+        pool.release_buffer(rb.buffer);
+        assert!(
+            max_off >= 2,
+            "replayed leaf must contain both tuples (max offset = {max_off})"
+        );
+
+        // Also exercise btree_redo dispatch end-to-end (must not error).
+        btree_redo(&shared, &rec).await;
+    })
+    .await;
+}
+
 // Keep IndexScanState referenced for clarity (the scan type used above).
 #[allow(dead_code)]
 fn _type_check(_s: &IndexScanState<'_, '_, '_>) {}

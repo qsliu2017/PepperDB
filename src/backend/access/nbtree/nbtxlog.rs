@@ -2,12 +2,14 @@
 //!
 //! `btree_redo` re-applies a btree WAL record to the page(s) it references during
 //! crash recovery. In PepperDB the btree insert/split/newroot emitters register
-//! their modified pages for a full-page image and do not additionally log the new
-//! index tuple as block data (see `nbtinsert::emit_*_wal`). Replay therefore
-//! rests on the full-page image: [`xlog_read_buffer_for_redo`] restores the image
-//! and stamps the page LSN, which reproduces the page state exactly. A record
-//! whose referenced page already carries the change (LSN guard) or whose page was
-//! never imaged because it predates the redo point is a no-op.
+//! their modified pages with `REGBUF_FORCE_IMAGE` and do not additionally log the
+//! new index tuple as block data (see `nbtinsert::emit_*_wal`). Every such record
+//! is therefore self-contained: replay rests on the full-page image, which
+//! [`xlog_read_buffer_for_redo`] restores while stamping the page LSN, reproducing
+//! the page state exactly (`BLK_RESTORED`). A record whose referenced page already
+//! carries the change (LSN guard) is a no-op. The force-image is required because
+//! without a checkpointer the redo pointer is invalid, so the LSN-based FPI
+//! heuristic alone would omit the image on a second insert into an existing page.
 //!
 //! INSERT_LEAF/INSERT_UPPER, SPLIT_L/SPLIT_R and NEWROOT are handled through the
 //! image-restore path. The rarer variants (dedup, delete, vacuum, page
@@ -52,20 +54,14 @@ pub async fn btree_redo(shared: &Arc<SharedState>, record: &DecodedXLogRecord) {
     }
 }
 
-/// PG `btree_xlog_insert`: re-apply a leaf/upper index-tuple insert. In this
-/// build the modified page is fully imaged; the image restore reproduces the
-/// insert. If the page needs redo but carries no image (page predates the redo
-/// point and no block data was logged for the tuple), the change cannot be
-/// reconstructed here -- flagged rather than silently skipped.
+/// PG `btree_xlog_insert`: re-apply a leaf/upper index-tuple insert. The write
+/// path forces a full-page image (REGBUF_FORCE_IMAGE), so the image restore
+/// reproduces the insert (BLK_RESTORED). BLK_NEEDS_REDO here would mean a record
+/// reached redo without its image, which the write path cannot emit -- flagged
+/// rather than silently skipped.
 async fn btree_xlog_insert(shared: &Arc<SharedState>, record: &DecodedXLogRecord) {
     let rb = xlog_read_buffer_for_redo(shared, record, 0).await;
-    if rb.action == XLogRedoAction::BLK_NEEDS_REDO {
-        crate::elog!(
-            crate::utils::elog::ERROR,
-            "btree_redo insert: page needs redo but no full-page image (incremental \
-             btree apply is staged)"
-        );
-    }
+    needs_image_or_stage(rb.action, "insert");
     release_if_valid(shared, rb.buffer);
 }
 

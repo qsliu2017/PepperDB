@@ -468,3 +468,231 @@ async fn delete_already_self_deleted_same_command_self_modified() {
     }))
     .await;
 }
+
+// ---------------------------------------------------------------------------
+// Recovery: heap DELETE / UPDATE redo fidelity (Fix 2 + Fix 3).
+// ---------------------------------------------------------------------------
+
+/// Read the first WAL record of RM_HEAP with the given opcode at/after `start`.
+fn read_heap_record(
+    shared: &Arc<SharedState>,
+    start: crate::access::xlogdefs::XLogRecPtr,
+    opcode: u8,
+) -> crate::access::xlogreader::DecodedXLogRecord {
+    use crate::backend::access::transam::xlogreader::XLogReader;
+    let page_read = shared.xlog().make_recovery_page_reader().expect("page reader");
+    let mut reader = XLogReader::new(shared.xlog().wal_segment_size(), page_read);
+    reader.set_system_identifier(0);
+    reader.begin_read(start);
+    loop {
+        let r = reader.read_record().unwrap().expect("a record").clone();
+        if r.header.rmid == crate::access::rmgrlist::RmgrId::Heap as u8
+            && (r.info() & crate::access::heapam_xlog::XLOG_HEAP_OPMASK) == opcode
+        {
+            break r;
+        }
+    }
+}
+
+/// Reset a heap page's LSN to zero so a redo record forces BLK_NEEDS_REDO
+/// (the online op already applied + stamped the page; we want the apply path).
+async fn reset_page_lsn(
+    shared: &Arc<SharedState>,
+    relation: &Arc<RelationData>,
+    blk: crate::storage::block::BlockNumber,
+) {
+    let buffer = super::read_relation_block(shared, relation, blk).await;
+    let pool = shared.buffers();
+    let buf_id = buffer.as_global().unwrap() as i32;
+    {
+        let _g = pool.content_exclusive(buffer);
+        // SAFETY: exclusive content lock held.
+        unsafe { pool.block_mut(buf_id) }.set_lsn(crate::access::xlogdefs::INVALID_XLOG_REC_PTR);
+    }
+    pool.mark_buffer_dirty(buffer);
+    pool.release_buffer(buffer);
+}
+
+// Fix 3: heap_xlog_delete redo reproduces the online-path xmax + infomask/
+// infomask2. The tuple carries a stale HEAP_HOT_UPDATED bit (infomask2) that both
+// the online delete and the redo must clear; the redo must set HEAP_KEYS_UPDATED
+// exactly as the online path does (a delete "updates keys"). PG's redo resets the
+// combo-cid, so that bit is masked out of the infomask comparison by design.
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_redo_matches_online_infomask() {
+    use crate::access::heapam_xlog::XLOG_HEAP_DELETE;
+    use crate::access::htup_details::{HEAP_COMBOCID, HEAP_HOT_UPDATED, HEAP_XMAX_INVALID};
+    use crate::backend::access::heap::heapam_xlog::heap_redo;
+
+    let shared = new_shared();
+    Box::pin(in_all_scopes(shared.clone(), |shared| async move {
+        StartTransactionCommand(&shared).await;
+        let loc = rloc(40);
+        create_main_fork(&shared, loc).await;
+        let rel = make_relation(loc, two_int4_desc());
+
+        let tid = insert_row_tid(&shared, &rel, 11, 22).await;
+        CommandCounterIncrement();
+
+        // Plant a stale HEAP_HOT_UPDATED bit that both delete + redo must clear.
+        {
+            let buffer = super::read_relation_block(&shared, &rel, tid.block_number()).await;
+            let pool = shared.buffers();
+            let buf_id = buffer.as_global().unwrap() as i32;
+            {
+                let _g = pool.content_exclusive(buffer);
+                // SAFETY: exclusive content lock held.
+                let page = unsafe { pool.block_mut(buf_id) };
+                let item_id = page.get_item_id(tid.offset_number());
+                let off = item_id.lp_off() as usize;
+                let bytes = page.as_mut_bytes();
+                let mut im2 = u16::from_ne_bytes([bytes[off + 18], bytes[off + 19]]);
+                im2 |= HEAP_HOT_UPDATED;
+                bytes[off + 18..off + 20].copy_from_slice(&im2.to_ne_bytes());
+            }
+            pool.release_buffer(buffer);
+        }
+
+        let start = shared.xlog().get_xlog_insert_rec_ptr();
+        let cid = GetCurrentCommandId(true);
+        let (res, _tmfd) = super::heap_delete(&shared, &rel, &tid, cid, None, true, false).await;
+        assert_eq!(res, TM_Result::Ok);
+        let end = shared.xlog().get_xlog_insert_rec_ptr();
+        shared.xlog().xlog_flush(end).await;
+
+        // Capture the online-path header, then roll back the page + replay.
+        let online = read_header_at(&shared, &rel, &tid).await;
+        assert_eq!(online.t_infomask & HEAP_XMAX_INVALID, 0);
+        // Online delete clears the stale HOT_UPDATED bit.
+        assert_eq!(online.t_infomask2 & HEAP_HOT_UPDATED, 0);
+
+        let rec = read_heap_record(&shared, start, XLOG_HEAP_DELETE);
+        reset_page_lsn(&shared, &rel, tid.block_number()).await;
+        heap_redo(&shared, &rec).await;
+
+        let redone = read_header_at(&shared, &rel, &tid).await;
+        // Redo clears combo-cid by design (SetCmax(FirstCommandId, false)); mask it.
+        assert_eq!(
+            redone.t_infomask & !HEAP_COMBOCID,
+            online.t_infomask & !HEAP_COMBOCID,
+            "delete redo infomask matches online (combo-cid aside)"
+        );
+        assert_eq!(redone.t_infomask2, online.t_infomask2, "delete redo infomask2 matches online");
+        assert_eq!(redone.t_infomask2 & HEAP_HOT_UPDATED, 0, "delete redo clears HOT_UPDATED");
+        assert_eq!(redone.get_raw_xmax(), online.get_raw_xmax(), "delete redo xmax matches online");
+        assert_eq!(redone.ctid, online.ctid, "delete redo t_ctid matches online (self link)");
+    }))
+    .await;
+}
+
+// Fix 2 + Fix 3: heap_xlog_update redo stamps the old tuple's forward chain link
+// (t_ctid = new TID) and reproduces the online-path xmax + infomask/infomask2.
+// PG's redo resets the combo-cid, masked out of the infomask comparison.
+#[tokio::test(flavor = "multi_thread")]
+async fn update_redo_stamps_ctid_and_matches_online() {
+    use crate::access::heapam_xlog::XLOG_HEAP_UPDATE;
+    use crate::access::htup_details::{HEAP_COMBOCID, HEAP_XMAX_INVALID};
+    use crate::backend::access::heap::heapam_xlog::heap_redo;
+
+    let shared = new_shared();
+    Box::pin(in_all_scopes(shared.clone(), |shared| async move {
+        StartTransactionCommand(&shared).await;
+        let loc = rloc(41);
+        create_main_fork(&shared, loc).await;
+        let rel = make_relation(loc, two_int4_desc());
+
+        let otid = insert_row_tid(&shared, &rel, 1, 2).await;
+        CommandCounterIncrement();
+
+        let desc = rel.rd_att.clone().unwrap();
+        let mut newtup =
+            heap_form_tuple(&desc, &[Int32GetDatum(3), Int32GetDatum(4)], &[false, false]);
+
+        let start = shared.xlog().get_xlog_insert_rec_ptr();
+        let cid = GetCurrentCommandId(true);
+        let (res, _lm, _ui) =
+            super::heap_update(&shared, &rel, &otid, &mut newtup, cid, None, true).await;
+        assert_eq!(res, TM_Result::Ok);
+        let end = shared.xlog().get_xlog_insert_rec_ptr();
+        shared.xlog().xlog_flush(end).await;
+
+        // Online result for the OLD tuple: xmax set, ctid -> new version.
+        let online = read_header_at(&shared, &rel, &otid).await;
+        assert_eq!(online.ctid, newtup.t_self, "online old ctid points at new version");
+        assert_ne!(online.ctid, otid);
+        assert_eq!(online.t_infomask & HEAP_XMAX_INVALID, 0);
+
+        // Roll back the OLD page's LSN and replay the update record.
+        let rec = read_heap_record(&shared, start, XLOG_HEAP_UPDATE);
+        reset_page_lsn(&shared, &rel, otid.block_number()).await;
+        heap_redo(&shared, &rec).await;
+
+        let redone = read_header_at(&shared, &rel, &otid).await;
+        assert_eq!(redone.ctid, newtup.t_self,
+            "update redo stamps old tuple t_ctid = new TID (forward chain link)");
+        assert_ne!(redone.ctid, otid, "old tuple no longer self-links after redo");
+        assert_eq!(
+            redone.t_infomask & !HEAP_COMBOCID,
+            online.t_infomask & !HEAP_COMBOCID,
+            "update redo infomask matches online (combo-cid aside)"
+        );
+        assert_eq!(redone.t_infomask2, online.t_infomask2, "update redo infomask2 matches online");
+        assert_eq!(redone.get_raw_xmax(), online.get_raw_xmax(), "update redo xmax matches online");
+    }))
+    .await;
+}
+
+// heap_xlog_lock redo reproduces the online-path row-lock stamping: xmax + lock
+// bits (infomask), HOT_UPDATED cleared + self-linked t_ctid for a lock-only xmax.
+// PG's redo resets the combo-cid, masked out of the infomask comparison.
+#[tokio::test(flavor = "multi_thread")]
+async fn lock_redo_matches_online() {
+    use crate::access::heapam_xlog::XLOG_HEAP_LOCK;
+    use crate::access::htup_details::{HEAP_COMBOCID, HEAP_HOT_UPDATED};
+    use crate::backend::access::heap::heapam_xlog::heap_redo;
+
+    let shared = new_shared();
+    Box::pin(in_all_scopes(shared.clone(), |shared| async move {
+        StartTransactionCommand(&shared).await;
+        let loc = rloc(42);
+        create_main_fork(&shared, loc).await;
+        let rel = make_relation(loc, two_int4_desc());
+
+        let tid = insert_row_tid(&shared, &rel, 5, 6).await;
+        CommandCounterIncrement();
+
+        let start = shared.xlog().get_xlog_insert_rec_ptr();
+        let mut tuple = HeapTupleData::null(tid, rel.rd_id);
+        tuple.t_self = tid;
+        let cid = GetCurrentCommandId(true);
+        let (res, _tmfd, buffer) = super::heap_lock_tuple(
+            &shared, &rel, &mut tuple, cid,
+            LockTupleMode::LockTupleExclusive, LockWaitPolicy::LockWaitBlock, false,
+        )
+        .await;
+        assert_eq!(res, TM_Result::Ok);
+        shared.buffers().release_buffer(buffer);
+        let end = shared.xlog().get_xlog_insert_rec_ptr();
+        shared.xlog().xlog_flush(end).await;
+
+        let online = read_header_at(&shared, &rel, &tid).await;
+        assert_ne!(online.t_infomask & HEAP_XMAX_LOCK_ONLY, 0, "online lock-only bit set");
+
+        let rec = read_heap_record(&shared, start, XLOG_HEAP_LOCK);
+        reset_page_lsn(&shared, &rel, tid.block_number()).await;
+        heap_redo(&shared, &rec).await;
+
+        let redone = read_header_at(&shared, &rel, &tid).await;
+        assert_eq!(
+            redone.t_infomask & !HEAP_COMBOCID,
+            online.t_infomask & !HEAP_COMBOCID,
+            "lock redo infomask matches online (combo-cid aside)"
+        );
+        assert_eq!(redone.t_infomask2, online.t_infomask2, "lock redo infomask2 matches online");
+        assert_eq!(redone.get_raw_xmax(), online.get_raw_xmax(), "lock redo xmax matches online");
+        // Lock-only xmax: t_ctid self-links (offset preserved).
+        assert_eq!(redone.ctid.offset_number(), tid.offset_number());
+        assert_eq!(redone.t_infomask2 & HEAP_HOT_UPDATED, 0, "lock redo clears HOT_UPDATED");
+    }))
+    .await;
+}

@@ -509,7 +509,12 @@ async fn emit_insert_wal(
     let xlrec = xl_btree_insert { offnum };
     begin_insert();
     register_data(as_bytes(&xlrec, SizeOfBtreeInsert));
-    register_block(0, &locator, ForkNumber::MAIN_FORKNUM, blk, page, crate::access::xloginsert::RegBuf::STANDARD);
+    // FORCE_IMAGE: without a checkpointer redo_rec_ptr is invalid, so the LSN-based
+    // FPI heuristic only backs up the first insert into a fresh leaf. The write path
+    // logs no block data, so a subsequent insert (page_lsn > 0) would leave the redo
+    // record unreplayable. Force a self-contained full-page image; btree_xlog_insert
+    // then always restores via BLK_RESTORED.
+    register_block(0, &locator, ForkNumber::MAIN_FORKNUM, blk, page, crate::access::xloginsert::RegBuf::FORCE_IMAGE | crate::access::xloginsert::RegBuf::STANDARD);
     xlog_insert(shared.xlog(), RmgrId::Btree as u8, XLOG_BTREE_INSERT_LEAF).await
 }
 
@@ -536,8 +541,11 @@ async fn emit_split_wal(
     };
     begin_insert();
     register_data(as_bytes(&xlrec, SizeOfBtreeSplit));
-    register_block(0, &locator, ForkNumber::MAIN_FORKNUM, lblk, left, crate::access::xloginsert::RegBuf::WILL_INIT | crate::access::xloginsert::RegBuf::STANDARD);
-    register_block(1, &locator, ForkNumber::MAIN_FORKNUM, rblk, right, crate::access::xloginsert::RegBuf::WILL_INIT | crate::access::xloginsert::RegBuf::STANDARD);
+    // FORCE_IMAGE: the redo path here restores from a full-page image rather than
+    // rebuilding the split incrementally, so both pages must carry an image
+    // (WILL_INIT alone implies NO_IMAGE and would leave the record unreplayable).
+    register_block(0, &locator, ForkNumber::MAIN_FORKNUM, lblk, left, crate::access::xloginsert::RegBuf::FORCE_IMAGE | crate::access::xloginsert::RegBuf::WILL_INIT | crate::access::xloginsert::RegBuf::STANDARD);
+    register_block(1, &locator, ForkNumber::MAIN_FORKNUM, rblk, right, crate::access::xloginsert::RegBuf::FORCE_IMAGE | crate::access::xloginsert::RegBuf::WILL_INIT | crate::access::xloginsert::RegBuf::STANDARD);
     xlog_insert(shared.xlog(), RmgrId::Btree as u8, XLOG_BTREE_SPLIT_L).await
 }
 
@@ -553,7 +561,9 @@ async fn emit_newroot_wal(
     }
     let locator = rel.rd_locator;
     begin_insert();
-    register_block(0, &locator, ForkNumber::MAIN_FORKNUM, root_blk, root, crate::access::xloginsert::RegBuf::WILL_INIT | crate::access::xloginsert::RegBuf::STANDARD);
+    // FORCE_IMAGE: the redo path restores the new root from a full-page image; see
+    // emit_split_wal. WILL_INIT alone would emit no image, leaving redo unreplayable.
+    register_block(0, &locator, ForkNumber::MAIN_FORKNUM, root_blk, root, crate::access::xloginsert::RegBuf::FORCE_IMAGE | crate::access::xloginsert::RegBuf::WILL_INIT | crate::access::xloginsert::RegBuf::STANDARD);
     xlog_insert(shared.xlog(), RmgrId::Btree as u8, XLOG_BTREE_NEWROOT).await
 }
 
