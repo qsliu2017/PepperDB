@@ -672,6 +672,13 @@ async fn warm_m3_resolution_caches(shared: &std::sync::Arc<crate::shared_state::
         {
             release_sys_cache(t);
         }
+        // TYPENAMENSP (typname, typnamespace) -- type-by-name resolution for the
+        // SYNC transform path (`bool 'x'`, `x::bool`, cast TypeName lookup).
+        let nd = name_data(ty.name);
+        let keys = [NameGetDatum(&nd), ObjectIdGetDatum(PG_CATALOG_NAMESPACE)];
+        if let Some(t) = search_sys_cache_populate(shared, Sc::TYPENAMENSP, &keys).await {
+            release_sys_cache(t);
+        }
     }
 
     // M5 (step 25B): warm AGGFNOID for each seeded aggregate so nodeAgg's sync

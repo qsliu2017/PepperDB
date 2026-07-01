@@ -1,6 +1,7 @@
 //! RestrictInfo node manipulation. Translated from
-//! backend/optimizer/util/restrictinfo.c (disposition: leaf for the M3
-//! single-relation scan qual; the OR-clause / join-clause analysis grows later).
+//! backend/optimizer/util/restrictinfo.c. Covers the single-relation scan qual
+//! and the OR-clause path (`make_sub_restrictinfos` wraps each OR/leaf subclause
+//! in a RestrictInfo); the join-clause selectivity analysis grows later.
 //!
 //! Non-type-centric free functions; bodies here, re-exported from
 //! `crate::optimizer::restrictinfo` (the C declarations live in restrictinfo.h)
@@ -69,8 +70,25 @@ pub fn make_restrictinfo(
     incompatible_relids: Option<Relids>,
     outer_relids: Option<Relids>,
 ) -> RestrictInfo {
+    // If it's an OR clause, build a modified copy with RestrictInfos inserted
+    // above each subclause of the top-level AND/OR structure.
     if is_orclause(&clause) {
-        not_yet_reachable("make_restrictinfo: OR clause (make_sub_restrictinfos)");
+        let node = make_sub_restrictinfos(
+            root,
+            *clause,
+            is_pushed_down,
+            has_clone,
+            is_clone,
+            pseudoconstant,
+            security_level,
+            required_relids,
+            incompatible_relids,
+            outer_relids,
+        );
+        let Node::RestrictInfo(ri) = node else {
+            unreachable!("make_restrictinfo: OR clause did not yield a RestrictInfo")
+        };
+        return *ri;
     }
     // AND/OR flattening should have removed top-level ANDs.
     crate::assert!(!is_andclause(&clause));
@@ -88,6 +106,97 @@ pub fn make_restrictinfo(
         incompatible_relids,
         outer_relids,
     )
+}
+
+/// PG `make_sub_restrictinfos`: build a modified copy of an AND/OR clause tree
+/// with RestrictInfos inserted above the OR subclauses (but not above sub-ANDs,
+/// since only ORs and simple clauses are valid RestrictInfos). Returns either a
+/// `Node::RestrictInfo` (OR / leaf) or a plain AND `BoolExpr` (AND).
+#[allow(clippy::too_many_arguments, reason = "1:1 PG port: matches the C signature")]
+fn make_sub_restrictinfos(
+    root: &mut PlannerInfo,
+    clause: Expr,
+    is_pushed_down: bool,
+    has_clone: bool,
+    is_clone: bool,
+    pseudoconstant: bool,
+    security_level: Index,
+    required_relids: Option<Relids>,
+    incompatible_relids: Option<Relids>,
+    outer_relids: Option<Relids>,
+) -> Node {
+    use crate::nodes::makefuncs::{make_andclause, make_orclause};
+    if is_orclause(&clause) {
+        let Node::BoolExpr(be) = &clause else { unreachable!() };
+        let orlist: Vec<Node> = be
+            .args
+            .clone()
+            .into_iter()
+            .map(|arg| {
+                make_sub_restrictinfos(
+                    root,
+                    arg,
+                    is_pushed_down,
+                    has_clone,
+                    is_clone,
+                    pseudoconstant,
+                    security_level,
+                    None, // OR constituents default to just their contained rels
+                    incompatible_relids.clone(),
+                    outer_relids.clone(),
+                )
+            })
+            .collect();
+        Node::RestrictInfo(Box::new(make_plain_restrictinfo(
+            root,
+            Box::new(clause),
+            Some(Box::new(make_orclause(orlist))),
+            is_pushed_down,
+            has_clone,
+            is_clone,
+            pseudoconstant,
+            security_level,
+            required_relids,
+            incompatible_relids,
+            outer_relids,
+        )))
+    } else if is_andclause(&clause) {
+        let Node::BoolExpr(be) = &clause else { unreachable!() };
+        let andlist: Vec<Node> = be
+            .args
+            .clone()
+            .into_iter()
+            .map(|arg| {
+                make_sub_restrictinfos(
+                    root,
+                    arg,
+                    is_pushed_down,
+                    has_clone,
+                    is_clone,
+                    pseudoconstant,
+                    security_level,
+                    required_relids.clone(),
+                    incompatible_relids.clone(),
+                    outer_relids.clone(),
+                )
+            })
+            .collect();
+        make_andclause(andlist)
+    } else {
+        Node::RestrictInfo(Box::new(make_plain_restrictinfo(
+            root,
+            Box::new(clause),
+            None,
+            is_pushed_down,
+            has_clone,
+            is_clone,
+            pseudoconstant,
+            security_level,
+            required_relids,
+            incompatible_relids,
+            outer_relids,
+        )))
+    }
 }
 
 /// PG `make_plain_restrictinfo`: construct a RestrictInfo from a non-OR clause.

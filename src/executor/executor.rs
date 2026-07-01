@@ -217,11 +217,34 @@ pub fn TupleHashEntryGetAdditional(
 // ---------------------------------------------------------------------------
 // execJunk.c
 // ---------------------------------------------------------------------------
-pub fn ExecInitJunkFilter(
-    _target_list: &[Node],
-    _slot: &mut TupleTableSlot,
-) -> Box<JunkFilter> {
-    unimplemented!()
+/// PG `ExecInitJunkFilter`: build a junk filter over `target_list`. The clean
+/// output tuple descriptor is built from the non-junk entries; `clean_map[i]` is
+/// the source attribute number (1-based) feeding clean column `i`. The filter
+/// owns its virtual result slot (PG reuses a caller-provided slot; the port has
+/// no shared slot pool here, so the filter makes its own).
+pub fn ExecInitJunkFilter(target_list: &[Node]) -> Box<JunkFilter> {
+    use crate::backend::executor::execTuples::{exec_clean_type_from_tl, make_single_tuple_table_slot};
+    use crate::executor::tuptable::TTSOpsVirtual;
+
+    let clean_tup_type = exec_clean_type_from_tl(target_list);
+    let result_slot = make_single_tuple_table_slot(Some(Arc::clone(&clean_tup_type)), &TTSOpsVirtual);
+
+    // clean_map: one entry per clean column, holding the source resno of the
+    // corresponding non-junk target entry.
+    let clean_map: Vec<AttrNumber> = target_list
+        .iter()
+        .filter_map(|n| match n {
+            Node::TargetEntry(te) if !te.resjunk => Some(te.resno),
+            _ => None,
+        })
+        .collect();
+
+    Box::new(JunkFilter {
+        target_list: target_list.to_vec(),
+        clean_tup_type: Some(clean_tup_type),
+        clean_map,
+        result_slot: Some(result_slot),
+    })
 }
 pub fn ExecInitJunkFilterConversion(
     _target_list: &[Node],
@@ -240,8 +263,37 @@ pub fn ExecFindJunkAttributeInTlist(
 ) -> Option<AttrNumber> {
     unimplemented!()
 }
-pub fn ExecFilterJunk(_junkfilter: &mut JunkFilter, _slot: &mut TupleTableSlot) -> Box<TupleTableSlot> {
-    unimplemented!()
+/// PG `ExecFilterJunk`: transpose the non-junk columns of `slot` into the junk
+/// filter's result slot (via `clean_map`) and return it as a virtual tuple.
+/// Returns a borrow of the filter-owned result slot (PG returns `jf_resultSlot`).
+pub fn ExecFilterJunk<'j>(
+    junkfilter: &'j mut JunkFilter,
+    slot: &mut TupleTableSlot,
+) -> &'j mut TupleTableSlot {
+    use crate::backend::executor::execTuples::exec_store_virtual_tuple;
+    use crate::executor::tuptable::{slot_getallattrs, ExecClearTuple};
+
+    // Extract all the values of the old tuple.
+    slot_getallattrs(slot);
+
+    let clean_map = std::mem::take(&mut junkfilter.clean_map);
+    let result_slot = junkfilter
+        .result_slot
+        .as_mut()
+        .unwrap_or_else(|| unreachable!("ExecFilterJunk: junk filter has a result slot"));
+
+    ExecClearTuple(result_slot);
+    for (i, &j) in clean_map.iter().enumerate() {
+        // j is the 1-based source resno; 0 would mean a NULL output column (not
+        // produced by ExecInitJunkFilter, only by the conversion variant).
+        let src = (j - 1) as usize;
+        result_slot.values[i] = slot.values[src];
+        result_slot.isnull[i] = slot.isnull[src];
+    }
+    exec_store_virtual_tuple(result_slot);
+
+    junkfilter.clean_map = clean_map;
+    result_slot
 }
 
 /// Extract value (and is-null) for a junk attribute. C's `bool *isNull`

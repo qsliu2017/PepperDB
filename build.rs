@@ -822,6 +822,7 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("overlaps_timestamp", "crate::backend::utils::adt::timestamp::overlaps_timestamp"),
     ("overlaps_timetz", "crate::backend::utils::adt::date::overlaps_timetz"),
     ("pg_conf_load_time", "crate::backend::utils::adt::timestamp::pg_conf_load_time"),
+    ("pg_input_error_info", "crate::backend::utils::adt::misc::pg_input_error_info"),
     ("pg_input_is_valid", "crate::backend::utils::adt::misc::pg_input_is_valid"),
     ("pg_postmaster_start_time", "crate::backend::utils::adt::timestamp::pg_postmaster_start_time"),
     ("statement_timestamp", "crate::backend::utils::adt::timestamp::statement_timestamp"),
@@ -1523,6 +1524,12 @@ fn gen_bootstrap_seeds(inc: &Path) -> String {
 const M3_PROC_NAMES: &[&str] = &[
     "int4pl", "int4mi", "int4mul", "int4div", "int4mod", "int4um",
     "int4lt", "int4gt", "int4le", "int4ge", "int4eq", "int4ne",
+    // bool I/O + comparison support (oprcode for the bool operators; boolin/boolout
+    // for the text<->bool coercion paths). booltext is seeded via M4_CASTS.
+    "boolin", "boolout",
+    "booleq", "boolne", "boollt", "boolgt", "boolle", "boolge",
+    // soft-error type-validation SRF/scalar functions (misc.rs).
+    "pg_input_is_valid", "pg_input_error_info",
 ];
 
 /// The pg_operator entries M3 seeds: the int4-on-int4 arithmetic and comparison
@@ -1542,6 +1549,13 @@ const M3_OPERATORS: &[(&str, &str, &str)] = &[
     (">=", "int4", "int4"),
     ("=", "int4", "int4"),
     ("<>", "int4", "int4"),
+    // bool comparison operators (oprcode = booleq/boolne/...).
+    ("=", "bool", "bool"),
+    ("<>", "bool", "bool"),
+    ("<", "bool", "bool"),
+    (">", "bool", "bool"),
+    ("<=", "bool", "bool"),
+    (">=", "bool", "bool"),
 ];
 
 /// The M4 casts pg_cast seeds (step 23): the numeric tower (int<->float<->numeric)
@@ -1570,6 +1584,7 @@ const M4_CASTS: &[(&str, &str, &str, char, char)] = &[
     ("numeric", "float4", "numeric_float4", 'i', 'f'),
     ("int4", "bool", "int4_bool", 'e', 'f'),
     ("bool", "int4", "bool_int4", 'e', 'f'),
+    ("bool", "text", "booltext", 'a', 'f'),
 ];
 
 /// Emit the M4 pg_cast + cast-support-proc seed tables (step 23). Like the M3

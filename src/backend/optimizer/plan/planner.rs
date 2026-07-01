@@ -843,20 +843,14 @@ fn grouping_planner(root: &mut PlannerInfo, tuple_fraction: f64, setops: Option<
     // Aggrefs and the grouping/sort-keyed ressortgrouprefs).
     preprocess_targetlist(root);
 
-    // M5 (step 26): the query has an upper (grouping/aggregation/sort/distinct/limit)
-    // stage when it groups, aggregates, distincts, sorts, or limits. When it does,
-    // the base scan must compute the *group/agg-input* tlist (the flattened Vars the
-    // grouping/aggregation reads), not the final Aggref-bearing tlist; compute it and
-    // stash it in `scan_input_tlist` so query_planner builds the scan rel from it.
-    let needs_upper = root.parse.hasAggs
-        || root.parse.hasWindowFuncs
-        || !root.parse.windowClause.is_empty()
-        || !root.parse.groupClause.is_empty()
-        || !root.parse.distinctClause.is_empty()
-        || !root.parse.sortClause.is_empty()
-        || root.parse.limitCount.is_some()
-        || root.parse.limitOffset.is_some();
-    if needs_upper {
+    // M5 (step 26): when the query GROUPS/aggregates/windows, the base scan must
+    // compute the *group/agg-input* tlist (the flattened Vars the grouping reads),
+    // not the final Aggref-bearing tlist; the Agg/WindowAgg node then computes the
+    // final `processed_tlist`. For a sort/distinct/limit-only query (no grouping)
+    // there is NO node that reprojects, so the scan/join must itself project the
+    // final `processed_tlist` (PG's `apply_scanjoin_target_to_paths`); leave
+    // `scan_input_tlist` empty so the scan target is the final tlist.
+    if crate::backend::optimizer::plan::planmain::query_computes_scan_input_tlist(root) {
         root.scan_input_tlist = make_scan_input_tlist(root);
     }
 

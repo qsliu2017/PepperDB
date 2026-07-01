@@ -69,19 +69,29 @@ pub fn exec_init_sort<'rel>(
             | crate::utils::tuplestore::EXEC_FLAG_MARK))
         != 0;
 
-    // ExecGetResultType(outerNode): the child's result rowtype is the sort's I/O
-    // shape. Both the scan slot and the result slot use it (virtual).
+    // ExecGetResultType(outerNode): the child's result rowtype is the sort's INPUT
+    // shape (the scan slot the child fills, and the tuplesort's tuple descriptor).
     let outer_desc = result_type_of(&child)
         .unwrap_or_else(|| unimplemented!("ExecInitSort: child has no result descriptor"));
 
+    // ExecInitResultTypeTL: the sort's OWN result rowtype comes from its targetlist
+    // (a passthrough of the child columns, but carrying the query's final resnames);
+    // the RowDescription reads this. Falls back to the child descriptor when the
+    // Sort has no targetlist entries (defensive; the planner always sets one).
+    let result_desc = if node.plan.targetlist.is_empty() {
+        Arc::clone(&outer_desc)
+    } else {
+        crate::backend::executor::execTuples::exec_type_from_tl(&node.plan.targetlist)
+    };
+
     let scan_slot = make_tuple_table_slot(Some(Arc::clone(&outer_desc)), &TTS_OPS_VIRTUAL);
-    let result_slot = make_tuple_table_slot(Some(Arc::clone(&outer_desc)), &TTS_OPS_VIRTUAL);
+    let result_slot = make_tuple_table_slot(Some(Arc::clone(&result_desc)), &TTS_OPS_VIRTUAL);
 
     let mut ps = PlanState {
         plan: Some(Node::Sort(Box::new(node.clone()))),
         ..PlanState::default()
     };
-    ps.ps_result_tuple_desc = Some(Arc::clone(&outer_desc));
+    ps.ps_result_tuple_desc = Some(Arc::clone(&result_desc));
     ps.ps_result_tuple_slot = Some(result_slot);
     ps.scandesc = Some(Arc::clone(&outer_desc));
     ps.resultops = Some(&TTS_OPS_VIRTUAL);

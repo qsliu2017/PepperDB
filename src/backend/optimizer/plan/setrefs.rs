@@ -529,6 +529,12 @@ fn fix_join_expr(expr: Node, outer_tlist: &[Node], inner_tlist: &[Node]) -> Node
             }
             Node::TargetEntry(te)
         }
+        Node::BooleanTest(mut b) => {
+            if let Some(arg) = b.arg.take() {
+                b.arg = Some(fix_join_expr(arg, outer_tlist, inner_tlist));
+            }
+            Node::BooleanTest(b)
+        }
         other => other,
     }
 }
@@ -880,6 +886,7 @@ fn fix_scan_expr_identity(expr: Option<&Node>) {
         }
         Node::CoalesceExpr(c) => c.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
         Node::MinMaxExpr(m) => m.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
+        Node::BooleanTest(b) => fix_scan_expr_identity(b.arg.as_ref()),
         // A VALUES row's per-column exprs (the values_lists entries of a ValuesScan).
         Node::RowExpr(r) => r.args.iter().for_each(|a| fix_scan_expr_identity(Some(a))),
         other => not_yet_reachable(&format!("set_plan_refs: unexpected scan expr {other:?}")),

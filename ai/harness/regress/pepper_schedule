@@ -18,6 +18,15 @@
 # "loaded without error" (its output intentionally differs from upstream).
 # Must be FIRST so downstream tests see its tables.
 test: test_setup
+# boolean: the bool type surface (input/output, the six comparison operators +
+# casts, IS [NOT] TRUE/FALSE/UNKNOWN, TRUE/FALSE literals, `AS <keyword>` column
+# labels, `table.*` expansion, LINE/caret error position, pg_input_is_valid).
+# KNOWN-DIFF on exactly ONE line: `SELECT * FROM pg_input_error_info('junk','bool')`
+# -- a record/set-returning function in FROM (RangeFunction -> RTE_FUNCTION ->
+# FunctionScan executor node), which is step 08 (SRF/funcapi). Every other line
+# matches upstream byte-for-byte. Flip to PASS (delete known_diffs/boolean.out)
+# when step 08 lands the function-in-FROM path.
+test: boolean
 #
 # --------------------------------------------------------------------------
 # BLOCKED -- verified NEW-DIFF against the current server (2026-07-01), each
@@ -37,18 +46,14 @@ test: test_setup
 #
 # Tier-1 simple types -- all NEW-DIFF:
 #   char, varchar   [char(n)/varchar(n) typmod not parsed -- string step (10)]
-#   boolean, int2, int4
-#                   [soft-error input API DONE (step 07): the crash/SIGSEGV that
-#                    dropped the backend on bad int2/int4/float input is fixed
-#                    (InputFunctionCall NUL-termination + make_const T_Float now a
-#                    catchable ERROR), and int2in/int4in/boolin + InputFunctionCall
-#                    Safe route through ErrorSaveContext. STILL BLOCKED on parser +
-#                    later-step features they exercise: typed literals (`bool 'x'`,
-#                    `int2 '0'`), `AS <keyword>`/`AS f(a,b)` column-list aliases,
-#                    `LINE n:`/caret error position, `pg_input_error_info(...)` in
-#                    FROM (record-returning SRF, step 08), int2vector input, and
-#                    function-by-name resolution (`pg_input_is_valid` -- func_get_
-#                    detail not warmed yet). Re-add when those land.]
+#   int2, int4      [boolean now ACTIVE above (KNOWN-DIFF on the one SRF-in-FROM
+#                    line). int2/int4 build on the SAME shared infra now landed
+#                    for boolean -- keyword ColLabel aliases, typed literals,
+#                    LINE/caret error position, unknown->text coercion, the sort
+#                    varlena fix, function-by-name warming. They STILL need
+#                    int2/int4-specific bits: int2vector input, `int2 '0'` typed
+#                    literals across more forms, and the `pg_input_error_info(...)`
+#                    SRF (step 08). Re-add each when its remaining blocker lands.]
 #   int8            [int8 INSERT path bugs ("syscache not warm", literal typing)]
 #   float4, float8  [float/numeric input -- numeric step (12); T_Float literal now
 #                    a catchable ERROR (no longer crashes) but not yet computed]

@@ -267,6 +267,54 @@ fn exec_interp_step(
             *resvalue = BoolGetDatum(!DatumGetBool(*resvalue));
             pc + 1
         }
+        // NULL tests for scalar values. IS UNKNOWN / IS NOT UNKNOWN compile to these
+        // (a boolean NULL is "unknown"). Result is never NULL.
+        ExprEvalOp::NULLTEST_ISNULL => {
+            *resvalue = BoolGetDatum(*resnull);
+            *resnull = false;
+            pc + 1
+        }
+        ExprEvalOp::NULLTEST_ISNOTNULL => {
+            *resvalue = BoolGetDatum(!*resnull);
+            *resnull = false;
+            pc + 1
+        }
+        // BooleanTest IS [NOT] {TRUE|FALSE}; the arg value is already in resvalue/
+        // resnull. Result is never NULL.
+        ExprEvalOp::BOOLTEST_IS_TRUE => {
+            if *resnull {
+                *resvalue = BoolGetDatum(false);
+                *resnull = false;
+            }
+            // else, input value is the correct output as well
+            pc + 1
+        }
+        ExprEvalOp::BOOLTEST_IS_NOT_TRUE => {
+            if *resnull {
+                *resvalue = BoolGetDatum(true);
+                *resnull = false;
+            } else {
+                *resvalue = BoolGetDatum(!DatumGetBool(*resvalue));
+            }
+            pc + 1
+        }
+        ExprEvalOp::BOOLTEST_IS_FALSE => {
+            if *resnull {
+                *resvalue = BoolGetDatum(false);
+                *resnull = false;
+            } else {
+                *resvalue = BoolGetDatum(!DatumGetBool(*resvalue));
+            }
+            pc + 1
+        }
+        ExprEvalOp::BOOLTEST_IS_NOT_FALSE => {
+            if *resnull {
+                *resvalue = BoolGetDatum(true);
+                *resnull = false;
+            }
+            // else, input value is the correct output as well
+            pc + 1
+        }
         ExprEvalOp::QUAL => {
             // Simplified BOOL_AND_STEP for ExecQual: if the argument (== result)
             // is FALSE or NULL, the whole qual is FALSE -- bail out early.
@@ -981,6 +1029,41 @@ mod tests {
 
         // NOT NULL = NULL.
         assert!(isnull(not(bool_null())), "NOT NULL = NULL");
+    }
+
+    /// BooleanTest IS [NOT] {TRUE|FALSE|UNKNOWN} over TRUE / FALSE / NULL. The
+    /// result is never NULL.
+    #[test]
+    fn boolean_test_all() {
+        use crate::nodes::primnodes::{BooleanTest, BoolTestType};
+        let btest = |t: BoolTestType, arg: Node| Node::BooleanTest(Box::new(BooleanTest {
+            arg: Some(arg),
+            booltesttype: t,
+            location: -1,
+        }));
+        let eval = |node: Node| -> bool {
+            let mut state = exec_init_expr(Some(&node), None).expect("booltest state");
+            let mut econtext = ExprContext::default();
+            let mut is_null = true;
+            let v = exec_interp_expr(&mut state, &mut econtext, &mut is_null);
+            assert!(!is_null, "BooleanTest result is never NULL");
+            DatumGetBool(v)
+        };
+        // (arg, IS_TRUE, IS_NOT_TRUE, IS_FALSE, IS_NOT_FALSE, IS_UNKNOWN, IS_NOT_UNKNOWN)
+        let cases = [
+            (bool_const(true), [true, false, false, true, false, true]),
+            (bool_const(false), [false, true, true, false, false, true]),
+            (bool_null(), [false, true, false, true, true, false]),
+        ];
+        let types = [
+            BoolTestType::TRUE, BoolTestType::NOT_TRUE, BoolTestType::FALSE,
+            BoolTestType::NOT_FALSE, BoolTestType::UNKNOWN, BoolTestType::NOT_UNKNOWN,
+        ];
+        for (arg, want) in cases {
+            for (t, w) in types.iter().zip(want) {
+                assert_eq!(eval(btest(*t, arg.clone())), w, "{t:?} of {arg:?}");
+            }
+        }
     }
 
     use crate::nodes::params::{ParamExecData, ParamExternData, ParamFlags, ParamListInfoData};

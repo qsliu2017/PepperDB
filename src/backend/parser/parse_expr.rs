@@ -70,6 +70,7 @@ fn transform_expr_recurse(pstate: &mut ParseState, expr: Option<Node>) -> Option
         // (see analyze::pre_analyze_sublinks) so this sync transform only validates +
         // builds the testexpr.
         Node::SubLink(sl) => Some(transformSubLink(pstate, *sl)),
+        Node::BooleanTest(b) => Some(transform_bool_test(pstate, *b)),
         // ... arms are filled by later milestones; for now they route here cleanly.
         other => not_yet_reachable(&other),
     }
@@ -350,6 +351,32 @@ fn transform_bool_expr(pstate: &mut ParseState, b: crate::nodes::primnodes::Bool
     }))
 }
 
+/// PG `transformBooleanTest`: transform the arg, coerce it to boolean (naming the
+/// IS [NOT] {TRUE|FALSE|UNKNOWN} clause in the error), and rebuild the BooleanTest.
+fn transform_bool_test(pstate: &mut ParseState, b: crate::nodes::primnodes::BooleanTest) -> Node {
+    use crate::nodes::primnodes::{BooleanTest, BoolTestType};
+    use crate::parser::parse_coerce::coerce_to_boolean;
+
+    let clausename = match b.booltesttype {
+        BoolTestType::TRUE => "IS TRUE",
+        BoolTestType::NOT_TRUE => "IS NOT TRUE",
+        BoolTestType::FALSE => "IS FALSE",
+        BoolTestType::NOT_FALSE => "IS NOT FALSE",
+        BoolTestType::UNKNOWN => "IS UNKNOWN",
+        BoolTestType::NOT_UNKNOWN => "IS NOT UNKNOWN",
+    };
+
+    let arg = transform_expr_recurse(pstate, b.arg)
+        .unwrap_or_else(|| not_yet_reachable_msg("transformBooleanTest: NULL argument"));
+    let arg = coerce_to_boolean(pstate, arg, clausename);
+
+    Node::BooleanTest(Box::new(BooleanTest {
+        arg: Some(arg),
+        booltesttype: b.booltesttype,
+        location: b.location,
+    }))
+}
+
 /// PG `transformFuncCall` -> `ParseFuncOrColumn`: transform the argument list and
 /// resolve the function (or column projection) into a FuncExpr.
 fn transform_func_call(pstate: &mut ParseState, fc: &crate::nodes::parsenodes::FuncCall) -> Node {
@@ -527,7 +554,7 @@ fn transform_column_ref(pstate: &mut ParseState, cref: &ColumnRef) -> Node {
 /// PG `refnameNamespaceItem` (M2 subset): find the index of a namespace item whose
 /// refname (eref aliasname) equals `relname`. Only the current level is searched
 /// (no parent-level / schema-qualified lookup yet).
-fn refname_namespace_item(pstate: &ParseState, relname: &str) -> Option<usize> {
+pub(crate) fn refname_namespace_item(pstate: &ParseState, relname: &str) -> Option<usize> {
     pstate
         .p_namespace
         .iter()

@@ -805,7 +805,74 @@ pub fn build_upper_plan(root: &PlannerInfo, subplan: Node) -> Node {
         )));
     }
 
+    // Stamp the final column names / resjunk flags onto the topmost plan node.
+    // PG's grouping_planner gives the final upper path the query's `processed_tlist`
+    // and create_plan labels the top node against it. Here the pass-through upper
+    // nodes (Sort/Limit/Unique) carried the child's unlabeled tlist (built from
+    // `scan_input_tlist`, which has no resnames and no resjunk marking); relabel it
+    // so the RowDescription shows the SELECT-list names and the junk sort/group
+    // columns are marked resjunk (and thus stripped by the junk filter). Grouping /
+    // window nodes already carry `processed_tlist`, so relabeling is a no-op there.
+    apply_final_tlist_labeling(root, &mut plan);
+
     plan
+}
+
+/// Stamp `root.processed_tlist`'s resname/resjunk/decoration onto the top plan
+/// node's tlist (PG `apply_tlist_labeling(topplan->targetlist, processed_tlist)`).
+/// The upper stages preserve the child column order/count 1:1 with the final
+/// tlist, so the entries line up positionally.
+fn apply_final_tlist_labeling(root: &PlannerInfo, plan: &mut Node) {
+    let src: Vec<crate::nodes::primnodes::TargetEntry> = root
+        .processed_tlist
+        .iter()
+        .map(|n| match n {
+            Node::TargetEntry(te) => (**te).clone(),
+            _ => not_yet_reachable("apply_final_tlist_labeling: processed_tlist entry is not a TargetEntry"),
+        })
+        .collect();
+
+    let tlist = top_plan_tlist_mut(plan);
+    if tlist.len() != src.len() {
+        // The upper stages preserve the final tlist 1:1 (the scan/join projects
+        // `processed_tlist` for a non-grouping query; grouping/window nodes carry it
+        // directly), so a length mismatch means a plan shape not yet handled.
+        not_yet_reachable("apply_final_tlist_labeling: top tlist length differs from processed_tlist");
+    }
+    let mut dest: Vec<crate::nodes::primnodes::TargetEntry> = tlist
+        .iter()
+        .map(|n| match n {
+            Node::TargetEntry(te) => (**te).clone(),
+            _ => not_yet_reachable("apply_final_tlist_labeling: top tlist entry is not a TargetEntry"),
+        })
+        .collect();
+    crate::backend::optimizer::util::tlist::apply_tlist_labeling(&mut dest, &src);
+    *tlist = dest
+        .into_iter()
+        .map(|te| Node::TargetEntry(Box::new(te)))
+        .collect();
+}
+
+/// Borrow the top plan node's targetlist (mirrors planmain's `top_plan_tlist_mut`
+/// but for the upper-plan node kinds Sort/Limit/Unique/Agg/WindowAgg/Group).
+fn top_plan_tlist_mut(plan: &mut Node) -> &mut Vec<Node> {
+    match plan {
+        Node::Sort(s) => &mut s.plan.targetlist,
+        Node::Limit(l) => &mut l.plan.targetlist,
+        Node::Unique(u) => &mut u.plan.targetlist,
+        Node::Agg(a) => &mut a.plan.targetlist,
+        Node::WindowAgg(w) => &mut w.plan.targetlist,
+        Node::Group(g) => &mut g.plan.targetlist,
+        Node::Result(r) => &mut r.plan.targetlist,
+        Node::SeqScan(s) => &mut s.scan.plan.targetlist,
+        Node::IndexScan(s) => &mut s.scan.plan.targetlist,
+        Node::IndexOnlyScan(s) => &mut s.scan.plan.targetlist,
+        Node::BitmapHeapScan(s) => &mut s.scan.plan.targetlist,
+        Node::NestLoop(n) => &mut n.join.plan.targetlist,
+        Node::MergeJoin(m) => &mut m.join.plan.targetlist,
+        Node::HashJoin(h) => &mut h.join.plan.targetlist,
+        _ => not_yet_reachable("apply_final_tlist_labeling: unexpected top plan node"),
+    }
 }
 
 /// PG `create_agg_plan` + `make_agg` (M5 subset): build an `Agg` over `subplan`. The

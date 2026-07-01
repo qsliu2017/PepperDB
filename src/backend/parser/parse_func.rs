@@ -42,6 +42,9 @@ pub struct FuncDetail {
     pub rettype: Oid,
     pub retset: bool,
     pub prokind: i8,
+    /// The resolved row's declared argument types (proargtypes), used to coerce
+    /// UNKNOWN string-literal arguments to the function's input types.
+    pub argtypes: Vec<Oid>,
 }
 
 /// Read the `Form_pg_proc` out of a held syscache tuple; the borrow is tied to the
@@ -121,8 +124,28 @@ pub fn func_get_detail(funcname: &[Node], argtypes: &[Oid]) -> (FuncDetailCode, 
         }
     }
 
+    // Unknown string-literal coercion fallback: PG's func_select_candidate coerces
+    // UNKNOWN arguments to a candidate's declared input types. We don't enumerate
+    // candidates (no index scan), so retry once with every UNKNOWN arg replaced by
+    // TEXT (the preferred string type, and the input type of every string-argument
+    // function reachable here). If it resolves, the returned `argtypes` (all TEXT in
+    // the substituted slots) drive the caller's per-argument coercion.
+    if argtypes.contains(&UNKNOWNOID) {
+        let coerced: Vec<Oid> =
+            argtypes.iter().map(|&t| if t == UNKNOWNOID { TEXTOID } else { t }).collect();
+        if let Some(detail) = lookup_proc_by_argvec(name, &coerced) {
+            let code = code_for_prokind(detail.prokind);
+            return (code, Some(detail));
+        }
+    }
+
     (FuncDetailCode::NotFound, None)
 }
+
+/// The pseudo-type OID for an unresolved string literal, and the preferred string
+/// type it coerces to in the func_get_detail fallback.
+const UNKNOWNOID: Oid = Oid::new(705);
+const TEXTOID: Oid = Oid::new(25);
 
 /// Look up a pg_proc row by (name, exact argtype vector) via PROCNAMEARGSNSP.
 fn lookup_proc_by_argvec(name: &str, argtypes: &[Oid]) -> Option<FuncDetail> {
@@ -141,6 +164,8 @@ fn lookup_proc_by_argvec(name: &str, argtypes: &[Oid]) -> Option<FuncDetail> {
         rettype: form.prorettype,
         retset: form.proretset,
         prokind: form.prokind,
+        // The match is exact on the search vector, so it IS the declared arg list.
+        argtypes: argtypes.to_vec(),
     };
     release_sys_cache(tup);
     Some(detail)
@@ -166,6 +191,34 @@ const ANYARRAYOID: Oid = Oid::new(2277);
 /// actual arguments).
 fn is_polymorphic_type(t: Oid) -> bool {
     t == ANYELEMENTOID || t == ANYCOMPATIBLEOID || t == ANYARRAYOID
+}
+
+/// PG `make_fn_arguments` (subset): coerce each actual argument expression to the
+/// function's declared input type via `coerce_type` (implicit context). An arg whose
+/// actual type already equals the declared type is returned unchanged; the reachable
+/// non-identity case is an UNKNOWN string literal retyped to the declared type.
+fn make_fn_arguments(
+    pstate: &mut ParseState,
+    args: Vec<Node>,
+    actual_types: &[Oid],
+    declared_types: &[Oid],
+    location: i32,
+) -> Vec<Node> {
+    use crate::nodes::primnodes::CoercionContext;
+    args.into_iter()
+        .enumerate()
+        .map(|(i, arg)| {
+            let actual = actual_types[i];
+            let declared = declared_types.get(i).copied().unwrap_or(actual);
+            if actual == declared || declared == InvalidOid {
+                return arg;
+            }
+            crate::parser::parse_coerce::coerce_type(
+                pstate, arg, actual, declared, -1,
+                CoercionContext::IMPLICIT, CoercionForm::IMPLICIT_CAST, location,
+            )
+        })
+        .collect()
 }
 
 /// PG `make_fn_expr` (the FuncExpr-building tail of ParseFuncOrColumn): build the
@@ -227,8 +280,11 @@ pub fn parse_func_or_column(
             if over {
                 not_yet_reachable("ParseFuncOrColumn: OVER on a non-aggregate/non-window function");
             }
-            // M3 argument types match the function's declared types exactly, so no
-            // make_fn_arguments coercion is needed (wired with the coercible path).
+            // make_fn_arguments (subset): coerce each actual argument to the resolved
+            // function's declared input type. Exact matches are the identity; the
+            // reachable non-identity case is an UNKNOWN string literal coerced to the
+            // declared type (e.g. pg_input_is_valid('true','bool') -> text,text).
+            let fargs = make_fn_arguments(pstate, fargs, &actual_arg_types, &detail.argtypes, location);
             make_fn_expr(&detail, fargs, CoercionForm::EXPLICIT_CALL, location)
         }
         FuncDetailCode::Aggregate => {

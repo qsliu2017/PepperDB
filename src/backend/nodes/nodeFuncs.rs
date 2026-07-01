@@ -429,6 +429,7 @@ fn walk_node<F: FnMut(&Node) -> bool>(node: &Node, walker: &mut F) -> bool {
         }
         Node::FuncExpr(f) => f.args.iter().any(&mut *walker),
         Node::RelabelType(r) => r.arg.as_ref().is_some_and(&mut *walker),
+        Node::BooleanTest(b) => b.arg.as_ref().is_some_and(&mut *walker),
         // PlaceHolderVar: recurse into the represented expression (var.c's
         // walkers visit a PHV's phexpr when not short-circuiting on it).
         Node::PlaceHolderVar(phv) => walker(&phv.phexpr),
@@ -483,6 +484,10 @@ fn mutate_node<F: FnMut(Node) -> Node>(node: Node, mutator: &mut F) -> Node {
         Node::RelabelType(mut r) => {
             r.arg = r.arg.map(&mut *mutator);
             Node::RelabelType(r)
+        }
+        Node::BooleanTest(mut b) => {
+            b.arg = b.arg.map(&mut *mutator);
+            Node::BooleanTest(b)
         }
         other => not_yet_reachable("expression_tree_mutator", &other),
     }

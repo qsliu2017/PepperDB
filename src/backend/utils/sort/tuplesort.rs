@@ -120,12 +120,40 @@ enum TupSortStatus {
 /// The owned body of a sortable object (PG's `void *tuple`). A heap sort keeps
 /// the deformed row; a datum sort keeps nothing extra (the value lives in
 /// `datum1`).
-#[derive(Clone)]
+///
+/// PG copies the whole `MinimalTuple` into sort memory so pass-by-reference
+/// (varlena) datums stay valid until `tuplesort_end`. Here the deformed row is
+/// owned: pass-by-ref datums are deep-copied via [`datum_copy_owned`] and the
+/// backing buffers travel with the `Heap` body (PG's `void *tuple` allocation).
+/// A datum in `values` points into one of `backing`, which lives as long as the
+/// tuple lives in `memtuples`.
 pub enum SortTupleBody {
-    /// Heap tuple: the full deformed row (used for tie-break columns).
-    Heap { values: Vec<Datum>, isnull: Vec<bool> },
-    /// Datum sort: no separate storage (single column lives in `datum1`).
-    Datum,
+    /// Heap tuple: the full deformed row (used for tie-break columns) plus the
+    /// owned backing buffers for its pass-by-reference datums.
+    Heap { values: Vec<Datum>, isnull: Vec<bool>, backing: Vec<Box<[u8]>> },
+    /// Datum sort: the leading value lives in `datum1`; `backing` owns its
+    /// pass-by-reference bytes (empty for a by-value datum).
+    Datum { backing: Option<Box<[u8]>> },
+}
+
+impl Clone for SortTupleBody {
+    /// Shallow clone: the datum pointers are copied verbatim; the clone does NOT
+    /// re-own the backing buffers. This is safe only because every clone site
+    /// reads from `state.memtuples`, whose entries (and their backing) outlive
+    /// the returned tuple (it is consumed within the same fetch, before the next
+    /// call). A cloned body's datums therefore point into the still-live source
+    /// backing. Deep-copying instead would leave the datums pointing at the old
+    /// buffers -- wrong -- so the shallow copy is deliberate.
+    fn clone(&self) -> Self {
+        match self {
+            Self::Heap { values, isnull, .. } => Self::Heap {
+                values: values.clone(),
+                isnull: isnull.clone(),
+                backing: Vec::new(),
+            },
+            Self::Datum { .. } => Self::Datum { backing: None },
+        }
+    }
 }
 
 /// The objects we sort. `datum1`/`isnull1` hold the leading sort key.
@@ -195,7 +223,7 @@ impl Tuplesortstate {
 
     /// C `comparetup_heap_tiebreak`: compare the 2nd..nth sort keys from the row.
     fn comparetup_heap_tiebreak(&self, a: &SortTuple, b: &SortTuple) -> i32 {
-        let (SortTupleBody::Heap { values: av, isnull: an }, SortTupleBody::Heap { values: bv, isnull: bn }) =
+        let (SortTupleBody::Heap { values: av, isnull: an, .. }, SortTupleBody::Heap { values: bv, isnull: bn, .. }) =
             (&a.body, &b.body)
         else {
             return 0;
@@ -227,10 +255,12 @@ fn lackmem(state: &Tuplesortstate) -> bool {
 /// Rough per-tuple memory charge (PG counts GetMemoryChunkSpace).
 fn sort_tuple_space(t: &SortTuple) -> i64 {
     let body = match &t.body {
-        SortTupleBody::Heap { values, isnull } => {
-            values.len() * core::mem::size_of::<Datum>() + isnull.len()
+        SortTupleBody::Heap { values, isnull, backing } => {
+            values.len() * core::mem::size_of::<Datum>()
+                + isnull.len()
+                + backing.iter().map(|b| b.len()).sum::<usize>()
         }
-        SortTupleBody::Datum => 0,
+        SortTupleBody::Datum { backing } => backing.as_ref().map_or(0, |b| b.len()),
     };
     (body + core::mem::size_of::<SortTuple>()) as i64
 }
@@ -398,13 +428,37 @@ pub fn tuplesort_used_bound(state: &Tuplesortstate) -> bool {
 
 // --- put ----------------------------------------------------------------------
 
-/// Build a `SortTuple` from a deformed row, setting the leading-key datum1.
-fn make_heap_sorttuple(state: &Tuplesortstate, values: Vec<Datum>, isnull: Vec<bool>) -> SortTuple {
+/// Build a `SortTuple` from a deformed row, deep-copying every pass-by-reference
+/// datum into sort-owned backing (PG copies the whole MinimalTuple; here the row
+/// owns its varlena bytes so the datums stay valid until `tuplesort_end`). Sets
+/// the leading-key datum1 from the (now owned) values.
+fn make_heap_sorttuple(state: &Tuplesortstate, mut values: Vec<Datum>, isnull: Vec<bool>) -> SortTuple {
+    let tupdesc = state
+        .tupdesc
+        .as_ref()
+        .unwrap_or_else(|| unreachable!("heap tuplesort has a tuple descriptor"));
+
+    let mut backing = Vec::new();
+    for (i, val) in values.iter_mut().enumerate() {
+        if isnull[i] {
+            continue;
+        }
+        let att = tupdesc.compact_attr(i);
+        if att.attbyval {
+            continue;
+        }
+        let (copy, owned) = crate::utils::datum::datum_copy_owned(*val, false, i32::from(att.attlen));
+        *val = copy;
+        if let Some(bytes) = owned {
+            backing.push(bytes);
+        }
+    }
+
     let idx = (state.sort_keys[0].attno - 1) as usize;
     let datum1 = values[idx];
     let isnull1 = isnull[idx];
     SortTuple {
-        body: SortTupleBody::Heap { values, isnull },
+        body: SortTupleBody::Heap { values, isnull, backing },
         datum1,
         isnull1,
         srctape: 0,
@@ -420,11 +474,22 @@ pub fn tuplesort_puttupleslot(state: &mut Tuplesortstate, slot: &mut TupleTableS
     tuplesort_puttuple_common(state, stup, tuplen);
 }
 
-/// C `tuplesort_putdatum`: feed a single value to a datum sort.
+/// C `tuplesort_putdatum`: feed a single value to a datum sort. Pass-by-reference
+/// values are deep-copied into sort-owned backing so the datum stays valid until
+/// `tuplesort_end` (PG copies the datum into sort memory the same way).
 pub fn tuplesort_putdatum(state: &mut Tuplesortstate, val: Datum, is_null: bool) {
+    let (datum1, backing) = if is_null {
+        (Datum(0), None)
+    } else if state.datum_typbyval {
+        (val, None)
+    } else {
+        // A datum sort of a by-ref type carries a single varlena/by-ref column;
+        // deep-copy it (typlen -1 covers varlena, which is the reachable case).
+        crate::utils::datum::datum_copy_owned(val, false, -1)
+    };
     let stup = SortTuple {
-        body: SortTupleBody::Datum,
-        datum1: if is_null { Datum(0) } else { val },
+        body: SortTupleBody::Datum { backing },
+        datum1,
         isnull1: is_null,
         srctape: 0,
     };
@@ -688,7 +753,7 @@ pub fn tuplesort_gettupleslot(
     slot: &mut TupleTableSlot,
 ) -> bool {
     match tuplesort_gettuple_common(state, forward) {
-        Some(SortTuple { body: SortTupleBody::Heap { values, isnull }, .. }) => {
+        Some(SortTuple { body: SortTupleBody::Heap { values, isnull, .. }, .. }) => {
             ExecClearTuple(slot);
             let n = values.len();
             slot.values[..n].copy_from_slice(&values);
@@ -696,7 +761,7 @@ pub fn tuplesort_gettupleslot(
             exec_store_virtual_tuple(slot);
             true
         }
-        Some(SortTuple { body: SortTupleBody::Datum, .. }) => {
+        Some(SortTuple { body: SortTupleBody::Datum { .. }, .. }) => {
             crate::elog!(ERROR, "tuplesort_gettupleslot called on a datum sort");
             unreachable!()
         }
@@ -1055,5 +1120,92 @@ mod tests {
         fn assert_send<T: Send>() {}
         assert_send::<Tuplesortstate>();
         assert_send::<Box<Tuplesortstate>>();
+    }
+
+    // A (int4 key, text payload) heap sort: the text datum initially points into a
+    // caller-owned buffer that is dropped before draining. The sort must deep-copy
+    // the varlena into its own memory, so the sorted output text stays valid (the
+    // regression that crashed printtup's VARSIZE_ANY_EXHDR with a dangling pointer).
+    const TEXTOID: crate::postgres_ext::Oid = crate::postgres_ext::Oid::new(25);
+
+    fn int4_text_desc() -> TupleDesc {
+        let mut td = TupleDescData::create_template(2);
+        td.init_builtin_entry(1, "k", INT4OID, -1, 0);
+        td.init_entry_collation(1, InvalidOid);
+        td.init_builtin_entry(2, "t", TEXTOID, -1, 0);
+        td.init_entry_collation(2, InvalidOid);
+        Arc::new(td)
+    }
+
+    /// Build a 4-byte-header varlena holding `s` into an owned buffer.
+    fn make_varlena_buf(s: &str) -> Box<[u8]> {
+        let total = crate::varatt::VARHDRSZ + s.len();
+        let mut buf = vec![0u8; total].into_boxed_slice();
+        // SAFETY: buf has VARHDRSZ + len bytes; set the 4-byte header then payload.
+        unsafe { crate::varatt::SET_VARSIZE(buf.as_mut_ptr(), total as u32) };
+        buf[crate::varatt::VARHDRSZ..].copy_from_slice(s.as_bytes());
+        buf
+    }
+
+    #[test]
+    fn heap_sort_varlena_payload_survives_source_drop() {
+        let desc = int4_text_desc();
+        let mut st = Box::new(Tuplesortstate {
+            status: TupSortStatus::Initial,
+            variant: Variant::Heap,
+            sortopt: sortopt::NONE,
+            bounded: false,
+            bound: 0,
+            bound_used: false,
+            n_keys: 1,
+            sort_keys: vec![int4_key(1, false, false)],
+            memtuples: Vec::new(),
+            avail_mem: 4096 * 1024,
+            allowed_mem: 4096 * 1024,
+            tuple_mem: 0,
+            current: 0,
+            eof_reached: false,
+            markpos: 0,
+            markpos_eof: false,
+            tupdesc: Some(Arc::clone(&desc)),
+            datum_typbyval: true,
+        });
+
+        // Feed rows out of key order; each text datum points into a per-row buffer
+        // that is dropped at the end of this scope (before performsort/drain).
+        {
+            let rows = [(3, "gamma"), (1, "alpha"), (2, "beta")];
+            let mut buffers: Vec<Box<[u8]>> = Vec::new();
+            for (k, t) in rows {
+                let buf = make_varlena_buf(t);
+                let mut slot = make_single_tuple_table_slot(Some(Arc::clone(&desc)), &TTSOpsVirtual);
+                slot.values[0] = Int32GetDatum(k);
+                slot.isnull[0] = false;
+                slot.values[1] = crate::postgres::PointerGetDatum(buf.as_ptr());
+                slot.isnull[1] = false;
+                exec_store_virtual_tuple(&mut slot);
+                tuplesort_puttupleslot(&mut st, &mut slot);
+                buffers.push(buf); // kept alive only until the block ends
+            }
+            // Explicitly drop the source buffers: any SortTuple that kept the raw
+            // pointer (rather than deep-copying) now dangles.
+            drop(buffers);
+        }
+
+        tuplesort_performsort(&mut st);
+
+        let mut slot = make_single_tuple_table_slot(Some(Arc::clone(&desc)), &TTSOpsVirtual);
+        let mut out = Vec::new();
+        while tuplesort_gettupleslot(&mut st, true, false, &mut slot) {
+            let k = DatumGetInt32(slot.values[0]);
+            // SAFETY: after the fix, the text datum points into sort-owned backing
+            // that outlives this drain, so the varlena header/payload are valid.
+            let t = unsafe { &*crate::postgres::DatumGetPointer(slot.values[1]).cast::<crate::c::text>() };
+            out.push((k, crate::backend::utils::adt::varlena::text_to_cstring(t)));
+        }
+        assert_eq!(
+            out,
+            vec![(1, "alpha".to_owned()), (2, "beta".to_owned()), (3, "gamma".to_owned())]
+        );
     }
 }

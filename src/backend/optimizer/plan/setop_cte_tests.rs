@@ -625,17 +625,15 @@ async fn uncorrelated_scalar_initplan_in_where() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn in_value_list_non_subquery_stages_cleanly() {
+async fn in_value_list_non_subquery_executes() {
     let shared = new_shared();
     in_scopes(Arc::clone(&shared), |shared| async move {
         seed(&shared).await;
-        // `x IN (expr_list)` parses + analyzes to an OR-chain of `=`. The general
-        // OR-clause-in-WHERE planning path (make_sub_restrictinfos) is not yet
-        // translated, so this stages cleanly (catchable error), not a crash. The
-        // SUBQUERY forms of IN (the step-44 deliverable) execute; this non-subquery
-        // list form rides the OR-clause path, which arrives with that milestone.
-        let res = run_sql(&shared, "SELECT a FROM t WHERE a IN (1, 3)").await;
-        assert!(res.is_err(), "non-subquery IN-list stages (OR clause), got {res:?}");
+        // `x IN (expr_list)` parses + analyzes to an OR-chain of `=`, planned via
+        // the OR-clause path (make_sub_restrictinfos). t = {1,2,3,3}, so IN (1,3)
+        // yields {1,3,3}.
+        let rows = run_sql(&shared, "SELECT a FROM t WHERE a IN (1, 3)").await.unwrap();
+        assert_eq!(col0_sorted(&rows), vec![1, 3, 3]);
     })
     .await;
 }

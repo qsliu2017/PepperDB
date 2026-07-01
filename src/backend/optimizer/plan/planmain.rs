@@ -31,17 +31,17 @@ fn not_yet_reachable(what: &str) -> ! {
     unimplemented!("{what}: not yet translated for this milestone");
 }
 
-/// Whether the query has an upper (grouping/aggregation/distinct/sort/limit) stage,
-/// in which case the base scan computes the `scan_input_tlist` (which may be empty,
-/// e.g. for a bare `count(*)`) rather than the final `processed_tlist`. Mirrors the
-/// `needs_upper` test in `grouping_planner`.
-fn query_has_upper_stage(root: &PlannerInfo) -> bool {
+/// Whether the base scan/join computes a distinct *group/agg-input* tlist (the
+/// flattened Vars an Agg/WindowAgg then reprojects into the final Aggref-bearing
+/// tlist) rather than projecting the final `processed_tlist` directly. True only
+/// for grouping/aggregation/window queries. A sort/distinct/limit-only query has
+/// no reprojecting node, so the scan projects `processed_tlist`. Note this can be
+/// true while `scan_input_tlist` is empty (a bare `count(*)` has no input Vars).
+pub(crate) fn query_computes_scan_input_tlist(root: &PlannerInfo) -> bool {
     root.parse.hasAggs
+        || root.parse.hasWindowFuncs
+        || !root.parse.windowClause.is_empty()
         || !root.parse.groupClause.is_empty()
-        || !root.parse.distinctClause.is_empty()
-        || !root.parse.sortClause.is_empty()
-        || root.parse.limitCount.is_some()
-        || root.parse.limitOffset.is_some()
 }
 
 /// PG `query_planner`: generate paths for the scan/join portion of the query.
@@ -122,8 +122,10 @@ fn query_planner_join(root: &mut PlannerInfo, qp_callback: QueryPathkeysCallback
     crate::backend::optimizer::plan::initsplan::add_base_rels_to_query(root, &jointree);
 
     // build_base_rel_tlists: mark every Var in the final (scan-input or processed)
-    // tlist as needed, so it propagates into each base rel's reltarget.
-    let final_tlist = if query_has_upper_stage(root) {
+    // tlist as needed, so it propagates into each base rel's reltarget. The
+    // scan-input tlist is populated only for grouping/window queries (an Agg node
+    // reprojects); otherwise the scan projects the final `processed_tlist`.
+    let final_tlist = if query_computes_scan_input_tlist(root) {
         root.scan_input_tlist.clone()
     } else {
         root.processed_tlist.clone()
@@ -289,7 +291,7 @@ fn setup_simple_rel_arrays(root: &mut PlannerInfo) {
 /// node). Both hold `Node` (TargetEntry-wrapped); unwrap for make_pathtarget_from_tlist.
 fn make_pathtarget_from_tlist_nodes(root: &PlannerInfo) -> PathTarget {
     use crate::nodes::nodes::Node;
-    let source = if query_has_upper_stage(root) {
+    let source = if query_computes_scan_input_tlist(root) {
         &root.scan_input_tlist
     } else {
         &root.processed_tlist
@@ -411,7 +413,7 @@ pub fn create_plan(root: &mut PlannerInfo, best_path: &Path) -> crate::nodes::no
 /// input Vars), so the scan plan is labeled against that; the final names land on
 /// the Agg's tlist (labeled when the upper plan is assembled).
 fn apply_top_tlist_labeling(root: &PlannerInfo, plan: &mut crate::nodes::nodes::Node) {
-    let label_src = if query_has_upper_stage(root) {
+    let label_src = if query_computes_scan_input_tlist(root) {
         &root.scan_input_tlist
     } else {
         &root.processed_tlist

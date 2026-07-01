@@ -13,9 +13,12 @@
 use crate::backend::parser::scan::Token;
 use crate::backend::parser::parser::{
     make_int_const, make_float_const, make_string_const, make_raw_stmt, make_star_target,
+    make_int_const_at, make_float_const_at, make_string_const_at, make_string_const_cast_at,
+    make_bool_const_at,
     do_negate, make_create_stmt, make_column_def_elt, system_type_name, generic_type_name,
-    make_insert_stmt, make_values_select, make_column_ref, make_range_var_table_ref,
-    make_a_expr, make_and_expr, make_or_expr, make_not_expr, make_func_call, RawStmtVec,
+    make_insert_stmt, make_values_select, make_column_ref, make_column_ref_star,
+    make_bool_const, make_bool_test, make_range_var_table_ref,
+    make_a_expr, make_ne_expr, NE_OP_NAME, make_and_expr, make_or_expr, make_not_expr, make_func_call, RawStmtVec,
     make_type_cast, make_case_expr, make_case_when, make_coalesce_expr, make_min_max_expr,
     make_nullif_expr, make_string_const_cast, make_agg_star_call, make_distinct_func_call,
     make_sortby, insert_select_options, make_index_stmt, make_index_elem,
@@ -53,6 +56,7 @@ use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
 use crate::nodes::nodes::{CmdType, JoinType, Node};
 use crate::nodes::lockoptions::{LockClauseStrength, LockWaitPolicy};
 use crate::nodes::primnodes::MergeMatchKind;
+use crate::nodes::primnodes::BoolTestType as BoolTest;
 use crate::nodes::parsenodes::{LockingClause, ObjectType, ResTarget, SelectStmt, SetOperation, SortByDir, SortByNulls, TypeName};
 
 grammar;
@@ -315,6 +319,10 @@ extern {
         "FREEZE"     => Token::Keyword("freeze"),
         // M13 (step 47): CLUSTER keyword (USING already exists at line 122).
         "CLUSTER"    => Token::Keyword("cluster"),
+        // Plan 004 (boolean): keywords needed as ColLabel / BooleanTest tokens.
+        "UNKNOWN"    => Token::Keyword("unknown"),
+        "ERROR"      => Token::Keyword("error"),
+        "OFF"        => Token::Keyword("off"),
         // literals / identifiers
         "IDENT"   => Token::Ident(<String>),
         "ICONST"  => Token::IConst(<i32>),
@@ -1577,6 +1585,243 @@ ColId: String = {
     <n:"IDENT"> => n,
 };
 
+// gram.y `ColLabel`: IDENT plus EVERY keyword category (used after an explicit
+// `AS` in a target/alias position, where any keyword is a legal column label).
+// Restricted to the keywords the grammar declares terminals for; grows with them.
+ColLabel: String = {
+    <n:"IDENT"> => n,
+    "ABORT" => "abort".to_string(),
+    "ABSOLUTE" => "absolute".to_string(),
+    "ACTION" => "action".to_string(),
+    "ADD" => "add".to_string(),
+    "AFTER" => "after".to_string(),
+    "ALL" => "all".to_string(),
+    "ALSO" => "also".to_string(),
+    "ALTER" => "alter".to_string(),
+    "ANALYSE" => "analyse".to_string(),
+    "ANALYZE" => "analyze".to_string(),
+    "AND" => "and".to_string(),
+    "ANY" => "any".to_string(),
+    "AS" => "as".to_string(),
+    "ASC" => "asc".to_string(),
+    "ASENSITIVE" => "asensitive".to_string(),
+    "AUTHORIZATION" => "authorization".to_string(),
+    "BACKWARD" => "backward".to_string(),
+    "BEFORE" => "before".to_string(),
+    "BEGIN" => "begin".to_string(),
+    "BETWEEN" => "between".to_string(),
+    "BIGINT" => "bigint".to_string(),
+    "BINARY" => "binary".to_string(),
+    "BOOLEAN" => "boolean".to_string(),
+    "BY" => "by".to_string(),
+    "CACHE" => "cache".to_string(),
+    "CASCADE" => "cascade".to_string(),
+    "CASCADED" => "cascaded".to_string(),
+    "CASE" => "case".to_string(),
+    "CAST" => "cast".to_string(),
+    "CHAIN" => "chain".to_string(),
+    "CHARACTERISTICS" => "characteristics".to_string(),
+    "CHECK" => "check".to_string(),
+    "CLOSE" => "close".to_string(),
+    "CLUSTER" => "cluster".to_string(),
+    "COALESCE" => "coalesce".to_string(),
+    "COLLATION" => "collation".to_string(),
+    "COLUMN" => "column".to_string(),
+    "COMMENT" => "comment".to_string(),
+    "COMMIT" => "commit".to_string(),
+    "COMMITTED" => "committed".to_string(),
+    "CONSTRAINT" => "constraint".to_string(),
+    "CONVERSION" => "conversion".to_string(),
+    "COPY" => "copy".to_string(),
+    "CREATE" => "create".to_string(),
+    "CROSS" => "cross".to_string(),
+    "CSV" => "csv".to_string(),
+    "CURRENT" => "current".to_string(),
+    "CURSOR" => "cursor".to_string(),
+    "CYCLE" => "cycle".to_string(),
+    "DATABASE" => "database".to_string(),
+    "DEALLOCATE" => "deallocate".to_string(),
+    "DECIMAL" => "decimal".to_string(),
+    "DECLARE" => "declare".to_string(),
+    "DEFAULT" => "default".to_string(),
+    "DEFERRABLE" => "deferrable".to_string(),
+    "DELETE" => "delete".to_string(),
+    "DELIMITER" => "delimiter".to_string(),
+    "DESC" => "desc".to_string(),
+    "DISTINCT" => "distinct".to_string(),
+    "DO" => "do".to_string(),
+    "DOMAIN" => "domain".to_string(),
+    "DOUBLE" => "double".to_string(),
+    "DROP" => "drop".to_string(),
+    "EACH" => "each".to_string(),
+    "ELSE" => "else".to_string(),
+    "END" => "end".to_string(),
+    "ENUM" => "enum".to_string(),
+    "ERROR" => "error".to_string(),
+    "ESCAPE" => "escape".to_string(),
+    "EXCEPT" => "except".to_string(),
+    "EXCLUDE" => "exclude".to_string(),
+    "EXECUTE" => "execute".to_string(),
+    "EXISTS" => "exists".to_string(),
+    "FALSE" => "false".to_string(),
+    "FETCH" => "fetch".to_string(),
+    "FILTER" => "filter".to_string(),
+    "FIRST" => "first".to_string(),
+    "FLOAT" => "float".to_string(),
+    "FOLLOWING" => "following".to_string(),
+    "FOR" => "for".to_string(),
+    "FOREIGN" => "foreign".to_string(),
+    "FORMAT" => "format".to_string(),
+    "FORWARD" => "forward".to_string(),
+    "FREEZE" => "freeze".to_string(),
+    "FROM" => "from".to_string(),
+    "FULL" => "full".to_string(),
+    "FUNCTION" => "function".to_string(),
+    "GRANT" => "grant".to_string(),
+    "GREATEST" => "greatest".to_string(),
+    "GROUP" => "group".to_string(),
+    "GROUPS" => "groups".to_string(),
+    "HEADER" => "header".to_string(),
+    "HOLD" => "hold".to_string(),
+    "IF" => "if".to_string(),
+    "IN" => "in".to_string(),
+    "INCREMENT" => "increment".to_string(),
+    "INDEX" => "index".to_string(),
+    "INNER" => "inner".to_string(),
+    "INSENSITIVE" => "insensitive".to_string(),
+    "INSERT" => "insert".to_string(),
+    "INSTEAD" => "instead".to_string(),
+    "INT" => "int".to_string(),
+    "INTEGER" => "integer".to_string(),
+    "INTERSECT" => "intersect".to_string(),
+    "INTO" => "into".to_string(),
+    "IS" => "is".to_string(),
+    "ISOLATION" => "isolation".to_string(),
+    "JOIN" => "join".to_string(),
+    "KEY" => "key".to_string(),
+    "LANGUAGE" => "language".to_string(),
+    "LAST" => "last".to_string(),
+    "LEAST" => "least".to_string(),
+    "LEFT" => "left".to_string(),
+    "LEVEL" => "level".to_string(),
+    "LIMIT" => "limit".to_string(),
+    "LOCAL" => "local".to_string(),
+    "LOCATION" => "location".to_string(),
+    "LOCKED" => "locked".to_string(),
+    "MATCH" => "match".to_string(),
+    "MATCHED" => "matched".to_string(),
+    "MATERIALIZED" => "materialized".to_string(),
+    "MAXVALUE" => "maxvalue".to_string(),
+    "MERGE" => "merge".to_string(),
+    "MINVALUE" => "minvalue".to_string(),
+    "MOVE" => "move".to_string(),
+    "NEXT" => "next".to_string(),
+    "NO" => "no".to_string(),
+    "NOT" => "not".to_string(),
+    "NOTHING" => "nothing".to_string(),
+    "NOWAIT" => "nowait".to_string(),
+    "NULL" => "null".to_string(),
+    "NULLIF" => "nullif".to_string(),
+    "NULLS" => "nulls".to_string(),
+    "NUMERIC" => "numeric".to_string(),
+    "OF" => "of".to_string(),
+    "OFF" => "off".to_string(),
+    "OFFSET" => "offset".to_string(),
+    "ON" => "on".to_string(),
+    "ONLY" => "only".to_string(),
+    "OPTION" => "option".to_string(),
+    "OR" => "or".to_string(),
+    "ORDER" => "order".to_string(),
+    "OTHERS" => "others".to_string(),
+    "OUTER" => "outer".to_string(),
+    "OVER" => "over".to_string(),
+    "OWNED" => "owned".to_string(),
+    "PARTIAL" => "partial".to_string(),
+    "PARTITION" => "partition".to_string(),
+    "PRECEDING" => "preceding".to_string(),
+    "PRECISION" => "precision".to_string(),
+    "PREPARE" => "prepare".to_string(),
+    "PREPARED" => "prepared".to_string(),
+    "PRIMARY" => "primary".to_string(),
+    "PRIOR" => "prior".to_string(),
+    "PRIVILEGES" => "privileges".to_string(),
+    "PROCEDURE" => "procedure".to_string(),
+    "PROGRAM" => "program".to_string(),
+    "QUOTE" => "quote".to_string(),
+    "RANGE" => "range".to_string(),
+    "READ" => "read".to_string(),
+    "REAL" => "real".to_string(),
+    "RECURSIVE" => "recursive".to_string(),
+    "REFERENCES" => "references".to_string(),
+    "RELATIVE" => "relative".to_string(),
+    "RELEASE" => "release".to_string(),
+    "RENAME" => "rename".to_string(),
+    "REPEATABLE" => "repeatable".to_string(),
+    "REPLACE" => "replace".to_string(),
+    "RESET" => "reset".to_string(),
+    "RESTRICT" => "restrict".to_string(),
+    "RETURNING" => "returning".to_string(),
+    "RETURNS" => "returns".to_string(),
+    "REVOKE" => "revoke".to_string(),
+    "RIGHT" => "right".to_string(),
+    "ROLLBACK" => "rollback".to_string(),
+    "ROW" => "row".to_string(),
+    "ROWS" => "rows".to_string(),
+    "RULE" => "rule".to_string(),
+    "SAVEPOINT" => "savepoint".to_string(),
+    "SCHEMA" => "schema".to_string(),
+    "SCROLL" => "scroll".to_string(),
+    "SELECT" => "select".to_string(),
+    "SEQUENCE" => "sequence".to_string(),
+    "SERIALIZABLE" => "serializable".to_string(),
+    "SESSION" => "session".to_string(),
+    "SET" => "set".to_string(),
+    "SHARE" => "share".to_string(),
+    "SHOW" => "show".to_string(),
+    "SIMPLE" => "simple".to_string(),
+    "SKIP" => "skip".to_string(),
+    "SMALLINT" => "smallint".to_string(),
+    "SNAPSHOT" => "snapshot".to_string(),
+    "SOME" => "some".to_string(),
+    "START" => "start".to_string(),
+    "STATEMENT" => "statement".to_string(),
+    "STDIN" => "stdin".to_string(),
+    "STDOUT" => "stdout".to_string(),
+    "TABLE" => "table".to_string(),
+    "TABLESPACE" => "tablespace".to_string(),
+    "TEMP" => "temp".to_string(),
+    "TEMPORARY" => "temporary".to_string(),
+    "TEXT" => "text".to_string(),
+    "THEN" => "then".to_string(),
+    "TIES" => "ties".to_string(),
+    "TIME" => "time".to_string(),
+    "TIMESTAMP" => "timestamp".to_string(),
+    "TO" => "to".to_string(),
+    "TRANSACTION" => "transaction".to_string(),
+    "TRIGGER" => "trigger".to_string(),
+    "TRUE" => "true".to_string(),
+    "TYPE" => "type".to_string(),
+    "UNBOUNDED" => "unbounded".to_string(),
+    "UNCOMMITTED" => "uncommitted".to_string(),
+    "UNION" => "union".to_string(),
+    "UNIQUE" => "unique".to_string(),
+    "UNKNOWN" => "unknown".to_string(),
+    "UPDATE" => "update".to_string(),
+    "USING" => "using".to_string(),
+    "VACUUM" => "vacuum".to_string(),
+    "VALUES" => "values".to_string(),
+    "VERBOSE" => "verbose".to_string(),
+    "VIEW" => "view".to_string(),
+    "WHEN" => "when".to_string(),
+    "WHERE" => "where".to_string(),
+    "WINDOW" => "window".to_string(),
+    "WITH" => "with".to_string(),
+    "WITHOUT" => "without".to_string(),
+    "WORK" => "work".to_string(),
+    "WRITE" => "write".to_string(),
+    "ZONE" => "zone".to_string(),
+};
+
 // ===========================================================================
 //  Transaction control (M9, step 36): gram.y `TransactionStmt` +
 //  `TransactionStmtLegacy`.
@@ -2393,10 +2638,11 @@ TargetList: Vec<Node> = {
 };
 
 // gram.y `target_el`. '*', a bare expression, and `a_expr AS ColLabel` are the
-// M1 reachable forms; the bare-label (no-AS) and full ColLabel keyword set arrive
-// with the keyword/label machinery. ColLabel is restricted to IDENT for now.
+// reachable forms. The AS-form label admits any keyword (ColLabel); the bare-label
+// (no-AS) form is deferred (it needs BareColLabel + the LALR precedence gram.y gets
+// from bison %prec, which lalrpop lacks -- every boolean.sql alias uses explicit AS).
 TargetEl: Node = {
-    <v:AExpr> "AS" <n:"IDENT"> => {
+    <v:AExpr> "AS" <n:ColLabel> => {
         let rt = ResTarget { name: Some(n), indirection: Vec::new(), val: Some(v), location: -1 };
         Node::ResTarget(Box::new(rt))
     },
@@ -2450,7 +2696,7 @@ CompareExpr: Node = {
     <l:AddExpr> "="  <r:AddExpr> => make_a_expr("=", l, r),
     <l:AddExpr> "<=" <r:AddExpr> => make_a_expr("<=", l, r),
     <l:AddExpr> ">=" <r:AddExpr> => make_a_expr(">=", l, r),
-    <l:AddExpr> "<>" <r:AddExpr> => make_a_expr("<>", l, r),
+    <l:AddExpr> "<>" <r:AddExpr> => make_ne_expr(l, r),
     // gram.y `a_expr IN_P in_expr` (%nonassoc IN_P). The RHS is either a sub-SELECT
     // (`x IN (SELECT ...)` -> `x = ANY (sub)`) or a parenthesized expr_list
     // (`x IN (a,b,c)` -> OR-chain of `=`). NOT IN negates.
@@ -2462,6 +2708,13 @@ CompareExpr: Node = {
     // ANY/SOME/ALL quantified comparison against a sub-SELECT.
     <l:AddExpr> <op:SubqueryOp> <a:SubType> <s:SelectWithParens> =>
         make_any_all_sublink(l, op, a, s),
+    // gram.y `a_expr IS [NOT] {TRUE|FALSE|UNKNOWN}` (%nonassoc IS) -> a BooleanTest.
+    <l:AddExpr> "IS" "TRUE"     => make_bool_test(l, BoolTest::TRUE),
+    <l:AddExpr> "IS" "NOT" "TRUE"    => make_bool_test(l, BoolTest::NOT_TRUE),
+    <l:AddExpr> "IS" "FALSE"    => make_bool_test(l, BoolTest::FALSE),
+    <l:AddExpr> "IS" "NOT" "FALSE"   => make_bool_test(l, BoolTest::NOT_FALSE),
+    <l:AddExpr> "IS" "UNKNOWN"  => make_bool_test(l, BoolTest::UNKNOWN),
+    <l:AddExpr> "IS" "NOT" "UNKNOWN" => make_bool_test(l, BoolTest::NOT_UNKNOWN),
     AddExpr,
 };
 
@@ -2480,7 +2733,7 @@ SubqueryOp: &'static str = {
     "="  => "=",
     "<=" => "<=",
     ">=" => ">=",
-    "<>" => "<>",
+    "<>" => NE_OP_NAME,
 };
 
 // gram.y `a_expr '+'/'-' a_expr` (%left '+' '-').
@@ -2632,6 +2885,9 @@ FuncApplication: Node = {
 ColumnRef: Node = {
     <n:ColId> => make_column_ref(vec![n]),
     <t:ColId> "." <n:ColId> => make_column_ref(vec![t, n]),
+    // gram.y `columnref: ColId indirection` where indirection ends in `.*` -- the
+    // whole-row reference `table.*` (a ColumnRef whose last field is an A_Star).
+    <t:ColId> "." "*" => make_column_ref_star(vec![t]),
 };
 
 // gram.y `AexprConst`. Iconst/FCONST/Sconst are the plain forms; M4 (step 23) adds
@@ -2640,13 +2896,18 @@ ColumnRef: Node = {
 // in a TypeCast to the named type (makeStringConstCast). BCONST/XCONST and the
 // func_name-Sconst / typmod'd forms grow later.
 AexprConst: Node = {
-    <i:"ICONST"> => make_int_const(i),
-    <f:"FCONST"> => make_float_const(f),
-    <s:"SCONST"> => make_string_const(s),
+    <l:@L> <i:"ICONST"> => make_int_const_at(i, l),
+    <l:@L> <f:"FCONST"> => make_float_const_at(f, l),
+    <l:@L> <s:"SCONST"> => make_string_const_at(s, l),
+    // gram.y `AexprConst: TRUE_P | FALSE_P` -> makeBoolAConst (a TypeCast of the
+    // string 't'/'f' to pg_catalog.bool, exactly as PG builds a boolean literal).
+    <l:@L> "TRUE"  => make_bool_const_at(true, l),
+    <l:@L> "FALSE" => make_bool_const_at(false, l),
     // gram.y `ConstTypename Sconst` / `Numeric Sconst`: the typed-literal form
     // `typename 'string'` (e.g. `NUMERIC '1.5'`, `DATE '2024-01-15'`). Reuses the
     // single shared `SimpleTypename` (no duplicate keyword nonterminal) so the only
     // decision after a type keyword is shift-SCONST vs reduce-to-SimpleTypename --
-    // resolved by lalrpop toward the typed-literal on SCONST lookahead.
-    <t:SimpleTypename> <s:"SCONST"> => make_string_const_cast(s, t),
+    // resolved by lalrpop toward the typed-literal on SCONST lookahead. The `@L` is
+    // the SCONST location (PG points the error caret at the literal).
+    <t:SimpleTypename> <l:@L> <s:"SCONST"> => make_string_const_cast_at(s, t, l),
 };

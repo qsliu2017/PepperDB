@@ -1362,10 +1362,9 @@ async fn warm_expr_caches(
         }
     }
 
-    // Function-call warming (PROCNAMEARGSNSP) is staged with the function-call
-    // wire milestone; the M3 wire path reaches operators (warmed above). The
-    // collected `fn_names` are recorded so that pass can grow here.
-    let _ = &fn_names;
+    // Function-call warming (PROCNAMEARGSNSP): for each function name in the target
+    // list / WHERE, warm its call-resolution caches over the candidate arg-type set.
+    warm_func_call_caches(shared, &fn_names, &types).await;
 
     // M4 (step 23): warm the cast-resolution caches the sync transform needs over
     // the wire -- the type-name lookups (TYPENAMENSP), the type metadata (TYPEOID),
@@ -1376,6 +1375,132 @@ async fn warm_expr_caches(
     //  - TYPEOID for the M4 base types (typinput/output/category reads),
     //  - CASTSOURCETARGET for the candidate-source x M4-target type cross product.
     warm_cast_caches(shared, target_list, where_clause, &types).await;
+}
+
+/// Async-warm the function-call resolution caches (PROCNAMEARGSNSP + PROCOID) for
+/// each `fn_name` over the 0-/1-/2-arg cross-product of the candidate argument types
+/// (plus TEXT/UNKNOWN so string-literal arguments resolve). Over-warming unused
+/// combinations is harmless (a negative cache entry). See `warm_expr_caches`.
+#[allow(
+    clippy::cast_ptr_alignment,
+    reason = "GETSTRUCT returns the MAXALIGN'd tuple body, aligned for Form_pg_proc"
+)]
+async fn warm_func_call_caches(shared: &Arc<SharedState>, fn_names: &[String], types: &[Oid]) {
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+    use crate::catalog::genbki::{TEXTOID, UNKNOWNOID};
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    use crate::postgres::{NameGetDatum, ObjectIdGetDatum, PointerGetDatum};
+    use crate::utils::syscache::SysCacheIdentifier as Sc;
+    if fn_names.is_empty() {
+        return;
+    }
+
+    let mut fn_types: Vec<Oid> = types.to_vec();
+    for t in [TEXTOID, UNKNOWNOID] {
+        if !fn_types.contains(&t) {
+            fn_types.push(t);
+        }
+    }
+    // The 0-/1-/2-arg argument vectors the wire path reaches.
+    let mut arglists: Vec<Vec<Oid>> = vec![Vec::new()];
+    for &a in &fn_types {
+        arglists.push(vec![a]);
+        for &b in &fn_types {
+            arglists.push(vec![a, b]);
+        }
+    }
+    for name in fn_names {
+        let nd = name_data(name);
+        for argtypes in &arglists {
+            let argvec = crate::utils::builtins::buildoidvector(argtypes);
+            let keys = [
+                NameGetDatum(&nd),
+                PointerGetDatum(argvec.cast::<u8>()),
+                ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
+            ];
+            let Some(tup) = search_sys_cache_populate(shared, Sc::PROCNAMEARGSNSP, &keys).await
+            else {
+                continue;
+            };
+            // Also warm PROCOID for make_fn_expr / get_func_* reads.
+            let oid = {
+                // SAFETY: a held PROCNAMEARGSNSP hit -> a pg_proc row.
+                let form = unsafe {
+                    &*crate::access::htup_details::GETSTRUCT(&*tup)
+                        .cast::<crate::catalog::pg_proc::FormData_pg_proc>()
+                };
+                form.oid
+            };
+            release_sys_cache(tup);
+            if let Some(t) =
+                search_sys_cache_populate(shared, Sc::PROCOID, &[ObjectIdGetDatum(oid)]).await
+            {
+                release_sys_cache(t);
+            }
+        }
+    }
+}
+
+/// Async-warm the type-name resolution syscaches (TYPENAMENSP + TYPEOID) the SYNC
+/// INSERT ... VALUES transform reads for the typed literals inside each VALUES row
+/// (`bool 'x'`, `true`/`false` -> a TypeCast to `pg_catalog.bool`, `n::numeric`, ...).
+/// `transform_insert_stmt` transforms the VALUES cells synchronously with no other
+/// pre-warm pass, so without this a fresh backend's cold catcache raises `type "..."
+/// does not exist`. Warms every m2 base type by name plus any explicit type name
+/// spelled in the VALUES cells; over-warming is harmless.
+async fn warm_insert_values_type_caches(shared: &Arc<SharedState>, stmt: &InsertStmt) {
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+    use crate::catalog::genbki::{
+        BOOLOID, DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID, INT8OID, NUMERICOID, TEXTOID,
+        TIMESTAMPOID,
+    };
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    use crate::postgres::{NameGetDatum, ObjectIdGetDatum};
+    use crate::utils::syscache::SysCacheIdentifier as Sc;
+
+    let Some(Node::SelectStmt(sel)) = stmt.selectStmt.as_ref() else {
+        return;
+    };
+    if sel.valuesLists.is_empty() {
+        return;
+    }
+
+    // The m2 base types (oid + the canonical pg_catalog name), matching warm_cast_caches.
+    let base_types: &[(Oid, &str)] = &[
+        (BOOLOID, "bool"), (INT2OID, "int2"), (INT4OID, "int4"), (INT8OID, "int8"),
+        (FLOAT4OID, "float4"), (FLOAT8OID, "float8"), (NUMERICOID, "numeric"),
+        (DATEOID, "date"), (TIMESTAMPOID, "timestamp"), (TEXTOID, "text"),
+    ];
+    for &(oid, name) in base_types {
+        if let Some(t) = search_sys_cache_populate(shared, Sc::TYPEOID, &[ObjectIdGetDatum(oid)]).await {
+            release_sys_cache(t);
+        }
+        let nd = name_data(name);
+        let keys = [NameGetDatum(&nd), ObjectIdGetDatum(PG_CATALOG_NAMESPACE)];
+        if let Some(t) = search_sys_cache_populate(shared, Sc::TYPENAMENSP, &keys).await {
+            release_sys_cache(t);
+        }
+    }
+
+    // Any explicit type name spelled in a VALUES cell (covers user-spelled names /
+    // typmod-less casts the base set doesn't spell).
+    let mut type_names: Vec<String> = Vec::new();
+    for row in &sel.valuesLists {
+        if let Node::RowExpr(row) = row {
+            for cell in &row.args {
+                collect_type_names(Some(cell), &mut type_names);
+            }
+        }
+    }
+    for tn in &type_names {
+        let nd = name_data(tn);
+        let keys = [NameGetDatum(&nd), ObjectIdGetDatum(PG_CATALOG_NAMESPACE)];
+        if let Some(t) = search_sys_cache_populate(shared, Sc::TYPENAMENSP, &keys).await {
+            release_sys_cache(t);
+        }
+    }
 }
 
 /// Async-warm the M4 cast-resolution syscaches (TYPENAMENSP / TYPEOID /
@@ -1796,6 +1921,10 @@ async fn transform_insert_stmt(
     if stmt.returningClause.is_some() {
         not_yet_reachable("transformInsertStmt: RETURNING clause");
     }
+
+    // Pre-warm the type-name caches the SYNC VALUES transform reads (typed literals
+    // like `bool 'x'` / `true`), so a fresh backend's cold catcache resolves them.
+    warm_insert_values_type_caches(shared, stmt).await;
 
     let select_stmt = stmt.selectStmt.as_ref();
     let is_general_select = is_general_select(select_stmt);

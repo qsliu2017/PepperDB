@@ -89,12 +89,13 @@ pub async fn get_type_output_info_populate(shared: &Arc<SharedState>, r#type: Oi
 /// The builtin int2/4/8 output map (bootstrap-window fallback; the int types are
 /// pass-by-value fixed-length, so `typIsVarlena` is false).
 fn builtin_type_output(r#type: Oid) -> (Oid, bool) {
-    use crate::catalog::genbki::{INT2OID, INT4OID, INT8OID};
-    use crate::utils::fmgroids::{F_INT2OUT, F_INT4OUT, F_INT8OUT};
+    use crate::catalog::genbki::{BOOLOID, INT2OID, INT4OID, INT8OID};
+    use crate::utils::fmgroids::{F_BOOLOUT, F_INT2OUT, F_INT4OUT, F_INT8OUT};
     let typoutput = match r#type {
         t if t == INT4OID => F_INT4OUT,
         t if t == INT2OID => F_INT2OUT,
         t if t == INT8OID => F_INT8OUT,
+        t if t == BOOLOID => F_BOOLOUT,
         _ => cache_lookup_failed(r#type),
     };
     (typoutput, false)
@@ -198,9 +199,10 @@ pub fn type_is_collatable(typid: Oid) -> bool {
 
 /// Builtin layout for the int2/4/8 types (bootstrap-window fallback).
 fn builtin_typlenbyvalalign(typid: Oid) -> Option<(i16, bool, u8)> {
-    use crate::catalog::genbki::{INT2OID, INT4OID, INT8OID};
-    use crate::catalog::pg_type::{TYPALIGN_DOUBLE, TYPALIGN_INT, TYPALIGN_SHORT};
+    use crate::catalog::genbki::{BOOLOID, INT2OID, INT4OID, INT8OID};
+    use crate::catalog::pg_type::{TYPALIGN_CHAR, TYPALIGN_DOUBLE, TYPALIGN_INT, TYPALIGN_SHORT};
     let r = match typid {
+        t if t == BOOLOID => (1, true, TYPALIGN_CHAR as u8),
         t if t == INT2OID => (2, true, TYPALIGN_SHORT as u8),
         t if t == INT4OID => (4, true, TYPALIGN_INT as u8),
         t if t == INT8OID => (8, true, TYPALIGN_DOUBLE as u8),
@@ -346,12 +348,13 @@ pub async fn get_type_input_info_populate(shared: &Arc<SharedState>, r#type: Oid
 /// The builtin int2/4/8 input map (bootstrap-window fallback; typioparam is the
 /// type's own OID since none is an array type).
 fn builtin_type_input(r#type: Oid) -> (Oid, Oid) {
-    use crate::catalog::genbki::{INT2OID, INT4OID, INT8OID};
-    use crate::utils::fmgroids::{F_INT2IN, F_INT4IN, F_INT8IN};
+    use crate::catalog::genbki::{BOOLOID, INT2OID, INT4OID, INT8OID};
+    use crate::utils::fmgroids::{F_BOOLIN, F_INT2IN, F_INT4IN, F_INT8IN};
     let typinput = match r#type {
         t if t == INT4OID => F_INT4IN,
         t if t == INT2OID => F_INT2IN,
         t if t == INT8OID => F_INT8IN,
+        t if t == BOOLOID => F_BOOLIN,
         _ => cache_lookup_failed(r#type),
     };
     (typinput, r#type)

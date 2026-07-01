@@ -99,16 +99,39 @@ pub fn transformTargetEntry(
     Box::new(makeTargetEntry(expr, resno, colname, resjunk))
 }
 
-/// PG `ExpandColumnRefStar`: expand a `something.*` target. M2 covers the bare `*`
-/// form (expand all tables in the namespace); the `relation.*` form grows with the
-/// whole-row / hook machinery.
+/// PG `ExpandColumnRefStar`: expand a `something.*` target. The bare `*` form
+/// expands every col-visible table; the `relation.*` form resolves the named
+/// namespace item and expands its columns. Schema-qualified (`nsp.rel.*`) and the
+/// pre/post columnref hooks grow later.
 fn expand_column_ref_star(pstate: &mut ParseState, cref: &ColumnRef) -> Vec<Node> {
-    if cref.fields.len() == 1 {
+    match cref.fields.as_slice() {
         // Bare '*': expand all tables.
-        expand_all_tables(pstate, cref.location)
-    } else {
-        unimplemented!("ExpandColumnRefStar: relation.* expansion not yet translated for this milestone")
+        [ColumnRefField::Star(_)] => expand_all_tables(pstate, cref.location),
+        // `relation.*`: expand the single named table (PG's ExpandSingleTable).
+        [ColumnRefField::String(relname), ColumnRefField::Star(_)] => {
+            let relname = &relname.sval;
+            let Some(idx) =
+                crate::backend::parser::parse_expr::refname_namespace_item(pstate, relname)
+            else {
+                error_missing_rte(relname, cref.location);
+            };
+            expand_ns_item_attrs(pstate, idx, cref.location)
+        }
+        _ => unimplemented!(
+            "ExpandColumnRefStar: schema-qualified relation.* not yet translated for this milestone"
+        ),
     }
+}
+
+/// PG `errorMissingRTE` (the message form reached by `relation.*` with no matching
+/// FROM entry): "missing FROM-clause entry for table \"relname\"".
+#[cold]
+fn error_missing_rte(relname: &str, _location: i32) -> ! {
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_TABLE)
+            .errmsg(format!("missing FROM-clause entry for table \"{relname}\""));
+    });
+    unreachable!("ereport(ERROR) diverges");
 }
 
 /// PG `ExpandAllTables`: expand a bare `*` into the columns of every col-visible
@@ -263,6 +286,28 @@ fn figure_colname_internal<'a>(node: &'a Node, name: &mut Option<&'a str>) -> i3
                 return 2;
             }
             0
+        }
+        Node::FuncCall(fc) => {
+            // Name the column after the last part of the (possibly qualified)
+            // function name (PG: strVal(llast(funcname))).
+            if let Some(Node::String_(s)) = fc.funcname.last() {
+                *name = Some(s.sval.as_str());
+                return 2;
+            }
+            0
+        }
+        Node::TypeCast(tc) => {
+            // Prefer a name from the cast's argument; otherwise use the last part
+            // of the target type name (PG: weak strength 1).
+            let strength = tc.arg.as_ref().map_or(0, |arg| figure_colname_internal(arg, name));
+            if strength <= 1
+                && let Some(tn) = tc.typeName.as_ref()
+                && let Some(last) = tn.names.last()
+            {
+                *name = Some(last.sval.as_str());
+                return 1;
+            }
+            strength
         }
         Node::A_Expr(a) => {
             if a.kind == A_Expr_Kind::NULLIF {

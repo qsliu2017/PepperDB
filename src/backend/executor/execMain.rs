@@ -171,8 +171,59 @@ fn init_plan(query_desc: &mut QueryDesc<'_>, eflags: i32) {
     // ExecGetResultType: the root node's result tupdesc (an Arc clone the
     // QueryDesc co-owns alongside the planstate's slot). A non-RETURNING
     // ModifyTable yields no tuples, hence no result descriptor.
-    query_desc.tupDesc = result_type_of(&planstate);
+    let mut tup_type = result_type_of(&planstate);
+
+    // Initialize the junk filter if needed. A SELECT needs a filter when the
+    // top-level tlist has any resjunk attrs (e.g. ORDER BY / GROUP BY / DISTINCT
+    // columns that are not part of the SELECT list). The filter's clean tuple
+    // type becomes the query result descriptor (junk stripped); each output tuple
+    // is passed through ExecFilterJunk before it reaches the destination.
+    if operation == CmdType::SELECT {
+        let top_tlist = top_plan_targetlist(&plan_tree);
+        let junk_needed = top_tlist.iter().any(|n| {
+            matches!(n, Node::TargetEntry(te) if te.resjunk)
+        });
+        if junk_needed {
+            let jf = crate::executor::executor::ExecInitJunkFilter(top_tlist);
+            tup_type.clone_from(&jf.clean_tup_type);
+            let estate = query_desc
+                .estate
+                .as_mut()
+                .unwrap_or_else(|| unreachable!("estate set by ExecutorStart"));
+            estate.junk_filter = Some(jf);
+        }
+    }
+
+    query_desc.tupDesc = tup_type;
     query_desc.planstate = Some(Box::new(planstate));
+}
+
+/// The top plan node's targetlist (`Plan.targetlist`). Mirrors createplan's
+/// `current_tlist` for the node kinds that can be the plan root.
+fn top_plan_targetlist(plan: &Node) -> &[Node] {
+    match plan {
+        Node::Result(r) => &r.plan.targetlist,
+        Node::SeqScan(s) => &s.scan.plan.targetlist,
+        Node::IndexScan(s) => &s.scan.plan.targetlist,
+        Node::IndexOnlyScan(s) => &s.scan.plan.targetlist,
+        Node::BitmapHeapScan(s) => &s.scan.plan.targetlist,
+        Node::TidScan(s) => &s.scan.plan.targetlist,
+        Node::ValuesScan(v) => &v.scan.plan.targetlist,
+        Node::Sort(s) => &s.plan.targetlist,
+        Node::Limit(l) => &l.plan.targetlist,
+        Node::Unique(u) => &u.plan.targetlist,
+        Node::Agg(a) => &a.plan.targetlist,
+        Node::WindowAgg(w) => &w.plan.targetlist,
+        Node::Group(g) => &g.plan.targetlist,
+        Node::Material(m) => &m.plan.targetlist,
+        Node::Append(a) => &a.plan.targetlist,
+        Node::NestLoop(n) => &n.join.plan.targetlist,
+        Node::MergeJoin(m) => &m.join.plan.targetlist,
+        Node::HashJoin(h) => &h.join.plan.targetlist,
+        // Plan shapes whose junk handling is not reachable yet fall back to no
+        // junk (the filter is only built when a resjunk entry is present).
+        _ => &[],
+    }
 }
 
 /// Build a `SubPlanRun` per planned SubPlan and attach the whole set to the scan
@@ -300,11 +351,17 @@ async fn execute_plan(
     let mut current_tuple_count: u64 = 0;
     loop {
         // ResetPerTupleExprContext(estate): no-op (memory tombstoned).
-        let Some(slot) = exec_proc_node(shared, planstate).await else {
+        let Some(mut slot) = exec_proc_node(shared, planstate).await else {
             break; // TupIsNull -> done
         };
 
-        // es_junkFilter is NULL for a plain SELECT; junk filtering grows.
+        // If we have a junk filter (top-level tlist has resjunk columns), strip
+        // them, producing a clean tuple with only the SELECT-list columns.
+        if let Some(estate) = estate.as_mut()
+            && let Some(jf) = estate.junk_filter.as_mut()
+        {
+            slot = crate::executor::executor::ExecFilterJunk(jf, slot);
+        }
 
         if send_tuples {
             let dest = dest

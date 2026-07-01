@@ -627,17 +627,96 @@ pub fn generate_base_implied_equalities(root: &mut PlannerInfo) {
 }
 
 /// PG `generate_base_implied_equalities_const`: const-EC base clauses. For the
-/// trivial `var = const` (2 members, 1 source) case we re-push the source clause.
-/// Beyond that, the cross-type equality generation reaches `process_implied_equality`
-/// (initsplan.c, stub); staged.
+/// trivial `var = const` (2 members, 1 source) case re-push the source clause.
+/// Otherwise pick the const member (preferring an actual `Const`) and derive a
+/// `var = const` clause for every other member via `process_implied_equality`.
 fn generate_base_implied_equalities_const(root: &mut PlannerInfo, ec_index: usize) {
-    let ec = &root.eq_classes[ec_index];
-    if ec.members.len() == 2 && ec.sources.len() == 1 {
-        let ri = ec.sources[0].as_ref().clone();
-        distribute_restrictinfo_to_rels_local(root, &ri);
-        return;
+    {
+        let ec = &root.eq_classes[ec_index];
+        if ec.members.len() == 2 && ec.sources.len() == 1 {
+            let ri = ec.sources[0].as_ref().clone();
+            crate::backend::optimizer::plan::initsplan::distribute_restrictinfo_to_rels(root, &ri);
+            return;
+        }
+        crate::assert!(ec.childmembers.is_empty());
     }
-    not_yet_reachable("generate_base_implied_equalities_const: multi-member const EC");
+
+    // Find the constant member; prefer an actual Const to a pseudo-constant so
+    // constraint-exclusion can use the generated "var = const" equalities.
+    let const_idx = {
+        let ec = &root.eq_classes[ec_index];
+        let mut chosen: Option<usize> = None;
+        for (i, em) in ec.members.iter().enumerate() {
+            if em.is_const {
+                chosen = Some(i);
+                if matches!(em.expr, Node::Const(_)) {
+                    break;
+                }
+            }
+        }
+        chosen.unwrap_or_else(|| unreachable!("generate_base_implied_equalities_const: no const"))
+    };
+
+    // Snapshot the const member's fields we need across the mutable-root loop.
+    let (const_expr, const_datatype, const_jd_relids) = {
+        let const_em = &root.eq_classes[ec_index].members[const_idx];
+        (
+            const_em.expr.clone(),
+            const_em.datatype,
+            const_em.jdomain.jd_relids.clone(),
+        )
+    };
+    let (collation, min_security) = {
+        let ec = &root.eq_classes[ec_index];
+        (ec.collation, ec.min_security)
+    };
+
+    // Generate a derived equality against each other member.
+    let num_members = root.eq_classes[ec_index].members.len();
+    for i in 0..num_members {
+        if i == const_idx {
+            continue;
+        }
+        let (cur_expr, cur_datatype, cur_is_const) = {
+            let cur_em = &root.eq_classes[ec_index].members[i];
+            crate::assert!(!cur_em.is_child);
+            (cur_em.expr.clone(), cur_em.datatype, cur_em.is_const)
+        };
+
+        let Some(eq_op) = select_equality_operator(root, ec_index, cur_datatype, const_datatype)
+        else {
+            // Cross-type failure: mark the EC broken and re-push source clauses.
+            root.eq_classes[ec_index].broken = true;
+            break;
+        };
+
+        // The const's jdomain relids are the qualscope, so a variable-free
+        // (both-const) clause is enforced at the join-domain level.
+        let qualscope = const_jd_relids.clone().unwrap_or_default();
+        let rinfo = crate::backend::optimizer::plan::initsplan::process_implied_equality(
+            root,
+            eq_op,
+            collation,
+            &cur_expr,
+            &const_expr,
+            qualscope,
+            min_security,
+            cur_is_const,
+        );
+
+        // If the clause didn't degenerate to a constant, mark it as mergejoinable
+        // and save it as a derived clause (selectivity estimation may consult it).
+        if let Some(mut rinfo) = rinfo
+            && !rinfo.mergeopfamilies.is_empty()
+        {
+            let ec_snapshot = Box::new(root.eq_classes[ec_index].identity_snapshot());
+            rinfo.left_ec = Some(ec_snapshot.clone());
+            rinfo.right_ec = Some(ec_snapshot);
+            rinfo.left_em = Some(root.eq_classes[ec_index].members[i].clone());
+            rinfo.right_em = Some(root.eq_classes[ec_index].members[const_idx].clone());
+            root.eq_classes[ec_index].derives_list.push(Box::new(rinfo));
+        }
+    }
 }
 
 /// PG `generate_base_implied_equalities_no_const`. For an EC whose members live
@@ -665,17 +744,20 @@ fn generate_base_implied_equalities_no_const(root: &PlannerInfo, ec_index: usize
     // bookkeeping staged.)
 }
 
-/// PG `generate_base_implied_equalities_broken`: re-push source clauses after a
-/// cross-type failure. Reaches `distribute_restrictinfo_to_rels` (stub); since
-/// we never set `broken` on the inner-join path, this is staged.
-fn generate_base_implied_equalities_broken(_root: &mut PlannerInfo, _ec_index: usize) {
-    not_yet_reachable("generate_base_implied_equalities_broken");
-}
-
-/// PG `distribute_restrictinfo_to_rels` (planmain.c stub). Staged: only reached
-/// by the const/broken base-clause paths above.
-fn distribute_restrictinfo_to_rels_local(_root: &mut PlannerInfo, _ri: &RestrictInfo) {
-    not_yet_reachable("distribute_restrictinfo_to_rels");
+/// PG `generate_base_implied_equalities_broken`: after a cross-type failure,
+/// re-push each source clause that is either in a const EC or is single-rel.
+fn generate_base_implied_equalities_broken(root: &mut PlannerInfo, ec_index: usize) {
+    let has_const = root.eq_classes[ec_index].has_const;
+    let sources: Vec<Box<RestrictInfo>> = root.eq_classes[ec_index].sources.clone();
+    for ri in sources {
+        let multi = ri
+            .required_relids
+            .as_ref()
+            .is_some_and(|r| bms_membership(r) == BMS_Membership::MULTIPLE);
+        if has_const || !multi {
+            crate::backend::optimizer::plan::initsplan::distribute_restrictinfo_to_rels(root, &ri);
+        }
+    }
 }
 
 /// PG `generate_join_implied_equalities`: emit the join clauses deducible from

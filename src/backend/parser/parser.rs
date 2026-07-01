@@ -37,9 +37,36 @@ pub fn make_int_const(val: i32) -> Node {
     a_const(ValUnion::Integer(makeInteger(val)))
 }
 
+/// `makeIntConst` carrying the token `@N` source location.
+pub fn make_int_const_at(val: i32, location: i32) -> Node {
+    a_const_at(ValUnion::Integer(makeInteger(val)), location)
+}
+
 /// PG `makeFloatConst`: an A_Const holding a T_Float value (kept as its text).
 pub fn make_float_const(text: String) -> Node {
     a_const(ValUnion::Float(makeFloat(text)))
+}
+
+/// `makeFloatConst` carrying the token `@N` source location.
+pub fn make_float_const_at(text: String, location: i32) -> Node {
+    a_const_at(ValUnion::Float(makeFloat(text)), location)
+}
+
+/// `makeStringConst` carrying the token `@N` source location.
+pub fn make_string_const_at(text: String, location: i32) -> Node {
+    a_const_at(ValUnion::String(makeString(text)), location)
+}
+
+/// `makeStringConstCast` carrying the SCONST `@N` location (PG points the error
+/// caret at the string literal of a typed-literal cast).
+pub fn make_string_const_cast_at(text: String, type_name: TypeName, location: i32) -> Node {
+    make_type_cast_at(make_string_const_at(text, location), type_name, location)
+}
+
+/// `makeBoolAConst` carrying the token `@N` location.
+pub fn make_bool_const_at(state: bool, location: i32) -> Node {
+    let s = if state { "t" } else { "f" };
+    make_string_const_cast_at(s.to_string(), system_type_name("bool"), location)
 }
 
 /// PG `makeNullAConst`: an A_Const with `isnull` set (the SQL NULL literal).
@@ -56,10 +83,16 @@ pub fn make_string_const(text: String) -> Node {
     a_const(ValUnion::String(makeString(text)))
 }
 
-/// Build an A_Const node from an already-constructed value (location currently -1
-/// pending location threading through the lexer; PG passes the `@N` token loc).
+/// Build an A_Const node from an already-constructed value. The no-location form
+/// keeps `location = -1` for the many callers that don't thread `@N` yet.
 fn a_const(val: ValUnion) -> Node {
-    Node::A_Const(Box::new(A_Const { val, isnull: false, location: -1 }))
+    a_const_at(val, -1)
+}
+
+/// Build an A_Const node carrying the token `@N` source location (PG's `makeXConst`
+/// passes the scanner location so `parser_errposition` can point the caret).
+fn a_const_at(val: ValUnion, location: i32) -> Node {
+    Node::A_Const(Box::new(A_Const { val, isnull: false, location }))
 }
 
 /// PG `doNegate`: an integer A_Const flips its sign in place; a float A_Const gets
@@ -126,6 +159,33 @@ pub fn make_star_target() -> Node {
 pub fn make_column_ref(parts: Vec<String>) -> Node {
     let fields = parts.into_iter().map(|p| ColumnRefField::String(makeString(p))).collect();
     Node::ColumnRef(Box::new(ColumnRef { fields, location: -1 }))
+}
+
+/// gram.y `columnref: ColId indirection` where the indirection is a trailing `.*`:
+/// a whole-row reference `table.*`. The name parts become String fields and the
+/// final field is an `A_Star` (transformColumnRef expands it to the row's columns).
+pub fn make_column_ref_star(parts: Vec<String>) -> Node {
+    let mut fields: Vec<ColumnRefField> =
+        parts.into_iter().map(|p| ColumnRefField::String(makeString(p))).collect();
+    fields.push(ColumnRefField::Star(A_Star {}));
+    Node::ColumnRef(Box::new(ColumnRef { fields, location: -1 }))
+}
+
+/// gram.y `makeBoolAConst`: the SQL boolean literal `TRUE`/`FALSE`. PG builds a
+/// string A_Const ('t'/'f') wrapped in a TypeCast to `pg_catalog.bool`, so the value
+/// flows through boolin exactly like `bool 't'`.
+pub fn make_bool_const(state: bool) -> Node {
+    let s = if state { "t" } else { "f" };
+    make_string_const_cast(s.to_string(), system_type_name("bool"))
+}
+
+/// gram.y `a_expr IS [NOT] {TRUE|FALSE|UNKNOWN}` -> a `BooleanTest` over the arg.
+pub fn make_bool_test(arg: Node, booltesttype: crate::nodes::primnodes::BoolTestType) -> Node {
+    Node::BooleanTest(Box::new(crate::nodes::primnodes::BooleanTest {
+        arg: Some(arg),
+        booltesttype,
+        location: -1,
+    }))
 }
 
 /// gram.y `c_expr: PARAM opt_indirection`: a `$n` positional parameter reference.
@@ -352,6 +412,17 @@ pub fn apply_join_alias(join: Node, alias: Option<crate::nodes::primnodes::Alias
 
 /// gram.y `a_expr <op> a_expr`: a simple binary operator A_Expr (AEXPR_OP). The
 /// operator name is a one-element list of a String value node (makeSimpleA_Expr).
+/// The not-equals operator name. A named constant because the `<>` literal cannot
+/// appear in a lalrpop action (lalrpop expands `<>` there to the tuple of bound
+/// values), so the grammar references this instead of spelling the string inline.
+pub const NE_OP_NAME: &str = "<>";
+
+/// gram.y `a_expr '<>' a_expr`: the not-equals A_Expr. A dedicated wrapper because
+/// the `<>` string literal cannot appear in a lalrpop action (see `NE_OP_NAME`).
+pub fn make_ne_expr(lexpr: Node, rexpr: Node) -> Node {
+    make_a_expr(NE_OP_NAME, lexpr, rexpr)
+}
+
 pub fn make_a_expr(op: &str, lexpr: Node, rexpr: Node) -> Node {
     use crate::nodes::parsenodes::A_Expr_Kind;
     let a = crate::nodes::makefuncs::makeSimpleA_Expr(
@@ -409,10 +480,16 @@ pub fn make_not_expr(expr: Node) -> Node {
 /// gram.y `makeTypeCast`: a TypeCast node coercing `arg` to `type_name` (the
 /// explicit `CAST(... AS t)` / `... :: t` display form is chosen at analysis time).
 pub fn make_type_cast(arg: Node, type_name: TypeName) -> Node {
+    make_type_cast_at(arg, type_name, -1)
+}
+
+/// `makeTypeCast` carrying the `@N` source location (threaded for typed-literal
+/// casts so a coercion error's caret points at the literal).
+pub fn make_type_cast_at(arg: Node, type_name: TypeName, location: i32) -> Node {
     Node::TypeCast(Box::new(crate::nodes::parsenodes::TypeCast {
         arg: Some(arg),
         typeName: Some(Box::new(type_name)),
-        location: -1,
+        location,
     }))
 }
 

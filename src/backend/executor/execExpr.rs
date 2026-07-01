@@ -130,6 +130,7 @@ fn exec_init_expr_rec(node: &Node, state: &mut ExprState) {
         Node::CaseExpr(c) => exec_init_case(c, state),
         Node::CoalesceExpr(c) => exec_init_coalesce(c, state),
         Node::MinMaxExpr(m) => exec_init_minmax(m, state),
+        Node::BooleanTest(b) => exec_init_boolean_test(b, state),
         // EEOP_AGGREF: inside an Agg node, an Aggref evaluates to the finalized
         // per-group value nodeAgg deposited in `econtext.ecxt_aggvalues[aggno]`.
         // The planner stamps `aggno` (the aggregate's slot in that array).
@@ -509,6 +510,30 @@ fn exec_init_boolexpr(b: &BoolExpr, state: &mut ExprState) {
     }
 }
 
+/// PG `ExecInitExprRec` T_BooleanTest arm: compile the arg into the scratch, then
+/// one step that maps the (value, isnull) pair to the test result. IS UNKNOWN /
+/// IS NOT UNKNOWN reuse the scalar NULLTEST_IS[NOT]NULL opcodes (PG). The result
+/// is never NULL.
+fn exec_init_boolean_test(b: &crate::nodes::primnodes::BooleanTest, state: &mut ExprState) {
+    use crate::nodes::primnodes::BoolTestType;
+
+    let arg = b.arg.as_ref().unwrap_or_else(|| not_yet_reachable("BooleanTest: NULL argument"));
+    exec_init_expr_rec(arg, state);
+
+    let opcode = match b.booltesttype {
+        BoolTestType::TRUE => ExprEvalOp::BOOLTEST_IS_TRUE,
+        BoolTestType::NOT_TRUE => ExprEvalOp::BOOLTEST_IS_NOT_TRUE,
+        BoolTestType::FALSE => ExprEvalOp::BOOLTEST_IS_FALSE,
+        BoolTestType::NOT_FALSE => ExprEvalOp::BOOLTEST_IS_NOT_FALSE,
+        BoolTestType::UNKNOWN => ExprEvalOp::NULLTEST_ISNULL,
+        BoolTestType::NOT_UNKNOWN => ExprEvalOp::NULLTEST_ISNOTNULL,
+    };
+    expr_eval_push_step(
+        state,
+        ExprEvalStep { opcode, resvalue: None, resnull: None, d: ExprEvalStepData::Empty },
+    );
+}
+
 /// Compile a scalar expression into a standalone sub-program (its own step list
 /// ending in `EEOP_DONE_RETURN`), for use as a function argument. The interpreter
 /// runs it into the fcinfo arg slot (rules.md s10: owned steps, no `resv` ptr).
@@ -796,7 +821,7 @@ fn expr_typlen(expr: &Node) -> i32 {
         Node::OpExpr(op) | Node::NullIfExpr(op) | Node::DistinctExpr(op) => typlen(op.opresulttype),
         Node::FuncExpr(f) => typlen(f.funcresulttype),
         Node::Aggref(a) => typlen(a.aggtype),
-        Node::BoolExpr(_) => typlen(crate::catalog::genbki::BOOLOID),
+        Node::BoolExpr(_) | Node::BooleanTest(_) => typlen(crate::catalog::genbki::BOOLOID),
         Node::RelabelType(r) => typlen(r.resulttype),
         Node::CoerceViaIO(c) => typlen(c.resulttype),
         Node::CaseExpr(c) => typlen(c.casetype),

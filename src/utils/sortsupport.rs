@@ -282,6 +282,7 @@ fn shim_comparator_for(cmp_func: Oid) -> SortComparator {
         c if c == f::F_NUMERIC_CMP => call_numeric_cmp,
         c if c == f::F_BTINT2CMP => call_btint2cmp,
         c if c == f::F_BTOIDCMP => call_btoidcmp,
+        c if c == f::F_BTBOOLCMP => call_btboolcmp,
         _ => {
             crate::elog!(
                 crate::utils::elog::ERROR,
@@ -321,6 +322,9 @@ fn call_btint2cmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
 }
 fn call_btoidcmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
     call_cmp(crate::utils::fmgroids::F_BTOIDCMP, x, y, ssup)
+}
+fn call_btboolcmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
+    call_cmp(crate::utils::fmgroids::F_BTBOOLCMP, x, y, ssup)
 }
 
 /// PG `PrepareSortSupportFromOrderingOp`: fill `ssup` from a btree "<" or ">"
@@ -381,6 +385,7 @@ fn get_ordering_op_properties(opno: Oid) -> Option<(Oid, Oid, crate::access::cmp
     const TEXT_OPS: Oid = Oid::new(1994); // btree/text_ops
     const DATETIME_OPS: Oid = Oid::new(434); // btree/datetime_ops
     const NUMERIC_OPS: Oid = Oid::new(1988); // btree/numeric_ops
+    const BOOL_OPS: Oid = Oid::new(424); // btree/bool_ops
     const INT2: Oid = Oid::new(21);
     const INT4: Oid = Oid::new(23);
     const INT8: Oid = Oid::new(20);
@@ -388,7 +393,10 @@ fn get_ordering_op_properties(opno: Oid) -> Option<(Oid, Oid, crate::access::cmp
     const TEXT: Oid = Oid::new(25);
     const DATE: Oid = Oid::new(1082);
     const NUMERIC: Oid = Oid::new(1700);
+    const BOOL: Oid = Oid::new(16);
     let (family, intype, cmp) = match opno.get() {
+        58 => (BOOL_OPS, BOOL, Lt),      // boollt
+        59 => (BOOL_OPS, BOOL, Gt),      // boolgt
         95 => (INTEGER_OPS, INT2, Lt),   // int2lt
         520 => (INTEGER_OPS, INT2, Gt),  // int2gt
         97 => (INTEGER_OPS, INT4, Lt),   // int4lt
@@ -452,6 +460,7 @@ fn builtin_opfamily_order_proc(opfamily: Oid, lefttype: Oid, procnum: i16) -> Oi
         return crate::postgres_ext::InvalidOid;
     }
     match lefttype.get() {
+        16 => f::F_BTBOOLCMP,
         21 => f::F_BTINT2CMP,
         23 => f::F_BTINT4CMP,
         20 => f::F_BTINT8CMP,

@@ -142,15 +142,15 @@ fn assign_collations_walker(
         // into the children (so nested OpExprs are visited) and sets the node's
         // collation to InvalidOid. The general collation merge over collatable inputs
         // grows with text/varchar.
-        Node::RelabelType(r) => {
-            if let Some(arg) = r.arg.as_mut() {
-                assign_expr_collations(pstate, arg);
-            }
-            no_collation(context);
-            false
-        }
-        Node::CoerceViaIO(c) => {
-            if let Some(arg) = c.arg.as_mut() {
+        // Single-arg uncollatable wrappers: descend into the arg, report no collation.
+        Node::RelabelType(_) | Node::CoerceViaIO(_) | Node::BooleanTest(_) => {
+            let arg = match node {
+                Node::RelabelType(r) => r.arg.as_mut(),
+                Node::CoerceViaIO(c) => c.arg.as_mut(),
+                Node::BooleanTest(b) => b.arg.as_mut(),
+                _ => unreachable!(),
+            };
+            if let Some(arg) = arg {
                 assign_expr_collations(pstate, arg);
             }
             no_collation(context);

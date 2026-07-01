@@ -34,7 +34,9 @@
 //! `process_security_barrier_quals`, the LATERAL helpers
 //! (`find_lateral_references`, `create_lateral_join_info`,
 //! `extract_lateral_references`, `rebuild_lateral_attr_needed`), and
-//! `process_implied_equality`/`build_implied_join_equality` (EC-driven, step 31).
+//! `build_implied_join_equality` (EC-driven, reached only by the outer-join
+//! reconsider path). `process_implied_equality` + `get_join_domain_min_rels` are
+//! live (EC-derived base equalities from `generate_base_implied_equalities_const`).
 //! `check_memoizable`'s typecache lookup is staged too (left_/right_hasheqoperator
 //! stay invalid; Memoize is an optimization).
 //!
@@ -803,19 +805,119 @@ pub fn mark_rels_nulled_by_join(root: &mut PlannerInfo, ojrelid: Index, lower_re
 }
 
 /// PG `process_implied_equality`: create `item1 op item2` and push it into the
-/// clause lists. Driven by the EC machinery (generate_base_implied_equalities);
-/// staged with the rest of the EC-derived clause generation (step 31).
+/// clause lists. Driven by the EC machinery (generate_base_implied_equalities).
+///
+/// `qualscope` is the nominal syntactic level; it must cover all rels used in the
+/// exprs but is only used to place the clause when both exprs are variable-free.
+/// `both_const` says both items are pseudo-constant, so it's worth folding via
+/// `eval_const_expressions` (may reduce to constant TRUE, in which case we return
+/// `None`). Returns the generated RestrictInfo, or `None` if it folded to TRUE.
 pub fn process_implied_equality(
-    _root: &mut PlannerInfo,
-    _opno: crate::postgres_ext::Oid,
-    _collation: crate::postgres_ext::Oid,
-    _item1: &crate::nodes::primnodes::Expr,
-    _item2: &crate::nodes::primnodes::Expr,
-    _qualscope: Relids,
-    _security_level: Index,
-    _both_const: bool,
-) -> RestrictInfo {
-    not_yet_reachable("process_implied_equality: EC-derived equality clause");
+    root: &mut PlannerInfo,
+    opno: Oid,
+    collation: Oid,
+    item1: &crate::nodes::primnodes::Expr,
+    item2: &crate::nodes::primnodes::Expr,
+    qualscope: Relids,
+    security_level: Index,
+    both_const: bool,
+) -> Option<RestrictInfo> {
+    // Build the clause. Copies of item1/item2 so we share no substructure.
+    let mut clause = crate::backend::nodes::makefuncs::make_opclause(
+        opno,
+        crate::catalog::genbki::BOOLOID,
+        false, // opretset
+        Some(item1.clone()),
+        Some(item2.clone()),
+        crate::postgres_ext::InvalidOid,
+        collation,
+    );
+    // Resolve the implementing function; the parser never saw this synthesized
+    // clause. (PG defers this to setrefs; setting it now is equivalent here.)
+    if let Node::OpExpr(op) = &mut clause {
+        op.opfuncid = crate::backend::utils::cache::lsyscache::get_opcode(opno);
+    }
+
+    // If both constant, try to reduce to a boolean constant.
+    let mut clause = Some(clause);
+    if both_const {
+        clause = crate::backend::optimizer::util::clauses::eval_const_expressions(Some(root), clause);
+        // If we produced const TRUE, drop the clause.
+        if let Some(Node::Const(cclause)) = &clause {
+            crate::assert!(cclause.consttype == crate::catalog::genbki::BOOLOID);
+            if !cclause.constisnull && crate::postgres::DatumGetBool(cclause.constvalue) {
+                return None;
+            }
+        }
+    }
+    let clause = clause.unwrap_or_else(|| unreachable!("process_implied_equality: null clause"));
+
+    // Cut-down distribute_qual_to_rels. Retrieve relids in the (folded) clause.
+    let mut relids = pull_varnos(root, Some(clause.clone()));
+    crate::assert!(bms_is_subset(&relids, &qualscope));
+
+    // Variable-free clause: apply as a gating qual at the join domain's safe level.
+    let mut pseudoconstant = false;
+    if bms_is_empty(&relids) {
+        relids = get_join_domain_min_rels(root, &qualscope);
+        pseudoconstant = true;
+        root.has_pseudo_constant_quals = true;
+    }
+
+    let mut restrictinfo = make_restrictinfo(
+        root,
+        Box::new(clause.clone()),
+        true,  // is_pushed_down
+        false, // !has_clone
+        false, // !is_clone
+        pseudoconstant,
+        security_level,
+        Some(relids.clone()),
+        None, // incompatible_relids
+        None, // outer_relids
+    );
+
+    // If it's a join clause, add its Vars to the rels' targetlists.
+    if bms_membership(&relids) == BMS_Membership::MULTIPLE {
+        let flags = PullVarClauseFlags::RECURSE_AGGREGATES
+            | PullVarClauseFlags::RECURSE_WINDOWFUNCS
+            | PullVarClauseFlags::INCLUDE_PLACEHOLDERS;
+        let vars = pull_var_clause(Some(clause), flags);
+        add_vars_to_targetlist(root, &vars, relids);
+    }
+
+    // Check mergejoinability (usually succeeds; the op came from an EC).
+    check_mergejoinable(&mut restrictinfo);
+
+    // Push into the appropriate restrictinfo lists.
+    distribute_restrictinfo_to_rels(root, &restrictinfo);
+
+    Some(restrictinfo)
+}
+
+/// PG `get_join_domain_min_rels`: the join level for a derived pseudoconstant
+/// (Var-free) qual belonging to the join domain with the given relids. Strips
+/// lower outer joins that could commute out; a no-op for the top-level domain or
+/// a query with no outer joins.
+fn get_join_domain_min_rels(root: &PlannerInfo, domain_relids: &Relids) -> Relids {
+    use crate::nodes::bitmapset::{bms_del_member, bms_del_members, bms_equal};
+    let mut result = bms_copy(domain_relids);
+    if root
+        .all_query_rels
+        .as_ref()
+        .is_some_and(|aqr| bms_equal(&result, aqr))
+    {
+        return result;
+    }
+    for sjinfo in &root.join_info_list {
+        if sjinfo.jointype == JoinType::LEFT && bms_is_member(sjinfo.ojrelid as i32, &result) {
+            result = bms_del_member(result, sjinfo.ojrelid as i32);
+            if let Some(rh) = &sjinfo.syn_righthand {
+                result = bms_del_members(result, rh);
+            }
+        }
+    }
+    result
 }
 
 /// PG `build_implied_join_equality`: build a RestrictInfo for an EC-implied join

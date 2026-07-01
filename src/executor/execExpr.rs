@@ -288,6 +288,9 @@ pub struct ExprEvalStep {
 
 /// Inline per-operation data; one variant per former `union d` member.
 pub enum ExprEvalStepData {
+    /// no payload; for steps that read only resvalue/resnull (e.g. scalar
+    /// NULLTEST_IS[NOT]NULL, BOOLTEST_IS_*).
+    Empty,
     /// for EEOP_INNER/OUTER/SCAN/OLD/NEW_FETCHSOME
     Fetch(FetchData),
     /// for EEOP_INNER/OUTER/SCAN/OLD/NEW_[SYS]VAR

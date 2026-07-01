@@ -84,7 +84,6 @@ pub fn coerce_type(
 /// applying its typinput function to the literal's cstring (stringTypeDatum). The
 /// literal's value is a cstring datum (UNKNOWN's internal repr == cstring).
 fn retype_unknown_const(con: &Const, target_type_id: Oid, target_type_mod: i32) -> Const {
-    use crate::backend::utils::fmgr::fmgr::OidInputFunctionCall;
     use crate::postgres::{Datum, DatumGetCString};
 
     // M4 has no domains; base == target.
@@ -100,8 +99,11 @@ fn retype_unknown_const(con: &Const, target_type_id: Oid, target_type_mod: i32) 
     } else {
         // SAFETY: UNKNOWN's value is a leaked NUL-terminated cstring (make_const).
         let s = unsafe { c_str_to_str(DatumGetCString(con.constvalue)) };
-        OidInputFunctionCall(typinput, &s, typioparam, input_type_mod)
-            .unwrap_or_else(|| not_yet_reachable("coerce_type: typinput returned NULL"))
+        // PG wraps stringTypeDatum with setup_parser_errposition_callback so an
+        // input-function ERROR points its caret at the literal (parser_errposition).
+        // We realize the same by stamping the raised error's cursorpos from the
+        // Const's `@N` location (1-based) before re-raising.
+        call_input_with_errposition(typinput, &s, typioparam, input_type_mod, con.location)
     };
     let _ = base_type_mod;
 
@@ -114,6 +116,41 @@ fn retype_unknown_const(con: &Const, target_type_id: Oid, target_type_mod: i32) 
         constisnull: con.constisnull,
         constbyval: typbyval,
         location: con.location,
+    }
+}
+
+/// Call the target type's input function for an unknown-literal coercion, stamping
+/// the raised error's `cursorpos` from the literal's `@N` source location if the
+/// input function raises without one. This is the port of PG wrapping
+/// `stringTypeDatum` in `setup_parser_errposition_callback(location)`: the caret in
+/// the client's `LINE n: ... ^` points at the literal. `location < 0` means unknown
+/// (no callback in PG); we leave `cursorpos` untouched then.
+fn call_input_with_errposition(
+    typinput: Oid,
+    s: &str,
+    typioparam: Oid,
+    input_type_mod: i32,
+    location: i32,
+) -> crate::postgres::Datum {
+    use crate::backend::utils::fmgr::fmgr::OidInputFunctionCall;
+
+    let call = std::panic::AssertUnwindSafe(|| {
+        OidInputFunctionCall(typinput, s, typioparam, input_type_mod)
+            .unwrap_or_else(|| not_yet_reachable("coerce_type: typinput returned NULL"))
+    });
+    match std::panic::catch_unwind(call) {
+        Ok(v) => v,
+        Err(payload) => match payload.downcast::<crate::utils::elog::ErrorData>() {
+            Ok(mut edata) => {
+                // PG's parser_errposition sets cursorpos = location + 1 (1-based),
+                // but only if the error carries no position yet.
+                if location >= 0 && edata.cursorpos == 0 {
+                    edata.cursorpos = location + 1;
+                }
+                std::panic::resume_unwind(edata)
+            }
+            Err(other) => std::panic::resume_unwind(other),
+        },
     }
 }
 
