@@ -13,10 +13,10 @@
 # --------------------------------------------------------------------------
 # ACTIVE (PASS today)
 # --------------------------------------------------------------------------
-# test_setup: the trimmed shared fixtures (INT2_TBL, INT4_TBL). run.sh swaps in
-# ai/harness/regress/test_setup_pepper.sql for this slot and classifies it by
-# "loaded without error" (its output intentionally differs from upstream).
-# Must be FIRST so downstream tests see its tables.
+# test_setup: the trimmed shared fixtures (INT2_TBL, INT4_TBL, CHAR_TBL,
+# VARCHAR_TBL). run.sh swaps in ai/harness/regress/test_setup_pepper.sql for this
+# slot and classifies it by "loaded without error" (its output intentionally
+# differs from upstream). Must be FIRST so downstream tests see its tables.
 test: test_setup
 # boolean: the bool type surface (input/output, the six comparison operators +
 # casts, IS [NOT] TRUE/FALSE/UNKNOWN, TRUE/FALSE literals, `AS <keyword>` column
@@ -30,6 +30,18 @@ test: boolean
 # step 10 -- md5(text)/md5(bytea) execute and `= <literal>` resolves via the text
 # operators + unknown-literal operator coercion the step added.
 test: md5
+# char, varchar: FULL PASS as of the post-step-10 unblocker pass. The two gaps
+# that held them back both landed: (1) temp-namespace shadowing -- CREATE TEMP
+# TABLE creates in the per-backend pg_temp_N namespace (created on first use),
+# and the active search path checks it FIRST, so the TEMP CHAR_TBL/VARCHAR_TBL
+# shadow the test_setup fixtures, DROP TABLE resolves the temp one, and the
+# fixture reappears for the "value too long" tail; (2) varchar-vs-literal
+# comparison resolution -- a varchar operand with no operator of its own now
+# falls through to the text operators via the binary varchar->text coercion
+# (parse_oper) instead of erroring. (The `||` operator is also lexed + resolves
+# now; these two tests don't use it.)
+test: char
+test: varchar
 #
 # Step 08 also landed: generate_series (int4/int8) as a materialized SRF-in-FROM,
 # gcd/lcm(int8), and the funcapi SRF ValuePerCall machinery. The step's remaining
@@ -74,21 +86,6 @@ test: md5
 #   select_having   [char(n) typmod + HAVING clause syntax -> string/agg steps]
 #
 # Tier-1 simple types -- all NEW-DIFF:
-#   char, varchar   [Step 10 landed the FULL bpchar/varchar surface: char(n)/
-#                    varchar(n) typmod grammar, bpcharin/varcharin length coercion
-#                    (blank-pad/truncate + "value too long"), the blank-insensitive
-#                    bpchar comparison suite, the text/varchar/bpchar operators +
-#                    binary-coercible operator resolution, the text<->bpchar<->
-#                    varchar casts, quoted-identifier lexing (`"char"`, `AS "x"`),
-#                    and FROM-relation ALIASES. VERIFIED working via psql. STILL
-#                    BLOCKED by ONE gap: `CREATE TEMP TABLE CHAR_TBL(...)` does not
-#                    SHADOW the test_setup CHAR_TBL -- temp-namespace precedence
-#                    (pg_temp on the search path) is staged (tablecmds.rs "temp-
-#                    namespace handling is staged"). The tests build a TEMP table of
-#                    the same name and expect it to hide the fixture; today both
-#                    resolve, so the row sets differ. Re-add when temp-namespace
-#                    shadowing lands. (`||` text-concat operator is also not lexed,
-#                    minor, but the temp-table gap is the hard blocker.)]
 #   int2, int4      [boolean now ACTIVE above (KNOWN-DIFF on the one SRF-in-FROM
 #                    line). int2/int4 build on the SAME shared infra now landed
 #                    for boolean -- keyword ColLabel aliases, typed literals,
@@ -100,24 +97,32 @@ test: md5
 #   int8            [int8 INSERT path bugs ("syscache not warm", literal typing)]
 #   float4, float8  [float/numeric input -- numeric step (12); T_Float literal now
 #                    a catchable ERROR (no longer crashes) but not yet computed]
-#   text            [Step 10 landed the varlena string breadth (concat/format/left/
-#                    right/reverse/quote_*/etc.) + text operators. text.sql still
-#                    needs: the `||` concat operator (not lexed), concat()/format()
-#                    execution which stages on get_call_expr_argtype (variadic-any
-#                    arg-type resolution, a PRE-EXISTING executor gap), the TEXT_TBL
-#                    fixture, to_date (datetime step 11), and string_agg/array_agg
-#                    (aggregate steps). Left OUT until those land.]
+#   text            [`||` NOW LEXES and text||text resolves (textcat). Verified
+#                    2026-07-02, text.sql still needs: the cross-type concat
+#                    operators `text || anynonarray` / `anynonarray || text`
+#                    (textanycat/anytextcat, polymorphic-arg resolution),
+#                    concat()/concat_ws()/format() execution which stages on
+#                    get_call_expr_argtype (variadic-"any" arg-type resolution, a
+#                    PRE-EXISTING executor gap) + the VARIADIC grammar, E'...'
+#                    escape strings + leading block comments (not lexed), the
+#                    "function length(integer) does not exist" arg-typed error
+#                    format with LINE/HINT, the TEXT_TBL fixture, to_date
+#                    (datetime step 11), and string_agg/array_agg (aggregate
+#                    steps). Left OUT until those land.]
 #   name            [Step 10 landed name I/O + comparison + a POSIX regex engine +
-#                    the `~`/`!~` operators. name.sql still needs: parse_ident (its
-#                    text[] array result stages on the array builder), the `||`
-#                    operator, repeat()/format() over name, and a DO/PL block
-#                    (step 23). Left OUT.]
+#                    the `~`/`!~` operators; `||` now lexes. Verified 2026-07-02,
+#                    name.sql still needs: `name` as a column type in CREATE TABLE
+#                    + `name 'literal'` typed literals (grammar), parse_ident (its
+#                    text[] array result stages on the array builder + `a[1]`
+#                    subscripting + `::name[]` casts), E'...' escape strings,
+#                    repeat()/format() over name, and a DO/PL block (step 23).
+#                    Left OUT.]
 #   strings         [Step 10 landed regexp_* scalars (regexp_replace/match/like/
 #                    count/instr/substr), LIKE/ILIKE, encode/decode helpers, and the
-#                    Spencer-style regex engine. strings.sql is XL and still blocked
-#                    by: bytea bit-ops (get/set_bit/byte), SIMILAR TO, the SRF
-#                    regexp_matches/split_to_table (SRF machinery), unistr, bytea<->
-#                    int casts, and the `||` operator. Left OUT.]
+#                    Spencer-style regex engine; `||` now lexes. strings.sql is XL
+#                    and still blocked by: bytea bit-ops (get/set_bit/byte),
+#                    SIMILAR TO, the SRF regexp_matches/split_to_table (SRF
+#                    machinery), unistr, and bytea<->int casts. Left OUT.]
 #   select_implicit [NOT a string test -- GROUP BY/ORDER BY resjunk + column-
 #                    ambiguity resolution + CTAS-with-count. lower()/upper() (landed
 #                    here) are the only string funcs. Blocked by the resjunk/

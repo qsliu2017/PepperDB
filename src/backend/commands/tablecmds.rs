@@ -86,10 +86,18 @@ pub async fn DefineRelation(
         unreachable!("CREATE TABLE always names the relation");
     });
 
-    // RangeVarGetAndCheckCreationNamespace (M2 subset): a schema qualifier
+    // RangeVarGetAndCheckCreationNamespace / RangeVarGetCreationNamespace (subset):
+    // TEMP relations (and the explicit `pg_temp` qualifier) create in this
+    // backend's temp namespace (created on first use); another schema qualifier
     // resolves in that schema; otherwise the default creation namespace is public.
-    // (Permission/lock/temp-namespace handling is staged.)
+    // (Permission/lock handling is staged.)
     let namespace_id = match relation.schemaname.as_deref() {
+        Some("pg_temp") => {
+            crate::backend::catalog::namespace::get_temp_table_namespace(shared).await
+        }
+        None if relation.relpersistence == crate::catalog::pg_class::RELPERSISTENCE_TEMP => {
+            crate::backend::catalog::namespace::get_temp_table_namespace(shared).await
+        }
         None => PG_PUBLIC_NAMESPACE,
         Some(schema) => crate::backend::catalog::namespace::namespace_oid_by_name(shared, schema)
             .await

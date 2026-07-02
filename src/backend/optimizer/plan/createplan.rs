@@ -823,8 +823,10 @@ pub fn build_upper_plan(root: &PlannerInfo, subplan: Node) -> Node {
     let has_distinct = !parse.distinctClause.is_empty();
     let has_sort = !parse.sortClause.is_empty();
     let has_limit = parse.limitCount.is_some() || parse.limitOffset.is_some();
+    let has_srfs =
+        crate::backend::optimizer::plan::planmain::tlist_returns_set(&root.processed_tlist);
 
-    if !has_grouping && !has_windows && !has_distinct && !has_sort && !has_limit {
+    if !has_grouping && !has_windows && !has_distinct && !has_sort && !has_limit && !has_srfs {
         return subplan;
     }
 
@@ -841,6 +843,17 @@ pub fn build_upper_plan(root: &PlannerInfo, subplan: Node) -> Node {
     //     below ordering by PARTITION BY then ORDER BY).
     if has_windows {
         plan = create_window_plans(root, plan);
+    }
+
+    // 1c) Target-list set-returning functions: a ProjectSet over the scan/join
+    //     evaluates the SRF-bearing final tlist (PG adjust_paths_for_srfs /
+    //     create_projectset_path / create_project_set_plan, collapsed to the
+    //     port's flat-plan assembly). Placed after grouping/window and before
+    //     DISTINCT / ORDER BY, matching PG grouping_planner's stage order.
+    //     grouping_planner rejected the SRF+grouping/window combination, so the
+    //     input here is the scan/join emitting the scan-input Vars.
+    if has_srfs {
+        plan = create_project_set_plan(root, plan);
     }
 
     // 2) ORDER BY (a Sort over the current plan's output).
@@ -922,6 +935,7 @@ fn top_plan_tlist_mut(plan: &mut Node) -> &mut Vec<Node> {
         Node::Unique(u) => &mut u.plan.targetlist,
         Node::Agg(a) => &mut a.plan.targetlist,
         Node::WindowAgg(w) => &mut w.plan.targetlist,
+        Node::ProjectSet(p) => &mut p.plan.targetlist,
         Node::Group(g) => &mut g.plan.targetlist,
         Node::Result(r) => &mut r.plan.targetlist,
         Node::SeqScan(s) => &mut s.scan.plan.targetlist,
@@ -935,6 +949,51 @@ fn top_plan_tlist_mut(plan: &mut Node) -> &mut Vec<Node> {
         Node::HashJoin(h) => &mut h.join.plan.targetlist,
         _ => not_yet_reachable("apply_final_tlist_labeling: unexpected top plan node"),
     }
+}
+
+/// PG `create_project_set_plan` + `make_project_set`: build a `ProjectSet` over
+/// `subplan` carrying the SRF-bearing final `processed_tlist`. PG's
+/// `split_pathtarget_at_srfs` guarantees every SRF sits at the TOP level of a
+/// tlist item, adding extra ProjectSet levels otherwise; the port stacks exactly
+/// one level, so nested SRF placements raise a clean, catchable
+/// feature-not-supported error instead.
+fn create_project_set_plan(root: &PlannerInfo, subplan: Node) -> Node {
+    use crate::backend::nodes::nodeFuncs::expression_returns_set;
+
+    for n in &root.processed_tlist {
+        let Node::TargetEntry(te) = n else {
+            not_yet_reachable("create_project_set_plan: tlist entry is not a TargetEntry");
+        };
+        let Some(expr) = te.expr.as_ref() else { continue };
+        let (is_top_srf, args) = match expr {
+            Node::FuncExpr(f) if f.funcretset => (true, &f.args),
+            Node::OpExpr(o) if o.opretset => (true, &o.args),
+            _ => (false, &Vec::new() as &Vec<Node>),
+        };
+        let nested = if is_top_srf {
+            // A set-returning argument of a set-returning function would need a
+            // second ProjectSet level below this one.
+            args.iter().any(expression_returns_set)
+        } else {
+            // An SRF buried inside a non-SRF expression would need a ProjectSet
+            // level ABOVE the one evaluating the SRF.
+            expression_returns_set(expr)
+        };
+        if nested {
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+                    .errmsg("set-returning functions are only supported at the top level of the select list");
+            });
+        }
+    }
+
+    let tlist = root.processed_tlist.clone();
+    Node::ProjectSet(Box::new(crate::nodes::plannodes::ProjectSet {
+        plan: Plan {
+            lefttree: Some(subplan),
+            ..empty_plan(tlist, Vec::new())
+        },
+    }))
 }
 
 /// PG `create_agg_plan` + `make_agg` (M5 subset): build an `Agg` over `subplan`. The
@@ -1212,6 +1271,7 @@ fn current_tlist(plan: &Node) -> &[Node] {
         Node::BitmapHeapScan(s) => &s.scan.plan.targetlist,
         Node::Agg(a) => &a.plan.targetlist,
         Node::WindowAgg(w) => &w.plan.targetlist,
+        Node::ProjectSet(p) => &p.plan.targetlist,
         Node::Sort(s) => &s.plan.targetlist,
         Node::Unique(u) => &u.plan.targetlist,
         Node::Limit(l) => &l.plan.targetlist,

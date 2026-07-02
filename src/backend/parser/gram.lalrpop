@@ -363,6 +363,7 @@ extern {
         "<="      => Token::LessEquals,
         ">="      => Token::GreaterEquals,
         "<>"      => Token::NotEquals,
+        "||"      => Token::Concat,
     }
 }
 
@@ -2796,30 +2797,38 @@ NotExpr: Node = {
 // gram.y comparison operators (%nonassoc: no chaining, so the operands are the
 // next-tighter tier). Each builds an A_Expr(OP) over the named operator.
 CompareExpr: Node = {
-    <l:AddExpr> "<"  <r:AddExpr> => make_a_expr("<", l, r),
-    <l:AddExpr> ">"  <r:AddExpr> => make_a_expr(">", l, r),
-    <l:AddExpr> "="  <r:AddExpr> => make_a_expr("=", l, r),
-    <l:AddExpr> "<=" <r:AddExpr> => make_a_expr("<=", l, r),
-    <l:AddExpr> ">=" <r:AddExpr> => make_a_expr(">=", l, r),
-    <l:AddExpr> "<>" <r:AddExpr> => make_ne_expr(l, r),
+    <l:QualOpExpr> "<"  <r:QualOpExpr> => make_a_expr("<", l, r),
+    <l:QualOpExpr> ">"  <r:QualOpExpr> => make_a_expr(">", l, r),
+    <l:QualOpExpr> "="  <r:QualOpExpr> => make_a_expr("=", l, r),
+    <l:QualOpExpr> "<=" <r:QualOpExpr> => make_a_expr("<=", l, r),
+    <l:QualOpExpr> ">=" <r:QualOpExpr> => make_a_expr(">=", l, r),
+    <l:QualOpExpr> "<>" <r:QualOpExpr> => make_ne_expr(l, r),
     // gram.y `a_expr IN_P in_expr` (%nonassoc IN_P). The RHS is either a sub-SELECT
     // (`x IN (SELECT ...)` -> `x = ANY (sub)`) or a parenthesized expr_list
     // (`x IN (a,b,c)` -> OR-chain of `=`). NOT IN negates.
-    <l:AddExpr> "IN" <s:SelectWithParens> => make_in_sublink(l, s, false),
-    <l:AddExpr> "IN" "(" <e:ExprList> ")" => make_in_list(l, e, false),
-    <l:AddExpr> "NOT" "IN" <s:SelectWithParens> => make_in_sublink(l, s, true),
-    <l:AddExpr> "NOT" "IN" "(" <e:ExprList> ")" => make_in_list(l, e, true),
+    <l:QualOpExpr> "IN" <s:SelectWithParens> => make_in_sublink(l, s, false),
+    <l:QualOpExpr> "IN" "(" <e:ExprList> ")" => make_in_list(l, e, false),
+    <l:QualOpExpr> "NOT" "IN" <s:SelectWithParens> => make_in_sublink(l, s, true),
+    <l:QualOpExpr> "NOT" "IN" "(" <e:ExprList> ")" => make_in_list(l, e, true),
     // gram.y `a_expr subquery_Op sub_type select_with_parens` (%nonassoc): the
     // ANY/SOME/ALL quantified comparison against a sub-SELECT.
-    <l:AddExpr> <op:SubqueryOp> <a:SubType> <s:SelectWithParens> =>
+    <l:QualOpExpr> <op:SubqueryOp> <a:SubType> <s:SelectWithParens> =>
         make_any_all_sublink(l, op, a, s),
     // gram.y `a_expr IS [NOT] {TRUE|FALSE|UNKNOWN}` (%nonassoc IS) -> a BooleanTest.
-    <l:AddExpr> "IS" "TRUE"     => make_bool_test(l, BoolTest::TRUE),
-    <l:AddExpr> "IS" "NOT" "TRUE"    => make_bool_test(l, BoolTest::NOT_TRUE),
-    <l:AddExpr> "IS" "FALSE"    => make_bool_test(l, BoolTest::FALSE),
-    <l:AddExpr> "IS" "NOT" "FALSE"   => make_bool_test(l, BoolTest::NOT_FALSE),
-    <l:AddExpr> "IS" "UNKNOWN"  => make_bool_test(l, BoolTest::UNKNOWN),
-    <l:AddExpr> "IS" "NOT" "UNKNOWN" => make_bool_test(l, BoolTest::NOT_UNKNOWN),
+    <l:QualOpExpr> "IS" "TRUE"     => make_bool_test(l, BoolTest::TRUE),
+    <l:QualOpExpr> "IS" "NOT" "TRUE"    => make_bool_test(l, BoolTest::NOT_TRUE),
+    <l:QualOpExpr> "IS" "FALSE"    => make_bool_test(l, BoolTest::FALSE),
+    <l:QualOpExpr> "IS" "NOT" "FALSE"   => make_bool_test(l, BoolTest::NOT_FALSE),
+    <l:QualOpExpr> "IS" "UNKNOWN"  => make_bool_test(l, BoolTest::UNKNOWN),
+    <l:QualOpExpr> "IS" "NOT" "UNKNOWN" => make_bool_test(l, BoolTest::NOT_UNKNOWN),
+    QualOpExpr,
+};
+
+// gram.y `a_expr qual_Op a_expr` (%left Op OPERATOR): generic/multi-character
+// operators bind tighter than the comparisons and looser than '+'/'-'. The
+// currently lexed subset is `||` (string concatenation).
+QualOpExpr: Node = {
+    <l:QualOpExpr> "||" <r:AddExpr> => make_a_expr("||", l, r),
     AddExpr,
 };
 

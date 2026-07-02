@@ -99,6 +99,11 @@ pub struct Session {
     /// PG `CritSectionCount`.
     crit_section_count: AtomicU32,
 
+    // --- Temp namespace (catalog/namespace.c statics) ---
+    /// PG `myTempNamespace`: this backend's temp-table namespace, `InvalidOid`
+    /// until the first CREATE TEMP TABLE creates it (`InitTempTableNamespace`).
+    temp_namespace: AtomicU32,
+
     // --- Command-loop state (postgres.c) ---
     /// PG `DoingCommandRead`: true while blocked reading a client command. A
     /// query-cancel arriving in this state is a no-op (postgres.c suppresses the
@@ -132,6 +137,7 @@ impl Session {
             interrupt_holdoff_count: AtomicU32::new(0),
             query_cancel_holdoff_count: AtomicU32::new(0),
             crit_section_count: AtomicU32::new(0),
+            temp_namespace: AtomicU32::new(InvalidOid.get()),
             doing_command_read: AtomicBool::new(false),
         }
     }
@@ -266,6 +272,14 @@ impl Session {
     pub fn dec_crit_section_count(&self) {
         let prev = self.crit_section_count.fetch_sub(1, Ordering::Relaxed);
         debug_assert!(prev > 0);
+    }
+
+    // --- Temp namespace ---
+    pub fn temp_namespace(&self) -> Oid {
+        Oid::new(self.temp_namespace.load(Ordering::Relaxed))
+    }
+    pub fn set_temp_namespace(&self, oid: Oid) {
+        self.temp_namespace.store(oid.get(), Ordering::Relaxed);
     }
 
     // --- Command-loop state ---

@@ -85,6 +85,9 @@ use crate::backend::executor::nodeModifyTable::{
 use crate::backend::executor::nodeNestloop::{
     exec_end_nest_loop, exec_init_nest_loop, exec_nest_loop, NestLoopRun,
 };
+use crate::backend::executor::nodeProjectSet::{
+    exec_end_project_set, exec_init_project_set, exec_project_set, ProjectSetRun,
+};
 use crate::backend::executor::nodeResult::{exec_end_result, exec_init_result, exec_result};
 use crate::backend::executor::nodeSeqscan::{
     exec_end_seq_scan, exec_init_seq_scan, exec_seq_scan, SeqScanRun,
@@ -150,6 +153,8 @@ pub enum PlanStateNode<'rel> {
     Group(Box<GroupRun<'rel>>),
     /// T_AggState (+ child + resolved per-aggregate metadata). PLAIN/SORTED/HASHED.
     Agg(Box<AggRun<'rel>>),
+    /// T_ProjectSetState (+ child + per-tlist SRF/expr element states).
+    ProjectSet(Box<ProjectSetRun<'rel>>),
     /// T_WindowAggState (+ child + per-window-function metadata + partition spool).
     WindowAgg(Box<WindowAggRun<'rel>>),
     /// T_AppendState (+ ordered subplan states). UNION ALL concatenation.
@@ -228,6 +233,7 @@ pub fn result_type_of(node: &PlanStateNode<'_>) -> Option<TupleDesc> {
         PlanStateNode::Unique(u) => u.state.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Group(g) => g.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Agg(a) => a.state.ss.ps.ps_result_tuple_desc.clone(),
+        PlanStateNode::ProjectSet(p) => p.state.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::WindowAgg(w) => w.state.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::Append(a) => a.ss.ps.ps_result_tuple_desc.clone(),
         PlanStateNode::SetOp(s) => s.ss.ps.ps_result_tuple_desc.clone(),
@@ -316,6 +322,10 @@ pub fn exec_init_node<'rel>(
             // REWIND/BACKWARD/MARK (PG passes eflags through, dropping those).
             let child = init_child(a.plan.lefttree.as_ref(), estate, child_eflags(eflags));
             Some(PlanStateNode::Agg(exec_init_agg(a, estate, child)))
+        }
+        Node::ProjectSet(p) => {
+            let child = init_child(p.plan.lefttree.as_ref(), estate, eflags);
+            Some(PlanStateNode::ProjectSet(exec_init_project_set(p, estate, child)))
         }
         Node::WindowAgg(w) => {
             // The window agg spools each partition; the child (a Sort) materializes,
@@ -474,6 +484,7 @@ pub async fn exec_proc_node<'n>(
         PlanStateNode::Unique(u) => exec_unique(shared, u).await,
         PlanStateNode::Group(g) => exec_group(shared, g).await,
         PlanStateNode::Agg(a) => exec_agg(shared, a).await,
+        PlanStateNode::ProjectSet(p) => Box::pin(exec_project_set(shared, p)).await,
         PlanStateNode::WindowAgg(w) => exec_window_agg(shared, w).await,
         PlanStateNode::Append(a) => Box::pin(exec_append(shared, a)).await,
         PlanStateNode::SetOp(s) => Box::pin(exec_setop(shared, s)).await,
@@ -552,6 +563,7 @@ pub fn exec_end_node(shared: Option<&Arc<SharedState>>, node: &mut PlanStateNode
         PlanStateNode::Unique(u) => exec_end_unique(shared, u),
         PlanStateNode::Group(g) => exec_end_group(shared, g),
         PlanStateNode::Agg(a) => exec_end_agg(shared, a),
+        PlanStateNode::ProjectSet(p) => exec_end_project_set(shared, p),
         PlanStateNode::WindowAgg(w) => exec_end_window_agg(shared, w),
         PlanStateNode::Append(a) => exec_end_append(shared, a),
         PlanStateNode::SetOp(s) => exec_end_setop(shared, s),

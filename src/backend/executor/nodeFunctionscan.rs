@@ -76,8 +76,9 @@ fn single_funcexpr(node: &FunctionScan) -> &Node {
 }
 
 /// Build the function's result tupdesc (simple case). Scalar -> a one-column desc
-/// named "column"; composite/record -> the resolved rowtype tupdesc.
-fn function_result_tupdesc(funcexpr: &Node) -> TupleDesc {
+/// named "column"; composite/record -> the resolved rowtype tupdesc. Shared with
+/// nodeProjectSet (the SRF ReturnSetInfo's expectedDesc).
+pub(crate) fn function_result_tupdesc(funcexpr: &Node) -> TupleDesc {
     let info = get_expr_result_type(funcexpr);
     match info.class {
         TypeFuncClass::Composite | TypeFuncClass::CompositeDomain => info

@@ -139,6 +139,7 @@ pub fn make_op(
     last_srf: Option<&Node>,
     location: i32,
 ) -> Node {
+    const TEXTOID: Oid = crate::catalog::genbki::TEXTOID;
     let _ = last_srf;
     let Some(rtree) = rtree else {
         crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
@@ -167,15 +168,41 @@ pub fn make_op(
     let (tup, ltree, rtree) = match oper(pstate, opname, ltype_id, rtype_id, true, location) {
         Some(t) => (t, ltree, rtree),
         None if rtype_id == unknown_oid && ltype_id != unknown_oid => {
-            let t = oper(pstate, opname, ltype_id, ltype_id, false, location)
-                .unwrap_or_else(|| op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location));
-            let rtree = coerce_operand_unknown(pstate, rtree, ltype_id, location);
-            (t, ltree, rtree)
+            if let Some(t) = oper(pstate, opname, ltype_id, ltype_id, true, location) {
+                let rtree = coerce_operand_unknown(pstate, rtree, ltype_id, location);
+                (t, ltree, rtree)
+            } else if is_binary_text_coercible(ltype_id) {
+                // A string-category left operand with no own operator resolves to
+                // the `text` operator (PG oper_select_candidate: the unknown takes
+                // the preferred string category, varchar/bpchar binary-coerce).
+                let t = oper(pstate, opname, TEXTOID, TEXTOID, true, location)
+                    .unwrap_or_else(|| op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location));
+                let rtree = coerce_operand_unknown(pstate, rtree, TEXTOID, location);
+                (t, relabel_to_text(ltree, ltype_id, location), rtree)
+            } else {
+                op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location)
+            }
         }
         None if ltype_id == unknown_oid && rtype_id != unknown_oid => {
-            let t = oper(pstate, opname, rtype_id, rtype_id, false, location)
+            if let Some(t) = oper(pstate, opname, rtype_id, rtype_id, true, location) {
+                let ltree = coerce_operand_unknown(pstate, ltree, rtype_id, location);
+                (t, ltree, rtree)
+            } else if is_binary_text_coercible(rtype_id) {
+                let t = oper(pstate, opname, TEXTOID, TEXTOID, true, location)
+                    .unwrap_or_else(|| op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location));
+                let ltree = coerce_operand_unknown(pstate, ltree, TEXTOID, location);
+                (t, ltree, relabel_to_text(rtree, rtype_id, location))
+            } else {
+                op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location)
+            }
+        }
+        // Both operands UNKNOWN literals: PG oper_select_candidate resolves to the
+        // preferred string-category type (text), so `'a' || 'b'` is text||text.
+        None if ltype_id == unknown_oid && rtype_id == unknown_oid => {
+            let t = oper(pstate, opname, TEXTOID, TEXTOID, true, location)
                 .unwrap_or_else(|| op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location));
-            let ltree = coerce_operand_unknown(pstate, ltree, rtype_id, location);
+            let ltree = coerce_operand_unknown(pstate, ltree, TEXTOID, location);
+            let rtree = coerce_operand_unknown(pstate, rtree, TEXTOID, location);
             (t, ltree, rtree)
         }
         // Binary-coercible string types (bpchar/varchar) have no own operators;
@@ -183,7 +210,6 @@ pub fn make_op(
         // cast. When both operands are string-category and an exact match failed,
         // relabel both to text and retry (a narrow `oper_select_candidate`).
         None if is_binary_text_coercible(ltype_id) && is_binary_text_coercible(rtype_id) => {
-            const TEXTOID: Oid = crate::catalog::genbki::TEXTOID;
             let t = oper(pstate, opname, TEXTOID, TEXTOID, true, location)
                 .unwrap_or_else(|| op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location));
             (

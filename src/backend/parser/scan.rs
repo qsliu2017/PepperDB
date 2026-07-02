@@ -64,6 +64,9 @@ pub enum Token {
     LessEquals,    // <=
     GreaterEquals, // >=
     NotEquals,     // <>  (also the spelling for !=)
+    // PG lexes `||` as a generic {operator} (an `Op` terminal); this port names
+    // the currently reachable multi-char operators individually.
+    Concat, // ||
 }
 
 /// Raw token classes emitted by logos before keyword resolution and literal
@@ -127,6 +130,7 @@ enum Raw {
     #[token(">=")] GreaterEquals,
     #[token("<>")] NotEquals,
     #[token("!=")] BangEquals,
+    #[token("||")] Concat,
     #[token("<")] Lt,
     #[token(">")] Gt,
     #[token("=")] Eq,
@@ -183,6 +187,7 @@ pub fn lex(src: &str) -> impl Iterator<Item = Result<(Loc, Token, Loc), LexError
             Raw::GreaterEquals => Token::GreaterEquals,
             // PG scan.l rewrites `!=` to `<>` at scan time; both yield NotEquals.
             Raw::NotEquals | Raw::BangEquals => Token::NotEquals,
+            Raw::Concat => Token::Concat,
         };
         Ok((start, tok, end))
     })

@@ -2845,6 +2845,82 @@ mod wire_tests {
             .expect("supervisor task ok");
     }
 
+    /// Plan 004 unblocker C: target-list set-returning functions (ProjectSet).
+    /// `SELECT generate_series(1,3), 42` expands to three rows with the constant
+    /// repeated; `CREATE TABLE ... AS SELECT generate_series(...)` materializes
+    /// the set (the select_into pattern); an SRF outside the target list raises a
+    /// catchable ErrorResponse (0A000) and the SAME session stays usable.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn srf_projectset_over_the_wire() {
+        let _aux = aux_test_serial().await;
+        let _hook = test_hook::serial().await;
+
+        let (sup, handle) = start_supervisor(loopback_port0(), tempdir_config()).await;
+        let (mut client, mut buf) = connect_and_startup(sup.local_addr).await;
+
+        // 1) SRF + constant: three rows, the constant repeated per row.
+        let select =
+            simple_query(&mut client, &mut buf, "SELECT generate_series(1,3), 42").await;
+        let types: Vec<u8> = select.iter().map(|m| m.ty).collect();
+        assert_eq!(
+            types,
+            vec![b'T', b'D', b'D', b'D', b'C', b'Z'],
+            "SRF expands to three DataRows"
+        );
+        for (i, srf) in [(1usize, "1"), (2, "2"), (3, "3")] {
+            let mut dr = Vec::new();
+            dr.extend_from_slice(&2u16.to_be_bytes());
+            dr.extend_from_slice(&u32::try_from(srf.len()).expect("len").to_be_bytes());
+            dr.extend_from_slice(srf.as_bytes());
+            dr.extend_from_slice(&2u32.to_be_bytes());
+            dr.extend_from_slice(b"42");
+            assert_eq!(select[i].body, dr, "DataRow {i}");
+        }
+        assert_eq!(select[4].body, b"SELECT 3\0");
+
+        // 2) CTAS over an SRF (the select_into pattern), then count it.
+        let ctas = simple_query(
+            &mut client,
+            &mut buf,
+            "CREATE TABLE srf_t AS SELECT generate_series(1,5) AS x",
+        )
+        .await;
+        let types: Vec<u8> = ctas.iter().map(|m| m.ty).collect();
+        assert_eq!(types, vec![b'C', b'Z'], "CTAS: CommandComplete + ReadyForQuery");
+        assert_eq!(ctas[0].body, b"SELECT 5\0", "CTAS materialized five rows");
+        let count = simple_query(&mut client, &mut buf, "SELECT count(*) FROM srf_t").await;
+        let d = count.iter().find(|m| m.ty == b'D').expect("a DataRow");
+        assert!(d.body.ends_with(b"5"), "count(*) = 5");
+
+        // 3) An SRF outside the target list raises a catchable ERROR (0A000).
+        let err = simple_query(
+            &mut client,
+            &mut buf,
+            "SELECT x FROM srf_t WHERE generate_series(1,2) > 1",
+        )
+        .await;
+        let types: Vec<u8> = err.iter().map(|m| m.ty).collect();
+        assert_eq!(types, vec![b'E', b'Z'], "ErrorResponse + ReadyForQuery");
+        let fields = decode_error_fields(&err[0].body);
+        assert_eq!(
+            fields.iter().find(|(t, _)| *t == b'C').map(|(_, v)| v.as_str()),
+            Some("0A000"),
+            "SQLSTATE feature_not_supported"
+        );
+
+        // THE POINT: the session (and server) survive the SRF misuse.
+        let ok = simple_query(&mut client, &mut buf, "SELECT 1").await;
+        let types: Vec<u8> = ok.iter().map(|m| m.ty).collect();
+        assert_eq!(types, vec![b'T', b'D', b'C', b'Z'], "session survives");
+
+        drop(client);
+        sup.shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle)
+            .await
+            .expect("supervisor drains")
+            .expect("supervisor task ok");
+    }
+
     /// M1 REGRESSION: SELECT 1 over the wire still returns the const int4 row.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn m1_select_1_over_the_wire() {

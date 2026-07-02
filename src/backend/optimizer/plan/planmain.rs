@@ -33,15 +33,29 @@ fn not_yet_reachable(what: &str) -> ! {
 
 /// Whether the base scan/join computes a distinct *group/agg-input* tlist (the
 /// flattened Vars an Agg/WindowAgg then reprojects into the final Aggref-bearing
-/// tlist) rather than projecting the final `processed_tlist` directly. True only
-/// for grouping/aggregation/window queries. A sort/distinct/limit-only query has
-/// no reprojecting node, so the scan projects `processed_tlist`. Note this can be
-/// true while `scan_input_tlist` is empty (a bare `count(*)` has no input Vars).
+/// tlist) rather than projecting the final `processed_tlist` directly. True for
+/// grouping/aggregation/window queries, and for a SELECT whose tlist contains
+/// set-returning functions (a ProjectSet node reprojects, PG's
+/// `split_pathtarget_at_srfs` split). A sort/distinct/limit-only query has no
+/// reprojecting node, so the scan projects `processed_tlist`. Note this can be
+/// true while `scan_input_tlist` is empty (a bare `count(*)` or a const-args SRF
+/// has no input Vars).
 pub(crate) fn query_computes_scan_input_tlist(root: &PlannerInfo) -> bool {
     root.parse.hasAggs
         || root.parse.hasWindowFuncs
         || !root.parse.windowClause.is_empty()
         || !root.parse.groupClause.is_empty()
+        || (root.parse.commandType == crate::nodes::nodes::CmdType::SELECT
+            && tlist_returns_set(&root.processed_tlist))
+}
+
+/// Does any entry of a (TargetEntry-wrapped) targetlist contain a set-returning
+/// function? The tlist half of PG's `parse->hasTargetSRFs` (detected structurally
+/// here; the parser flag is not populated in this port).
+pub(crate) fn tlist_returns_set(tlist: &[crate::nodes::nodes::Node]) -> bool {
+    tlist
+        .iter()
+        .any(crate::backend::nodes::nodeFuncs::expression_returns_set)
 }
 
 /// PG `query_planner`: generate paths for the scan/join portion of the query.

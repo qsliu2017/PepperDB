@@ -37,6 +37,7 @@ pub mod nodeMaterial;
 pub mod nodeMergejoin;
 pub mod nodeModifyTable;
 pub mod nodeNestloop;
+pub mod nodeProjectSet;
 pub mod nodeRecursiveunion;
 pub mod nodeResult;
 pub mod nodeSeqscan;

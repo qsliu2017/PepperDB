@@ -104,9 +104,9 @@ fn exec_init_expr_rec(node: &Node, state: &mut ExprState) {
             expr_eval_push_step(state, step);
         }
         Node::FuncExpr(func) => {
-            if func.funcretset {
-                not_yet_reachable("ExecInitExprRec: set-returning function");
-            }
+            // A set-returning FuncExpr is rejected inside exec_init_func (PG's
+            // ExecInitFunc fn_retset check); ProjectSet inits SRFs via
+            // exec_init_function_result_set, never through here.
             let step = exec_init_func(node, &func.args, func.funcid, func.inputcollid);
             expr_eval_push_step(state, step);
         }
@@ -384,8 +384,14 @@ fn exec_init_func(node: &Node, args: &[Node], funcid: Oid, inputcollid: Oid) -> 
     fmgr_info(funcid, &mut flinfo);
     fmgr_info_set_expr(Some(Box::new(node.clone())), &mut flinfo);
 
+    // PG ExecInitFunc: a set-returning function is only legal where the caller
+    // handles sets (ProjectSet / FunctionScan use the SRF init paths, not this
+    // one). A catchable ERROR, matching C -- never a panic.
     if flinfo.retset {
-        not_yet_reachable("ExecInitFunc: set-returning function");
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+                .errmsg("set-valued function called in context that cannot accept a set");
+        });
     }
     let strict = flinfo.strict;
     let fn_addr = flinfo.fn_addr;

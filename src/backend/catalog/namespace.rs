@@ -27,18 +27,68 @@ use crate::shared_state::SharedState;
 
 /// The M2 default search path: pg_catalog first, then public. PG computes this
 /// from the `search_path` GUC (`fetchSearchPath`); M2 uses the default schemas
-/// directly (no temp namespace, no GUC override).
+/// directly (no GUC override). The backend's temp namespace is prepended by
+/// [`active_search_path`].
 #[must_use]
 pub fn default_search_path() -> [Oid; 2] {
     [PG_CATALOG_NAMESPACE, PG_PUBLIC_NAMESPACE]
 }
 
+/// PG `recomputeNamespacePath` (subset): the active search path. The backend's
+/// temp namespace -- if one has been created -- is implicitly FIRST, so temp
+/// tables shadow permanent ones of the same name; then pg_catalog, then public.
+#[must_use]
+pub fn active_search_path() -> Vec<Oid> {
+    let mut path = Vec::with_capacity(3);
+    if let Some(session) = crate::session::try_current() {
+        let temp = session.temp_namespace();
+        if temp.is_valid() {
+            path.push(temp);
+        }
+    }
+    path.extend(default_search_path());
+    path
+}
+
+/// PG `GetTempTableNamespace` / `AccessTempTableNamespace`: this backend's temp
+/// namespace, creating it on first use (`InitTempTableNamespace`). The namespace
+/// is named `pg_temp_<proc_pid>` (PG: `pg_temp_<MyProcNumber>`), owned by the
+/// bootstrap superuser, and remembered per session. Staged vs namespace.c
+/// (rules.md s4): the ACL_CREATE_TEMP permission check, the recovery / parallel-
+/// worker guards, the `pg_toast_temp_N` companion (no TOAST yet), leftover
+/// clean-out (`RemoveTempRelations` -- synthetic proc pids are unique per server
+/// run, so a reused name only arises across restarts), and end-of-xact cleanup.
+pub async fn get_temp_table_namespace(shared: &Arc<SharedState>) -> Oid {
+    let session = crate::session::current();
+    let existing = session.temp_namespace();
+    if existing.is_valid() {
+        return existing;
+    }
+    let namespace_name = format!("pg_temp_{}", session.proc_pid());
+    let namespace_id = if let Some(oid) = namespace_oid_by_name(shared, &namespace_name).await {
+        oid
+    } else {
+        let oid = crate::backend::catalog::pg_namespace::namespace_create(
+            shared,
+            &namespace_name,
+            crate::catalog::pg_authid::BOOTSTRAP_SUPERUSERID,
+            true,
+        )
+        .await;
+        // Advance the command counter to make the namespace visible.
+        crate::backend::access::transam::xact::CommandCounterIncrement();
+        oid
+    };
+    session.set_temp_namespace(namespace_id);
+    namespace_id
+}
+
 /// `RelnameGetRelid`: resolve an unqualified relation name against the search path,
 /// returning its OID (or `None` if not found). Scans pg_class by (relname,
 /// relnamespace) for each namespace in path order; the first match wins (PG's
-/// search-path precedence).
+/// search-path precedence -- the temp namespace shadows).
 pub async fn relname_get_relid(shared: &Arc<SharedState>, relname: &str) -> Option<Oid> {
-    for nsp in default_search_path() {
+    for nsp in active_search_path() {
         if let Some(oid) = relname_nsp_get_relid(shared, relname, nsp).await {
             return Some(oid);
         }
@@ -71,7 +121,7 @@ pub async fn relname_nsp_get_relid(
 /// returning its OID. Scans pg_type by (typname, typnamespace). This is the lookup
 /// `CREATE TABLE t(a int)` uses to turn `int4` into its type OID.
 pub async fn typename_get_typid(shared: &Arc<SharedState>, typname: &str) -> Option<Oid> {
-    for nsp in default_search_path() {
+    for nsp in active_search_path() {
         if let Some(oid) = typename_nsp_get_typid(shared, typname, nsp).await {
             return Some(oid);
         }
@@ -178,13 +228,24 @@ pub fn lookup_explicit_namespace(nspname: &str, missing_ok: bool) -> Option<Oid>
 
 /// `RangeVarGetRelid` (M2 form): resolve a `RangeVar` (an optionally schema-
 /// qualified relation reference) to its OID. A schema qualifier resolves in that
-/// schema; an unqualified name searches the path. `None` if not found.
+/// schema (`pg_temp` aliases this backend's temp namespace); an unqualified name
+/// searches the path. `None` if not found.
 pub async fn range_var_get_relid(
     shared: &Arc<SharedState>,
     schemaname: Option<&str>,
     relname: &str,
 ) -> Option<Oid> {
     match schemaname {
+        // The pg_temp alias: only this backend's temp namespace qualifies, and
+        // only once it exists (RangeVarGetRelidExtended's temp arm).
+        Some("pg_temp") => {
+            let session = crate::session::try_current()?;
+            let temp = session.temp_namespace();
+            if !temp.is_valid() {
+                return None;
+            }
+            relname_nsp_get_relid(shared, relname, temp).await
+        }
         Some(schema) => {
             // Resolve the schema on-disk so user-created schemas (CREATE SCHEMA)
             // qualify a relation reference, not just the seeded built-ins.

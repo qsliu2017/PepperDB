@@ -631,9 +631,9 @@ pub fn subquery_planner(
     // PG's preprocess_expression over the tlist is an identity here. The general
     // preprocess_expression (and the WCO/returning/qual/window/limit/onConflict/
     // merge passes) grows when non-trivial expressions appear.
-    if root.parse.hasTargetSRFs {
-        not_yet_reachable("subquery_planner: set-returning functions in tlist");
-    }
+    // Target-list SRFs are detected structurally in grouping_planner /
+    // query_computes_scan_input_tlist (parse.hasTargetSRFs is not populated in
+    // this port) and planned as a ProjectSet over the scan/join (plan 004 pass C).
     // LIMIT/OFFSET expressions are int8 Consts (transformLimitClause const-folds the
     // literal form), so preprocess_expression over them is an identity; they need no
     // guard. M8's RETURNING list is simple Vars/consts (preprocess_expression is an
@@ -846,6 +846,23 @@ fn grouping_planner(root: &mut PlannerInfo, tuple_fraction: f64, setops: Option<
     // Aggrefs and the grouping/sort-keyed ressortgrouprefs).
     preprocess_targetlist(root);
 
+    // Target-list SRFs over an aggregated/windowed input need a ProjectSet stacked
+    // ABOVE the Agg/WindowAgg (PG's adjust_paths_for_srfs after each upper stage);
+    // the port stacks a single ProjectSet over the scan/join only, so reject the
+    // combination with a clean, catchable error rather than a wrong plan.
+    if root.parse.commandType == CmdType::SELECT
+        && crate::backend::optimizer::plan::planmain::tlist_returns_set(&root.processed_tlist)
+        && (root.parse.hasAggs
+            || root.parse.hasWindowFuncs
+            || !root.parse.groupClause.is_empty()
+            || !root.parse.windowClause.is_empty())
+    {
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+                .errmsg("set-returning functions combined with aggregation, GROUP BY, or window functions are not supported");
+        });
+    }
+
     // M5 (step 26): when the query GROUPS/aggregates/windows, the base scan must
     // compute the *group/agg-input* tlist (the flattened Vars the grouping reads),
     // not the final Aggref-bearing tlist; the Agg/WindowAgg node then computes the
@@ -961,6 +978,28 @@ fn pull_vars_into(
         // args are plain expressions (not TargetEntry-wrapped, unlike Aggref).
         Node::WindowFunc(w) => {
             for arg in &w.args {
+                pull_vars_into(arg, 0, exprs, refs);
+            }
+        }
+        // Function/operator argument Vars are scan inputs too (an SRF's arguments
+        // are computed below the ProjectSet; PG's split_pathtarget_at_srfs).
+        Node::FuncExpr(f) => {
+            for arg in &f.args {
+                pull_vars_into(arg, 0, exprs, refs);
+            }
+        }
+        Node::OpExpr(op) | Node::NullIfExpr(op) => {
+            for arg in &op.args {
+                pull_vars_into(arg, 0, exprs, refs);
+            }
+        }
+        Node::RelabelType(r) => {
+            if let Some(arg) = r.arg.as_ref() {
+                pull_vars_into(arg, 0, exprs, refs);
+            }
+        }
+        Node::CoerceViaIO(c) => {
+            if let Some(arg) = c.arg.as_ref() {
                 pull_vars_into(arg, 0, exprs, refs);
             }
         }

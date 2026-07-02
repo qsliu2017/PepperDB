@@ -82,6 +82,7 @@ fn set_plan_refs(root: &mut PlannerInfo, plan: Node, rtoffset: usize) -> Node {
         Node::Hash(h) => Node::Hash(Box::new(set_hash_refs(root, *h, rtoffset))),
         Node::Agg(a) => Node::Agg(Box::new(set_agg_refs(root, *a, rtoffset))),
         Node::WindowAgg(w) => Node::WindowAgg(Box::new(set_windowagg_refs(root, *w, rtoffset))),
+        Node::ProjectSet(p) => Node::ProjectSet(Box::new(set_projectset_refs(root, *p, rtoffset))),
         Node::Sort(s) => Node::Sort(Box::new(set_sort_refs(root, *s, rtoffset))),
         Node::Unique(u) => Node::Unique(Box::new(set_unique_refs(root, *u, rtoffset))),
         Node::Limit(l) => Node::Limit(Box::new(set_limit_refs(root, *l, rtoffset))),
@@ -289,6 +290,80 @@ fn set_windowagg_refs(
     plan
 }
 
+/// PG `set_plan_refs` T_ProjectSet arm + `set_upper_references`: recurse into the
+/// child, then rewrite the ProjectSet's tlist Vars -- including the Vars inside
+/// the set-returning FuncExpr/OpExpr arguments -- to reference the child output
+/// by position (OUTER_VAR).
+fn set_projectset_refs(
+    root: &mut PlannerInfo,
+    mut plan: crate::nodes::plannodes::ProjectSet,
+    rtoffset: usize,
+) -> crate::nodes::plannodes::ProjectSet {
+    let child = plan
+        .plan
+        .lefttree
+        .take()
+        .unwrap_or_else(|| not_yet_reachable("set_plan_refs: ProjectSet without child"));
+    let child = set_plan_refs(root, child, rtoffset);
+    let child_tlist = plan_tlist(&child).to_vec();
+    plan.plan.plan_node_id = next_plan_node_id(root);
+    for entry in &mut plan.plan.targetlist {
+        let Node::TargetEntry(te) = entry else { continue };
+        if let Some(expr) = te.expr.take() {
+            te.expr = Some(fix_projectset_expr(expr, &child_tlist));
+        }
+    }
+    crate::assert!(plan.plan.qual.is_empty(), "a ProjectSet carries no qual");
+    plan.plan.lefttree = Some(child);
+    plan
+}
+
+/// Rewrite the Vars in a ProjectSet tlist expression to OUTER_VAR positions over
+/// the child output. Unlike `fix_upper_expr` (whose reachable upper expressions
+/// are flat), the SRF arguments nest Vars inside FuncExpr/OpExpr/casts, so this
+/// recurses into those containers.
+fn fix_projectset_expr(expr: Node, child_tlist: &[Node]) -> Node {
+    match expr {
+        Node::Var(mut v) => {
+            let pos = child_position_of_var(child_tlist, v.varno, v.varattno).unwrap_or_else(|| {
+                not_yet_reachable("set_projectset_refs: Var not found in subplan output")
+            });
+            v.varno = OUTER_VAR;
+            v.varattno = pos;
+            Node::Var(v)
+        }
+        Node::FuncExpr(mut f) => {
+            f.args = f.args.into_iter().map(|a| fix_projectset_expr(a, child_tlist)).collect();
+            Node::FuncExpr(f)
+        }
+        Node::OpExpr(mut o) => {
+            o.args = o.args.into_iter().map(|a| fix_projectset_expr(a, child_tlist)).collect();
+            Node::OpExpr(o)
+        }
+        Node::NullIfExpr(mut o) => {
+            o.args = o.args.into_iter().map(|a| fix_projectset_expr(a, child_tlist)).collect();
+            Node::NullIfExpr(o)
+        }
+        Node::BoolExpr(mut b) => {
+            b.args = b.args.into_iter().map(|a| fix_projectset_expr(a, child_tlist)).collect();
+            Node::BoolExpr(b)
+        }
+        Node::RelabelType(mut r) => {
+            if let Some(arg) = r.arg.take() {
+                r.arg = Some(fix_projectset_expr(arg, child_tlist));
+            }
+            Node::RelabelType(r)
+        }
+        Node::CoerceViaIO(mut c) => {
+            if let Some(arg) = c.arg.take() {
+                c.arg = Some(fix_projectset_expr(arg, child_tlist));
+            }
+            Node::CoerceViaIO(c)
+        }
+        other => other,
+    }
+}
+
 /// PG `set_plan_refs` T_Sort arm: recurse into the child, assign the node id; the
 /// Sort's tlist is its child's (a passthrough), so its Var refs are already
 /// child-relative (no rewrite needed). The sortColIdx are child output positions.
@@ -356,6 +431,7 @@ fn plan_tlist(plan: &Node) -> &[Node] {
         Node::BitmapHeapScan(s) => &s.scan.plan.targetlist,
         Node::Agg(a) => &a.plan.targetlist,
         Node::WindowAgg(w) => &w.plan.targetlist,
+        Node::ProjectSet(p) => &p.plan.targetlist,
         Node::Sort(s) => &s.plan.targetlist,
         Node::Unique(u) => &u.plan.targetlist,
         Node::Limit(l) => &l.plan.targetlist,

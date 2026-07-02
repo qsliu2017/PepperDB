@@ -386,6 +386,47 @@ pub fn exprLocation(expr: &Node) -> i32 {
     }
 }
 
+/// PG `expression_returns_set` (+ `expression_returns_set_walker`): does the
+/// expression contain a set-returning function call (`FuncExpr.funcretset` /
+/// `OpExpr.opretset`) at any level? Aggref/WindowFunc arguments cannot contain
+/// SRFs (parser-enforced in PG), so they short-circuit false, as in C. Uses its
+/// own recursion (not `expression_tree_walker`, whose untranslated arms are grow
+/// guards): a node kind without an arm here answers false, and a missed SRF is
+/// backstopped by the executor's set-valued-function ereport.
+#[must_use]
+pub fn expression_returns_set(expr: &Node) -> bool {
+    fn walker(node: &Node) -> bool {
+        match node {
+            Node::FuncExpr(f) if f.funcretset => true,
+            Node::OpExpr(o) if o.opretset => true,
+            Node::FuncExpr(f) => f.args.iter().any(walker),
+            Node::OpExpr(o) | Node::DistinctExpr(o) | Node::NullIfExpr(o) => {
+                o.args.iter().any(walker)
+            }
+            Node::BoolExpr(b) => b.args.iter().any(walker),
+            Node::TargetEntry(t) => t.expr.as_ref().is_some_and(walker),
+            Node::RelabelType(r) => r.arg.as_ref().is_some_and(walker),
+            Node::CoerceViaIO(c) => c.arg.as_ref().is_some_and(walker),
+            Node::BooleanTest(b) => b.arg.as_ref().is_some_and(walker),
+            Node::CaseExpr(c) => {
+                c.arg.as_ref().is_some_and(walker)
+                    || c.args.iter().any(walker)
+                    || c.defresult.as_ref().is_some_and(walker)
+            }
+            Node::CaseWhen(w) => {
+                w.expr.as_ref().is_some_and(walker) || w.result.as_ref().is_some_and(walker)
+            }
+            Node::CoalesceExpr(c) => c.args.iter().any(walker),
+            Node::MinMaxExpr(m) => m.args.iter().any(walker),
+            Node::RowExpr(r) => r.args.iter().any(walker),
+            // Aggref / WindowFunc arguments cannot contain SRFs (C's explicit
+            // early-outs); other leaves and untranslated containers answer false.
+            _ => false,
+        }
+    }
+    walker(expr)
+}
+
 // ---------------------------------------------------------------------------
 // Expression tree walker / mutator framework.
 //
