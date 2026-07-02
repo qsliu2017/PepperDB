@@ -244,10 +244,11 @@ fn set_worktablescan_refs(
     plan
 }
 
-/// PG `set_plan_refs` T_Agg arm + `set_upper_references`: recurse into the child,
-/// then rewrite the Agg's tlist Vars to reference the child (subplan) output by
-/// position (OUTER_VAR), and assign each Aggref its sequential `aggno`. (M5: no
-/// partial-agg combine, no HAVING qual, no grouping sets.)
+/// PG `set_plan_refs` T_Agg arm + `set_upper_references`: rewrite the Agg's tlist
+/// and HAVING-qual Vars/expressions to reference the child (subplan) output by
+/// position (OUTER_VAR), assign each distinct Aggref its `aggno` (tlist + qual;
+/// duplicates share a number, PG preprocess_aggrefs), THEN recurse into the child
+/// (PG fixes the parent against the child's still-unrewritten tlist).
 fn set_agg_refs(root: &mut PlannerInfo, mut plan: Agg, rtoffset: usize) -> Agg {
     crate::assert!(plan.chain.is_empty() && plan.grouping_sets.is_empty());
     let child = plan
@@ -255,23 +256,22 @@ fn set_agg_refs(root: &mut PlannerInfo, mut plan: Agg, rtoffset: usize) -> Agg {
         .lefttree
         .take()
         .unwrap_or_else(|| not_yet_reachable("set_plan_refs: Agg without child"));
-    let child = set_plan_refs(root, child, rtoffset);
     let child_tlist = plan_tlist(&child).to_vec();
 
     plan.plan.plan_node_id = next_plan_node_id(root);
     fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
-    crate::assert!(plan.plan.qual.is_empty(), "set_plan_refs: Agg HAVING qual not yet reachable");
-    assign_agg_nos(&mut plan.plan.targetlist);
-    plan.plan.lefttree = Some(child);
+    fix_outer_exprs(&mut plan.plan.qual, &child_tlist);
+    assign_agg_nos(&mut plan.plan.targetlist, &mut plan.plan.qual);
+    plan.plan.lefttree = Some(set_plan_refs(root, child, rtoffset));
     plan
 }
 
-/// PG `set_plan_refs` T_WindowAgg arm + `set_upper_references`: recurse into the
-/// child, then rewrite the WindowAgg's tlist Vars (and the WindowFunc-argument Vars)
-/// to reference the child output by position (OUTER_VAR). A WindowFunc whose `winref`
-/// is NOT this node's is a lower window's already-computed column: it is left to be
-/// read from the child output (the executor copies it through), so it is rewritten to
-/// the child OUTER_VAR position holding it. (M12: no run-condition, no HAVING qual.)
+/// PG `set_plan_refs` T_WindowAgg arm + `set_upper_references`: rewrite the
+/// WindowAgg's tlist Vars (and the WindowFunc-argument Vars) to reference the child
+/// output by position (OUTER_VAR), then recurse into the child. A WindowFunc whose
+/// `winref` is NOT this node's is a lower window's already-computed column: it is
+/// left to be read from the child output (the executor copies it through).
+/// (M12: no run-condition, no HAVING qual.)
 fn set_windowagg_refs(
     root: &mut PlannerInfo,
     mut plan: crate::nodes::plannodes::WindowAgg,
@@ -282,11 +282,10 @@ fn set_windowagg_refs(
         .lefttree
         .take()
         .unwrap_or_else(|| not_yet_reachable("set_plan_refs: WindowAgg without child"));
-    let child = set_plan_refs(root, child, rtoffset);
     let child_tlist = plan_tlist(&child).to_vec();
     plan.plan.plan_node_id = next_plan_node_id(root);
     fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
-    plan.plan.lefttree = Some(child);
+    plan.plan.lefttree = Some(set_plan_refs(root, child, rtoffset));
     plan
 }
 
@@ -304,7 +303,6 @@ fn set_projectset_refs(
         .lefttree
         .take()
         .unwrap_or_else(|| not_yet_reachable("set_plan_refs: ProjectSet without child"));
-    let child = set_plan_refs(root, child, rtoffset);
     let child_tlist = plan_tlist(&child).to_vec();
     plan.plan.plan_node_id = next_plan_node_id(root);
     for entry in &mut plan.plan.targetlist {
@@ -314,7 +312,7 @@ fn set_projectset_refs(
         }
     }
     crate::assert!(plan.plan.qual.is_empty(), "a ProjectSet carries no qual");
-    plan.plan.lefttree = Some(child);
+    plan.plan.lefttree = Some(set_plan_refs(root, child, rtoffset));
     plan
 }
 
@@ -373,13 +371,12 @@ fn set_sort_refs(root: &mut PlannerInfo, mut plan: Sort, rtoffset: usize) -> Sor
         .lefttree
         .take()
         .unwrap_or_else(|| not_yet_reachable("set_plan_refs: Sort without child"));
-    let child = set_plan_refs(root, child, rtoffset);
     let child_tlist = plan_tlist(&child).to_vec();
     plan.plan.plan_node_id = next_plan_node_id(root);
     // A Sort projects nothing; its tlist mirrors the child output. Rewrite any Vars
     // to OUTER_VAR positions for faithfulness (identity when already positional).
     fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
-    plan.plan.lefttree = Some(child);
+    plan.plan.lefttree = Some(set_plan_refs(root, child, rtoffset));
     plan
 }
 
@@ -390,11 +387,10 @@ fn set_unique_refs(root: &mut PlannerInfo, mut plan: Unique, rtoffset: usize) ->
         .lefttree
         .take()
         .unwrap_or_else(|| not_yet_reachable("set_plan_refs: Unique without child"));
-    let child = set_plan_refs(root, child, rtoffset);
     let child_tlist = plan_tlist(&child).to_vec();
     plan.plan.plan_node_id = next_plan_node_id(root);
     fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
-    plan.plan.lefttree = Some(child);
+    plan.plan.lefttree = Some(set_plan_refs(root, child, rtoffset));
     plan
 }
 
@@ -406,11 +402,10 @@ fn set_limit_refs(root: &mut PlannerInfo, mut plan: Limit, rtoffset: usize) -> L
         .lefttree
         .take()
         .unwrap_or_else(|| not_yet_reachable("set_plan_refs: Limit without child"));
-    let child = set_plan_refs(root, child, rtoffset);
     let child_tlist = plan_tlist(&child).to_vec();
     plan.plan.plan_node_id = next_plan_node_id(root);
     fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
-    plan.plan.lefttree = Some(child);
+    plan.plan.lefttree = Some(set_plan_refs(root, child, rtoffset));
     plan
 }
 
@@ -531,14 +526,13 @@ fn set_hash_refs(
         .lefttree
         .take()
         .unwrap_or_else(|| not_yet_reachable("set_plan_refs: Hash without child"));
-    let child = set_plan_refs(root, child, rtoffset);
     let child_tlist = plan_tlist(&child).to_vec();
     plan.plan.plan_node_id = next_plan_node_id(root);
     // The Hash's tlist is a passthrough of its child; rewrite its hashkeys to
     // OUTER_VAR positions over the child (the Hash has a single input -> OUTER_VAR).
     fix_outer_exprs(&mut plan.hashkeys, &child_tlist);
     fix_upper_tlist(&mut plan.plan.targetlist, &child_tlist);
-    plan.plan.lefttree = Some(child);
+    plan.plan.lefttree = Some(set_plan_refs(root, child, rtoffset));
     plan
 }
 
@@ -677,10 +671,26 @@ fn fix_upper_tlist(tlist: &mut [Node], child_tlist: &[Node]) {
     }
 }
 
-/// Rewrite the Vars in `expr` to OUTER_VAR positions over the child output. The
-/// M5-reachable upper expressions are bare Vars (grouping/sort columns), Aggrefs
-/// (whose argument Vars are rewritten), and Consts.
+/// Rewrite the Vars in `expr` to OUTER_VAR positions over the child output.
+/// Mirrors PG `fix_upper_expr_mutator`: a whole (non-Var, non-Const) expression
+/// equal to a child output column is replaced by an OUTER_VAR Var over that
+/// position (`search_indexed_tlist_for_non_var` -- the grouping-EXPRESSION case,
+/// e.g. `lower(c)` computed by the scan); otherwise Vars are rewritten in place
+/// and the reachable containers recursed. Aggrefs/WindowFuncs stay (the executor
+/// computes them here); only their arguments are rewritten.
 fn fix_upper_expr(expr: Node, child_tlist: &[Node]) -> Node {
+    // Whole-expression match against the child output: a grouping expression the
+    // scan computed, or an Aggref a child Agg computed (the Sort/Limit above an
+    // Agg reads the aggregate by position). WindowFuncs are excluded: the port's
+    // stacked WindowAggs share one final tlist, so a match would wrongly turn the
+    // top window's own WindowFunc into a passthrough.
+    if !matches!(
+        expr,
+        Node::Var(_) | Node::Const(_) | Node::TargetEntry(_) | Node::WindowFunc(_)
+    ) && let Some(var) = search_child_tlist_for_expr(child_tlist, &expr)
+    {
+        return Node::Var(Box::new(var));
+    }
     match expr {
         Node::Var(mut v) => {
             let pos = child_position_of_var(child_tlist, v.varno, v.varattno).unwrap_or_else(|| {
@@ -715,8 +725,73 @@ fn fix_upper_expr(expr: Node, child_tlist: &[Node]) -> Node {
             w.args = w.args.into_iter().map(|a| fix_upper_expr(a, child_tlist)).collect();
             Node::WindowFunc(w)
         }
+        Node::OpExpr(mut op) => {
+            op.args = op.args.into_iter().map(|a| fix_upper_expr(a, child_tlist)).collect();
+            Node::OpExpr(op)
+        }
+        Node::NullIfExpr(mut op) => {
+            op.args = op.args.into_iter().map(|a| fix_upper_expr(a, child_tlist)).collect();
+            Node::NullIfExpr(op)
+        }
+        Node::DistinctExpr(mut op) => {
+            op.args = op.args.into_iter().map(|a| fix_upper_expr(a, child_tlist)).collect();
+            Node::DistinctExpr(op)
+        }
+        Node::FuncExpr(mut f) => {
+            f.args = f.args.into_iter().map(|a| fix_upper_expr(a, child_tlist)).collect();
+            Node::FuncExpr(f)
+        }
+        Node::BoolExpr(mut b) => {
+            b.args = b.args.into_iter().map(|a| fix_upper_expr(a, child_tlist)).collect();
+            Node::BoolExpr(b)
+        }
+        Node::BooleanTest(mut b) => {
+            if let Some(arg) = b.arg.take() {
+                b.arg = Some(fix_upper_expr(arg, child_tlist));
+            }
+            Node::BooleanTest(b)
+        }
+        Node::RelabelType(mut r) => {
+            if let Some(arg) = r.arg.take() {
+                r.arg = Some(fix_upper_expr(arg, child_tlist));
+            }
+            Node::RelabelType(r)
+        }
+        Node::CoerceViaIO(mut c) => {
+            if let Some(arg) = c.arg.take() {
+                c.arg = Some(fix_upper_expr(arg, child_tlist));
+            }
+            Node::CoerceViaIO(c)
+        }
         other => other,
     }
+}
+
+/// PG `search_indexed_tlist_for_non_var`: find a child output column whose whole
+/// expression equals `expr`, returning the OUTER_VAR Var referencing it (typed
+/// from the expression).
+fn search_child_tlist_for_expr(
+    child_tlist: &[Node],
+    expr: &Node,
+) -> Option<crate::nodes::primnodes::Var> {
+    use crate::nodes::nodeFuncs::exprType;
+    for n in child_tlist {
+        let Node::TargetEntry(te) = n else { continue };
+        if te.expr.as_ref() == Some(expr) {
+            let mut var = crate::backend::nodes::makefuncs::make_var(
+                OUTER_VAR,
+                te.resno,
+                exprType(expr),
+                -1,
+                crate::postgres_ext::InvalidOid,
+                0,
+            );
+            var.varnosyn = 0;
+            var.varattnosyn = te.resno;
+            return Some(var);
+        }
+    }
+    None
 }
 
 /// The child output column position (1-based) holding the base-rel Var
@@ -755,17 +830,70 @@ fn child_position_of_var(
     None
 }
 
-/// PG `set_upper_references` Aggref `aggno` assignment: number the Aggrefs in the
-/// Agg's tlist 0..n in resno order (nodeAgg resolves them positionally).
-fn assign_agg_nos(tlist: &mut [Node]) {
-    let mut aggno = 0;
+/// PG `preprocess_aggrefs` analog: number the distinct Aggrefs in the Agg's tlist
+/// and HAVING qual 0..n (tlist order first, then qual-only aggregates); duplicate
+/// Aggrefs (same aggregate over the same input) share an `aggno`, like PG. nodeAgg
+/// resolves each Aggref by its stamped number.
+fn assign_agg_nos(tlist: &mut [Node], qual: &mut [Node]) {
+    let mut seen: Vec<crate::nodes::primnodes::Aggref> = Vec::new();
     for n in tlist.iter_mut() {
         let Node::TargetEntry(te) = n else { continue };
-        if let Some(Node::Aggref(agg)) = te.expr.as_mut() {
+        if let Some(expr) = te.expr.as_mut() {
+            assign_agg_nos_expr(expr, &mut seen);
+        }
+    }
+    for n in qual.iter_mut() {
+        assign_agg_nos_expr(n, &mut seen);
+    }
+}
+
+/// Walk an expression, stamping each Aggref's `aggno`/`aggtransno` (deduplicated
+/// by structural equality with the numbering fields normalized).
+fn assign_agg_nos_expr(expr: &mut Node, seen: &mut Vec<crate::nodes::primnodes::Aggref>) {
+    match expr {
+        Node::Aggref(agg) => {
+            let mut norm = (**agg).clone();
+            norm.aggno = -1;
+            norm.aggtransno = -1;
+            let aggno = seen.iter().position(|s| *s == norm).unwrap_or_else(|| {
+                seen.push(norm);
+                seen.len() - 1
+            });
+            let aggno = i32::try_from(aggno).unwrap_or(0);
             agg.aggno = aggno;
             agg.aggtransno = aggno;
-            aggno += 1;
         }
+        Node::OpExpr(op) | Node::NullIfExpr(op) | Node::DistinctExpr(op) => {
+            for a in &mut op.args {
+                assign_agg_nos_expr(a, seen);
+            }
+        }
+        Node::FuncExpr(f) => {
+            for a in &mut f.args {
+                assign_agg_nos_expr(a, seen);
+            }
+        }
+        Node::BoolExpr(b) => {
+            for a in &mut b.args {
+                assign_agg_nos_expr(a, seen);
+            }
+        }
+        Node::BooleanTest(b) => {
+            if let Some(a) = b.arg.as_mut() {
+                assign_agg_nos_expr(a, seen);
+            }
+        }
+        Node::RelabelType(r) => {
+            if let Some(a) = r.arg.as_mut() {
+                assign_agg_nos_expr(a, seen);
+            }
+        }
+        Node::CoerceViaIO(c) => {
+            if let Some(a) = c.arg.as_mut() {
+                assign_agg_nos_expr(a, seen);
+            }
+        }
+        _ => {}
     }
 }
 

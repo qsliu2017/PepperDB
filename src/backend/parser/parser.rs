@@ -157,19 +157,19 @@ pub fn make_star_target() -> Node {
 /// part may be `*` in PG; M2's grammar only constructs name parts here (the
 /// `table.*` form grows with the indirection machinery), so every part is a String
 /// field.
-pub fn make_column_ref(parts: Vec<String>) -> Node {
+pub fn make_column_ref(parts: Vec<String>, location: i32) -> Node {
     let fields = parts.into_iter().map(|p| ColumnRefField::String(makeString(p))).collect();
-    Node::ColumnRef(Box::new(ColumnRef { fields, location: -1 }))
+    Node::ColumnRef(Box::new(ColumnRef { fields, location }))
 }
 
 /// gram.y `columnref: ColId indirection` where the indirection is a trailing `.*`:
 /// a whole-row reference `table.*`. The name parts become String fields and the
 /// final field is an `A_Star` (transformColumnRef expands it to the row's columns).
-pub fn make_column_ref_star(parts: Vec<String>) -> Node {
+pub fn make_column_ref_star(parts: Vec<String>, location: i32) -> Node {
     let mut fields: Vec<ColumnRefField> =
         parts.into_iter().map(|p| ColumnRefField::String(makeString(p))).collect();
     fields.push(ColumnRefField::Star(A_Star {}));
-    Node::ColumnRef(Box::new(ColumnRef { fields, location: -1 }))
+    Node::ColumnRef(Box::new(ColumnRef { fields, location }))
 }
 
 /// gram.y `makeBoolAConst`: the SQL boolean literal `TRUE`/`FALSE`. PG builds a
@@ -360,9 +360,45 @@ pub fn make_range_var_table_ref(relation: RangeVar) -> Node {
     Node::RangeVar(Box::new(relation))
 }
 
-/// gram.y `alias_clause`: build an `Alias` (no column-alias list yet).
+/// gram.y `alias_clause`: build an `Alias` (no column-alias list).
 pub fn make_alias(name: String) -> crate::nodes::primnodes::Alias {
     crate::nodes::primnodes::Alias { aliasname: Some(name), colnames: Vec::new() }
+}
+
+/// gram.y `alias_clause: [AS] ColId '(' name_list ')'`: an `Alias` with a
+/// column-name override list (`FROM t AS f(a, b)`).
+pub fn make_alias_cols(name: String, cols: Vec<String>) -> crate::nodes::primnodes::Alias {
+    use crate::nodes::value::makeString;
+    crate::nodes::primnodes::Alias {
+        aliasname: Some(name),
+        colnames: cols.into_iter().map(makeString).collect(),
+    }
+}
+
+/// gram.y `table_ref: select_with_parens opt_alias_clause`: a sub-SELECT in FROM.
+pub fn make_range_subselect(
+    subquery: Node,
+    alias: Option<crate::nodes::primnodes::Alias>,
+) -> Node {
+    Node::RangeSubselect(Box::new(crate::nodes::parsenodes::RangeSubselect {
+        lateral: false,
+        subquery: Some(subquery),
+        alias: alias.map(Box::new),
+    }))
+}
+
+/// gram.y `simple_select: TABLE relation_expr`: `TABLE t` == `SELECT * FROM t`.
+pub fn make_table_select(rel: RangeVar) -> Node {
+    make_simple_select(
+        Vec::new(),
+        None,
+        vec![make_star_target()],
+        vec![make_range_var_table_ref(rel)],
+        None,
+        Vec::new(),
+        None,
+        Vec::new(),
+    )
 }
 
 /// gram.y `table_ref: func_table func_alias_clause` (the simple
@@ -1071,6 +1107,7 @@ pub fn make_simple_select(
     from: Vec<Node>,
     where_clause: Option<Node>,
     group: Vec<Node>,
+    having: Option<Node>,
     window: Vec<Node>,
 ) -> Node {
     Node::SelectStmt(Box::new(SelectStmt {
@@ -1081,7 +1118,7 @@ pub fn make_simple_select(
         whereClause: where_clause,
         groupClause: group,
         groupDistinct: false,
-        havingClause: None,
+        havingClause: having,
         windowClause: window,
         valuesLists: Vec::new(),
         sortClause: Vec::new(),
@@ -2058,6 +2095,14 @@ pub fn make_column_fk_constraint(
     c.fk_matchtype = matchtype;
     c.fk_upd_action = upd_action;
     c.fk_del_action = del_action;
+    Node::Constraint(Box::new(c))
+}
+
+/// gram.y `ColConstraintElem` (PRIMARY KEY / UNIQUE / [NOT] NULL): a bare
+/// column constraint of the given type at `loc`.
+pub fn make_column_constraint(contype: ConstrType, loc: i32) -> Node {
+    let mut c = empty_constraint(contype);
+    c.location = loc;
     Node::Constraint(Box::new(c))
 }
 

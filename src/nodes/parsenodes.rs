@@ -189,11 +189,21 @@ pub enum ColumnRefField {
 }
 
 /// ColumnRef - reference to a column, or possibly a whole tuple.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ColumnRef {
     pub fields: Vec<ColumnRefField>,
     pub location: ParseLoc,
 }
+
+// PG `equal()` ignores parse locations (COMPARE_LOCATION_FIELD): two inline
+// `OVER (ORDER BY v)` specs must dedup to one window even though each `v` sits
+// at a different text offset.
+impl PartialEq for ColumnRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.fields == other.fields
+    }
+}
+impl Eq for ColumnRef {}
 
 /// ParamRef - specifies a $n parameter reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -241,7 +251,7 @@ pub enum A_Expr_Kind {
 // makeSimpleA_Expr exactly and the OP arm needs no extra fields, so the enum split
 // buys nothing yet (revisit if the OP_ANY/OP_ALL/IN/BETWEEN kinds diverge in shape).
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct A_Expr {
     pub kind: A_Expr_Kind,
     /// possibly-qualified name of operator
@@ -253,6 +263,16 @@ pub struct A_Expr {
     pub rexpr_list_start: ParseLoc,
     pub rexpr_list_end: ParseLoc,
     pub location: ParseLoc,
+}
+
+// PG `equal()` ignores parse locations (COMPARE_LOCATION_FIELD; see ColumnRef).
+impl PartialEq for A_Expr {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.name == other.name
+            && self.lexpr == other.lexpr
+            && self.rexpr == other.rexpr
+    }
 }
 
 /// C: `union ValUnion` - inline value node for A_Const.
@@ -267,7 +287,7 @@ pub enum ValUnion {
 }
 
 /// A_Const - a literal constant.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct A_Const {
     pub val: ValUnion,
     /// SQL NULL constant
@@ -275,12 +295,26 @@ pub struct A_Const {
     pub location: ParseLoc,
 }
 
+// PG `equal()` ignores parse locations (COMPARE_LOCATION_FIELD; see ColumnRef).
+impl PartialEq for A_Const {
+    fn eq(&self, other: &Self) -> bool {
+        self.val == other.val && self.isnull == other.isnull
+    }
+}
+
 /// TypeCast - a CAST expression.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct TypeCast {
     pub arg: Option<Node>,
     pub typeName: Option<Box<TypeName>>,
     pub location: ParseLoc,
+}
+
+// PG `equal()` ignores parse locations (COMPARE_LOCATION_FIELD; see ColumnRef).
+impl PartialEq for TypeCast {
+    fn eq(&self, other: &Self) -> bool {
+        self.arg == other.arg && self.typeName == other.typeName
+    }
 }
 
 /// CollateClause - a COLLATE expression.
@@ -312,7 +346,7 @@ pub struct RoleSpec {
 }
 
 /// FuncCall - a function or aggregate invocation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct FuncCall {
     pub funcname: Vec<Node>,
     pub args: Vec<Node>,
@@ -325,6 +359,22 @@ pub struct FuncCall {
     pub func_variadic: bool,
     pub funcformat: CoercionForm,
     pub location: ParseLoc,
+}
+
+// PG `equal()` ignores parse locations (COMPARE_LOCATION_FIELD; see ColumnRef).
+impl PartialEq for FuncCall {
+    fn eq(&self, other: &Self) -> bool {
+        self.funcname == other.funcname
+            && self.args == other.args
+            && self.agg_order == other.agg_order
+            && self.agg_filter == other.agg_filter
+            && self.over == other.over
+            && self.agg_within_group == other.agg_within_group
+            && self.agg_star == other.agg_star
+            && self.agg_distinct == other.agg_distinct
+            && self.func_variadic == other.func_variadic
+            && self.funcformat == other.funcformat
+    }
 }
 
 /// A_Star - '*' representing all columns of a table or compound field.
@@ -373,13 +423,23 @@ pub struct MultiAssignRef {
 }
 
 /// SortBy - for ORDER BY clause.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct SortBy {
     pub node: Option<Node>,
     pub sortby_dir: SortByDir,
     pub sortby_nulls: SortByNulls,
     pub useOp: Vec<Node>,
     pub location: ParseLoc,
+}
+
+// PG `equal()` ignores parse locations (COMPARE_LOCATION_FIELD; see ColumnRef).
+impl PartialEq for SortBy {
+    fn eq(&self, other: &Self) -> bool {
+        self.node == other.node
+            && self.sortby_dir == other.sortby_dir
+            && self.sortby_nulls == other.sortby_nulls
+            && self.useOp == other.useOp
+    }
 }
 
 /// WindowDef - raw representation of WINDOW and OVER clauses.

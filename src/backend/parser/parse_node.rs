@@ -14,7 +14,7 @@
 //! the Float/BitString arms reach `numeric_in`/`bit_in`, not yet translated, and
 //! stage to `unimplemented!()` per rules.md s4.
 
-use crate::catalog::genbki::{BOOLOID, INT4OID, UNKNOWNOID};
+use crate::catalog::genbki::{BOOLOID, INT4OID, INT8OID, NUMERICOID, UNKNOWNOID};
 use crate::nodes::makefuncs::makeConst;
 use crate::nodes::parsenodes::{A_Const, ValUnion};
 use crate::nodes::primnodes::Const;
@@ -211,23 +211,30 @@ pub fn make_const(_pstate: &mut ParseState, aconst: &A_Const) -> Box<Const> {
             return Box::new(con);
         }
         ValUnion::Float(f) => {
-            // T_Float carries an oversize integer OR a true float/numeric literal;
-            // PG runs pg_strtoint64_safe then falls back to numeric_in. Both reach
-            // the not-yet-translated int8/numeric input machinery (owned by the
-            // numeric step). Raise a catchable ERROR rather than dropping the
-            // connection: any bad float literal (e.g. `1.5`) must not kill the
-            // backend. TODO(numeric): resolve to int8/numeric like PG.
-            let lit = f.fval.clone();
-            crate::ereport!(
-                crate::utils::elog::ERROR,
-                |e: &mut crate::utils::elog::ErrorData| {
-                    e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
-                        .errmsg(format!(
-                            "numeric literal \"{lit}\" not supported yet (int8/numeric input)"
-                        ));
-                }
-            );
-            unreachable!("ereport(ERROR) diverges");
+            // A T_Float literal could be an oversize integer as well as a float.
+            // PG tries pg_strtoint64_safe first; on success the const is int4 if
+            // the value fits (probably only INT_MIN after doNegate) else int8;
+            // otherwise the literal goes through numeric_in.
+            let mut esc = crate::nodes::miscnodes::ErrorSaveContext::new();
+            crate::backend::utils::adt::int::strtoint64_safe(&f.fval, Some(&mut esc))
+                .map_or_else(
+                    || {
+                        (
+                            call_numeric_in_with_errposition(&f.fval, aconst.location),
+                            NUMERICOID,
+                            -1,
+                            false,
+                        )
+                    },
+                    |val64| {
+                        let val32 = val64 as i32;
+                        if val64 == i64::from(val32) {
+                            (Int32GetDatum(val32), INT4OID, 4, true)
+                        } else {
+                            (crate::postgres::Int64GetDatum(val64), INT8OID, 8, true)
+                        }
+                    },
+                )
         }
         ValUnion::BitString(_b) => {
             crate::ereport!(
@@ -252,4 +259,33 @@ pub fn make_const(_pstate: &mut ParseState, aconst: &A_Const) -> Box<Const> {
     let mut con = makeConst(typeid, -1, InvalidOid, typelen, val, false, typebyval);
     con.location = aconst.location;
     Box::new(con)
+}
+
+/// Run `numeric_in` on a T_Float literal's text (PG `DirectFunctionCall3` under
+/// `setup_parser_errposition_callback`): an error raised without a position gets
+/// its caret pointed at the literal (the client's `LINE n: ... ^`).
+fn call_numeric_in_with_errposition(s: &str, location: i32) -> Datum {
+    use crate::backend::utils::fmgr::fmgr::OidInputFunctionCall;
+
+    let call = std::panic::AssertUnwindSafe(|| {
+        OidInputFunctionCall(crate::utils::fmgroids::F_NUMERIC_IN, s, InvalidOid, -1)
+            .unwrap_or_else(|| {
+                crate::elog!(crate::utils::elog::ERROR, "input function returned NULL".to_string());
+                unreachable!("elog(ERROR) diverges");
+            })
+    });
+    match std::panic::catch_unwind(call) {
+        Ok(v) => v,
+        Err(payload) => match payload.downcast::<crate::utils::elog::ErrorData>() {
+            Ok(mut edata) => {
+                // PG's parser_errposition sets cursorpos = location + 1 (1-based),
+                // only if the error carries no position yet.
+                if location >= 0 && edata.cursorpos == 0 {
+                    edata.cursorpos = location + 1;
+                }
+                std::panic::resume_unwind(edata)
+            }
+            Err(other) => std::panic::resume_unwind(other),
+        },
+    }
 }

@@ -52,6 +52,41 @@ test: comments
 # portals_p2: FULL PASS as of unblocker pass B -- it only needed the onek
 # fixture (COPY FROM file + `name` columns) restored in test_setup.
 test: portals_p2
+# select_having: FULL PASS as of unblocker pass E (2026-07-02) -- HAVING grammar
+# (gram.y having_clause), transformed like WHERE (EXPR_KIND_HAVING; aggregates
+# allowed), checked by parseCheckAggregates (PG-format `column "rel.col" must
+# appear in the GROUP BY clause...` with LINE/caret), evaluated as the Agg node's
+# qual per finalized group (setrefs numbers tlist+qual Aggrefs; nodeAgg skips
+# HAVING-rejected groups); the degenerate no-agg/no-GROUP-BY form plans as a
+# childless gating Result (PG create_degenerate_grouping_paths -- the table is
+# never scanned). Also needed pass D/E catalog+cache work: int8 operator rows,
+# count("any") resolution, lower(bpchar), HAVING cache warming.
+test: select_having
+# select_implicit: FULL PASS as of unblocker pass E -- the resjunk GROUP BY /
+# ORDER BY planner path: grouping EXPRESSIONS (b/2, lower(c), a%2) are scan/join
+# output columns (make_scan_input_tlist keeps sort-keyed exprs whole; a JOIN top
+# node reprojects them via apply-scanjoin-target), setrefs matches whole
+# expressions against the child tlist (search_indexed_tlist_for_non_var) with
+# parent-first upper fixup, nodeAgg emits the FULL tlist (junk stripped by the
+# top junk filter), and the SQL92 findTargetlistEntry rules landed (output-name
+# matching with ambiguity check, GROUP BY prefers FROM columns via colNameToVar,
+# `GROUP BY/ORDER BY position N is not in select list` with LINE/caret). Node
+# equality now ignores Var/Const parse locations (PG equal()), so `GROUP BY a/2`
+# matches the tlist `a/2`.
+test: select_implicit
+# int2, int4: FULL PASS. Unblocker pass D landed the entire catalog/adt surface
+# (full int2 + int24/int42 + int8 operator sets, big literals -> int4/int8/
+# numeric consts, int2vector, the int8/float8/numeric->int2/int4 casts, per-type
+# cache warming); pass E landed the last four grammar/lexer forms it needed:
+# `<<`/`>>` operator tokens (lexer + the qual_Op tier), alias column lists
+# `[AS] f(a, b)` (with PG's "table has N columns available but M specified"
+# error), `TABLE t` as a simple_select (so `(TABLE t)` parses), and sub-SELECT /
+# `(VALUES ...)` in FROM (RangeSubselect -> RTE_SUBQUERY; the planner's existing
+# pull_up_subqueries flattens the simple shapes to base VALUES/relation RTEs, so
+# no SubqueryScan is needed). Also un-guarded: makeConst over varlena (numeric
+# consts) -- no TOAST exists, so the PG detoast is an identity here.
+test: int2
+test: int4
 #
 # Step 08 also landed: generate_series (int4/int8) as a materialized SRF-in-FROM,
 # gcd/lcm(int8), and the funcapi SRF ValuePerCall machinery. The step's remaining
@@ -100,20 +135,11 @@ test: portals_p2
 #                    a dropped connection); then the aborted-txn cascade]
 #   bitmapops       [CREATE TABLE ... WITH (autovacuum_enabled = false) --
 #                    reloptions, step 13; then index/bitmap planner paths]
-#   select_having   [HAVING has NO grammar production or planner support at all
-#                    (subquery_planner has_having_qual guard) -> the aggregate
-#                    step; also `SELECT 1 AS one HAVING 1 < 2` FROM-less agg]
-#
 # Tier-1 simple types -- all NEW-DIFF:
-#   int2, int4      [re-verified 2026-07-02 after pass B: still need the int2/int4
-#                    arithmetic + cross-type comparison operators (`*`/`/`/`-`
-#                    over (21,21) and (23,21) are not seeded -- "operator does not
-#                    exist"), the int2vector type, out-of-int4-range literals
-#                    ("numeric literal -2147483648 not supported" -- int8/numeric
-#                    literal input, step 12), and multi-row typed VALUES forms.]
-#   int8            [INT8_TBL now exists EMPTY in test_setup; its rows are still
-#                    blocked on int8 input of unquoted big literals ("numeric
-#                    literal 4567890123456789 not supported" -- step 12)]
+#   int8            [INT8_TBL now LOADS WITH ROWS in test_setup (pass D fixed big
+#                    integer literals + numutils-exact int8in); int8.sql itself
+#                    still needs its own operator/cast tail -- re-verify when
+#                    picked up]
 #   float4, float8  [float/numeric input -- numeric step (12); T_Float literal now
 #                    a catchable ERROR (no longer crashes) but not yet computed]
 #   text            [`||` NOW LEXES and text||text resolves (textcat). Verified
@@ -143,14 +169,29 @@ test: portals_p2
 #                    and still blocked by: bytea bit-ops (get/set_bit/byte),
 #                    SIMILAR TO, the SRF regexp_matches/split_to_table (SRF
 #                    machinery), unistr, and bytea<->int casts. Left OUT.]
-#   select_implicit [pass B fixed bpchar ordering (sortsupport 1058/1060) and
-#                    bpchar/name grouping equality (nodeGroup type_cmp), so its
-#                    first GROUP BY sections now match. Still blocked by
-#                    "build_upper_plan: group/sort key not in child output" (the
-#                    resjunk GROUP BY/ORDER BY planner work) + HAVING. Left OUT.]
-#   union           [set-op execution partially exists but
-#                    "transformSetOperationStmt: ORDER BY / LIMIT over a set
-#                    operation" grow-guards, plus numeric/float literals -- large]
-#   delete          [re-verified 2026-07-02: inline column-constraint `PRIMARY
-#                    KEY` in CREATE TABLE and the DELETE alias forms
-#                    (`DELETE FROM t [AS] dt`) are still grammar gaps]
+#   union           [pass E landed ORDER BY/LIMIT over a set-op tree (analyze
+#                    resolves the sort against the output columns SQL92-style;
+#                    the planner stacks Sort/Limit above the combined plan, with
+#                    the =/</> caches async-warmed) -- the first 7 integer UNION
+#                    queries now match. Re-verified 2026-07-02, the rest of
+#                    union.sql is blocked by: `SELECT 1.1 UNION ...` numeric
+#                    literals (a varlena numeric Const hits the "makeConst:
+#                    varlena detoast deferred" grow-guard and the panic KILLS the
+#                    server -- numeric step 12), EXPLAIN (step 14, ~40 lines),
+#                    subquery-in-FROM (SubqueryScan), enable_hashagg/sort GUCs,
+#                    varbit/arrays/records/xid, TRIM(TRAILING FROM), CREATE TYPE
+#                    AS, inheritance, plpgsql. Left OUT.]
+#   delete          [pass E landed the grammar/analysis legs: inline column
+#                    constraints (PRIMARY KEY / UNIQUE / [NOT] NULL ->
+#                    transformColumnDefinition splits an implicit unique-index
+#                    IndexStmt; ProcessUtilitySlow runs it) and the DELETE alias
+#                    forms (relation_expr_opt_alias; the alias is exposed instead
+#                    of the table name, with PG's "invalid reference to
+#                    FROM-clause entry" + "Perhaps you meant to reference the
+#                    table alias" hint). Re-verified 2026-07-02, still blocked by:
+#                    `id SERIAL` (type "serial" does not exist -- needs the
+#                    serial->sequence+nextval-default expansion in
+#                    transformColumnDefinition over the pg_attrdef default
+#                    machinery) and `repeat('x', 10000)` (a 10KB tuple -> "row is
+#                    too big"; needs TOAST/inline compression, step 29 -- the
+#                    plan itself lists `delete` as step 29's test). Left OUT.]

@@ -66,6 +66,37 @@ async fn transform_from_clause_item(
         return (rtr, nsitem);
     }
 
+    // PG `transformRangeSubselect`: a sub-SELECT in FROM (incl. `(VALUES ...)`
+    // and `(TABLE t)`). Analyze it in a child ParseState, then build the
+    // RTE_SUBQUERY (the alias column-count check lives in
+    // addRangeTableEntryForSubquery). The planner's pull_up_subqueries flattens
+    // the simple shapes (`(TABLE t)`, `(VALUES ...)`) into base RTEs.
+    if let Node::RangeSubselect(rs) = &n {
+        if rs.lateral {
+            not_yet_reachable("transformRangeSubselect: LATERAL subquery");
+        }
+        let subquery = rs
+            .subquery
+            .as_ref()
+            .unwrap_or_else(|| not_yet_reachable("transformRangeSubselect: missing subquery"));
+        let mut child = crate::backend::parser::parse_node::make_child_parsestate(pstate);
+        let query = Box::pin(crate::backend::parser::analyze::transform_stmt_async_pub(
+            shared, &mut child, subquery,
+        ))
+        .await;
+        let nsitem = crate::backend::parser::parse_relation::add_range_table_entry_for_subquery(
+            pstate,
+            query,
+            rs.alias.as_deref(),
+            false,
+            true,
+        );
+        let rtr = Node::RangeTblRef(Box::new(crate::nodes::primnodes::RangeTblRef {
+            rtindex: nsitem.rtindex,
+        }));
+        return (rtr, nsitem);
+    }
+
     let Node::RangeVar(rv) = n else {
         not_yet_reachable("transformFromClauseItem: non-RangeVar FROM item (join/subquery)");
     };
@@ -231,11 +262,13 @@ pub async fn set_target_table(
     required_perms: AclMode,
 ) -> i32 {
     let rel = open_table_for_parse(shared, relation).await;
+    // PG passes the target's alias through, so `DELETE FROM t AS dt WHERE dt.a`
+    // resolves and the bare relation name is hidden (errors like PG).
     let nsitem = add_range_table_entry_for_relation(
         pstate,
         &rel,
         LockMode::RowExclusiveLock as i32,
-        None,
+        relation.alias.as_deref(),
         inh,
         false,
     );
@@ -622,18 +655,83 @@ pub fn transform_limit_clause(
     Some(coerced)
 }
 
-/// PG `findTargetlistEntry` (SQL92 subset): resolve a GROUP BY / ORDER BY raw
-/// expression to a targetlist entry's resno. An integer literal `N` references the
-/// Nth output column (SQL92 ordinal); otherwise the expression is transformed and
-/// matched against the existing tlist (reusing an equal entry) or appended as a new
-/// resjunk entry. The SQL99 name-only rule and ambiguity checks grow later.
+/// PG `findTargetlistEntrySQL92`: resolve a GROUP BY / ORDER BY raw expression to
+/// a targetlist entry's resno, honoring the two SQL92 special cases:
+///  1. a bare column name matches an output-column resname (multiple matches are
+///     an error unless their expressions are identical); for GROUP BY a matching
+///     FROM column takes precedence (colNameToVar; its ambiguity check applies);
+///  2. an integer literal `N` references the Nth output column.
+///
+/// Otherwise (SQL99) the expression is transformed and matched against the tlist
+/// (reusing an equal entry) or appended as a new resjunk entry.
 fn find_target_list_entry(
     pstate: &mut ParseState,
     node: Node,
     targetlist: &mut Vec<Node>,
     expr_kind: crate::parser::parse_node::ParseExprKind,
 ) -> crate::access::attnum::AttrNumber {
-    // SQL92 ordinal: a bare positive integer A_Const selects the Nth tlist column.
+    use crate::backend::parser::parse_expr::ParseExprKindName;
+
+    // SQL92 case 1: a bare (unqualified, single-part) column name.
+    if let Node::ColumnRef(cr) = &node
+        && cr.fields.len() == 1
+        && let crate::nodes::parsenodes::ColumnRefField::String(s) = &cr.fields[0]
+    {
+        let mut name: Option<&str> = Some(s.sval.as_str());
+        let location = cr.location;
+
+        // In GROUP BY a FROM-clause column wins over a targetlist alias: if the
+        // name resolves in the namespace, fall through to the SQL99 rules. An
+        // ambiguous FROM reference errors inside col_name_to_var, as PG wants.
+        if expr_kind == crate::parser::parse_node::ParseExprKind::GroupBy
+            && crate::backend::parser::parse_relation::col_name_to_var(
+                pstate,
+                s.sval.as_str(),
+                true,
+                location,
+            )
+            .is_some()
+        {
+            name = None;
+        }
+
+        if let Some(name) = name {
+            let mut target_resno: Option<crate::access::attnum::AttrNumber> = None;
+            let mut target_expr: Option<&Node> = None;
+            for n in targetlist.iter() {
+                let Node::TargetEntry(te) = n else { continue };
+                if te.resjunk || te.resname.as_deref() != Some(name) {
+                    continue;
+                }
+                if target_resno.is_some() {
+                    if target_expr != te.expr.as_ref() {
+                        crate::ereport!(
+                            crate::utils::elog::ERROR,
+                            |e: &mut crate::utils::elog::ErrorData| {
+                                e.errcode(crate::utils::errcodes::ERRCODE_AMBIGUOUS_COLUMN)
+                                    .errmsg(format!(
+                                        "{} \"{name}\" is ambiguous",
+                                        ParseExprKindName(expr_kind)
+                                    ));
+                                if location >= 0 {
+                                    e.errposition(location + 1);
+                                }
+                            }
+                        );
+                    }
+                } else {
+                    target_resno = Some(te.resno);
+                    target_expr = te.expr.as_ref();
+                }
+                // Stay in loop to check for ambiguity.
+            }
+            if let Some(resno) = target_resno {
+                return resno;
+            }
+        }
+    }
+
+    // SQL92 case 2: an integer literal selects the Nth non-junk tlist column.
     if let Node::A_Const(c) = &node
         && let crate::nodes::parsenodes::ValUnion::Integer(iv) = &c.val
     {
@@ -646,21 +744,30 @@ fn find_target_list_entry(
             })
             .collect();
         if target < 1 || (target as usize) > non_junk.len() {
+            let location = c.location;
             crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
-                e.errcode(crate::utils::errcodes::ERRCODE_INVALID_COLUMN_REFERENCE)
-                    .errmsg(format!("ORDER/GROUP BY position {target} is not in select list"));
+                e.errcode(crate::utils::errcodes::ERRCODE_INVALID_COLUMN_REFERENCE).errmsg(
+                    format!(
+                        "{} position {target} is not in select list",
+                        ParseExprKindName(expr_kind)
+                    ),
+                );
+                if location >= 0 {
+                    e.errposition(location + 1);
+                }
             });
             unreachable!("ereport(ERROR) diverges");
         }
         return non_junk[(target - 1) as usize];
     }
 
-    // Transform the expression, then match it against the existing tlist.
+    // Otherwise (SQL99): transform the expression, then match it against the tlist
+    // (any entry, junk included -- PG findTargetlistEntrySQL99, so a GROUP BY
+    // reuses the resjunk entry an earlier ORDER BY appended).
     let expr = crate::parser::parse_expr::transformExpr(pstate, Some(node), expr_kind)
         .unwrap_or_else(|| not_yet_reachable("findTargetlistEntry: NULL expression"));
     for n in targetlist.iter() {
         if let Node::TargetEntry(te) = n
-            && !te.resjunk
             && te.expr.as_ref() == Some(&expr)
         {
             return te.resno;

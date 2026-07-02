@@ -243,6 +243,11 @@ fn plan_set_operations_stmt(parse: &mut Query) -> PlannedStmt {
         &parse.targetList,
     );
 
+    // ORDER BY / LIMIT over the set-op result: a Sort / Limit above the combined
+    // plan (the sort keys are output-column positions from the top targetlist).
+    let combined =
+        crate::backend::optimizer::plan::createplan::build_setop_sort_limit(parse, result.plan);
+
     // Move the combined rangetable into the Query so set_plan_references flattens it
     // (rtoffset 0; the combined plan's scan Vars/scanrelids are already final).
     parse.rtable = result.rtable;
@@ -252,7 +257,7 @@ fn plan_set_operations_stmt(parse: &mut Query) -> PlannedStmt {
     let mut root = make_planner_info(&glob, parse, 1);
     let _ = &mut glob;
 
-    let top_plan = set_plan_references(&mut root, result.plan);
+    let top_plan = set_plan_references(&mut root, combined);
     let glob = &root.glob;
 
     PlannedStmt {
@@ -631,10 +636,11 @@ pub fn subquery_planner(
     // PlanRowMarks on root.row_marks (M8, step 34).
     preprocess_rowmarks(&mut root);
 
+    // The HAVING qual is evaluated at the Agg node (create_agg_plan puts it in the
+    // Agg's qual); PG's move-ungrouped-HAVING-to-WHERE optimization is skipped
+    // (identical semantics, one evaluation point). The degenerate no-agg/no-GROUP
+    // case becomes a gating Result (build_upper_plan).
     root.has_having_qual = root.parse.havingQual.is_some();
-    if root.has_having_qual {
-        not_yet_reachable("subquery_planner: HAVING clause");
-    }
 
     // Expression preprocessing on the targetlist (eval_const_expressions etc).
     // M1's targets are already-resolved Const nodes that fold to themselves, so
@@ -917,13 +923,25 @@ fn grouping_planner(root: &mut PlannerInfo, tuple_fraction: f64, setops: Option<
 fn make_scan_input_tlist(root: &PlannerInfo) -> Vec<Node> {
     let mut exprs: Vec<Node> = Vec::new();
     let mut sortgrouprefs: Vec<crate::c::Index> = Vec::new();
-    // Pull every Var out of the final tlist (the aggregate inputs are Vars inside
-    // Aggrefs; the grouping/sort columns are Vars directly). Deduplicate by Var
-    // identity (varno/varattno), keeping the first occurrence's sortgroupref.
+    // A grouping/sort-keyed entry whose expression carries no aggregate is a scan
+    // output column AS A WHOLE (PG make_group_input_target keeps the grouping
+    // EXPRESSIONS below the Agg -- `GROUP BY lower(c)` computes lower(c) at the
+    // scan); everything else contributes its Vars (the aggregate inputs are Vars
+    // inside Aggrefs). Deduplicate whole expressions by equality and Vars by
+    // (varno, varattno), keeping the first occurrence's sortgroupref.
     for n in &root.processed_tlist {
         let Node::TargetEntry(te) = n else { continue };
         let Some(expr) = te.expr.as_ref() else { continue };
-        pull_vars_into(expr, te.ressortgroupref, &mut exprs, &mut sortgrouprefs);
+        if te.ressortgroupref != 0 && !contains_aggref(expr) {
+            push_scan_expr(expr, te.ressortgroupref, &mut exprs, &mut sortgrouprefs);
+        } else {
+            pull_vars_into(expr, te.ressortgroupref, &mut exprs, &mut sortgrouprefs);
+        }
+    }
+    // The HAVING qual's aggregate arguments and grouped-column references are scan
+    // inputs too (`HAVING min(a) = max(a)` with `a` nowhere in the target list).
+    if let Some(having) = root.parse.havingQual.as_ref() {
+        pull_vars_into(having, 0, &mut exprs, &mut sortgrouprefs);
     }
 
     exprs
@@ -941,6 +959,42 @@ fn make_scan_input_tlist(root: &PlannerInfo) -> Vec<Node> {
             Node::TargetEntry(Box::new(tle))
         })
         .collect()
+}
+
+/// Whether an expression tree contains an `Aggref` (PG `contain_agg_clause` over
+/// the reachable expression kinds).
+fn contains_aggref(expr: &Node) -> bool {
+    match expr {
+        Node::Aggref(_) => true,
+        Node::OpExpr(op) | Node::NullIfExpr(op) | Node::DistinctExpr(op) => {
+            op.args.iter().any(contains_aggref)
+        }
+        Node::FuncExpr(f) => f.args.iter().any(contains_aggref),
+        Node::BoolExpr(b) => b.args.iter().any(contains_aggref),
+        Node::RelabelType(r) => r.arg.as_ref().is_some_and(contains_aggref),
+        Node::CoerceViaIO(c) => c.arg.as_ref().is_some_and(contains_aggref),
+        _ => false,
+    }
+}
+
+/// Add a whole grouping/sort expression to the scan-input list, deduplicating by
+/// expression equality (merging the sortgroupref onto an existing entry).
+fn push_scan_expr(
+    expr: &Node,
+    sortgroupref: crate::c::Index,
+    exprs: &mut Vec<Node>,
+    refs: &mut Vec<crate::c::Index>,
+) {
+    for (i, e) in exprs.iter().enumerate() {
+        if e == expr {
+            if refs[i] == 0 {
+                refs[i] = sortgroupref;
+            }
+            return;
+        }
+    }
+    exprs.push(expr.clone());
+    refs.push(sortgroupref);
 }
 
 /// Pull the base-rel `Var`s out of a final-tlist expression into the scan-input
@@ -998,8 +1052,19 @@ fn pull_vars_into(
                 pull_vars_into(arg, 0, exprs, refs);
             }
         }
-        Node::OpExpr(op) | Node::NullIfExpr(op) => {
+        Node::OpExpr(op) | Node::NullIfExpr(op) | Node::DistinctExpr(op) => {
             for arg in &op.args {
+                pull_vars_into(arg, 0, exprs, refs);
+            }
+        }
+        // The HAVING qual reaches here too: AND/OR trees + boolean tests.
+        Node::BoolExpr(b) => {
+            for arg in &b.args {
+                pull_vars_into(arg, 0, exprs, refs);
+            }
+        }
+        Node::BooleanTest(b) => {
+            if let Some(arg) = b.arg.as_ref() {
                 pull_vars_into(arg, 0, exprs, refs);
             }
         }

@@ -67,6 +67,8 @@ pub enum Token {
     // PG lexes `||` as a generic {operator} (an `Op` terminal); this port names
     // the currently reachable multi-char operators individually.
     Concat, // ||
+    Shl,    // <<
+    Shr,    // >>
 }
 
 /// Raw token classes emitted by logos before keyword resolution and literal
@@ -139,6 +141,10 @@ enum Raw {
     #[token("<>")] NotEquals,
     #[token("!=")] BangEquals,
     #[token("||")] Concat,
+    // Bit shifts (generic {operator} in PG scan.l; named here). Listed before
+    // the single-char `<`/`>` so logos's longest-match picks them.
+    #[token("<<")] Shl,
+    #[token(">>")] Shr,
     #[token("<")] Lt,
     #[token(">")] Gt,
     #[token("=")] Eq,
@@ -221,6 +227,8 @@ pub fn lex(src: &str) -> impl Iterator<Item = Result<(Loc, Token, Loc), LexError
             // PG scan.l rewrites `!=` to `<>` at scan time; both yield NotEquals.
             Raw::NotEquals | Raw::BangEquals => Token::NotEquals,
             Raw::Concat => Token::Concat,
+            Raw::Shl => Token::Shl,
+            Raw::Shr => Token::Shr,
         };
         Ok((start, tok, end))
     })

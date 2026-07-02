@@ -623,7 +623,29 @@ const BUILTIN_FN_BINDINGS: &[(&str, &str)] = &[
     ("int4up", "crate::backend::utils::adt::int::int4up"),
     ("int4xor", "crate::backend::utils::adt::int::int4xor"),
     // int8.c (step 25B subset): count/sum/min/max support over bigint.
+    ("int28", "crate::backend::utils::adt::int::int28"),
     ("int2_sum", "crate::backend::utils::adt::int::int2_sum"),
+    ("int48", "crate::backend::utils::adt::int::int48"),
+    ("int48eq", "crate::backend::utils::adt::int::int48eq"),
+    ("int48ge", "crate::backend::utils::adt::int::int48ge"),
+    ("int48gt", "crate::backend::utils::adt::int::int48gt"),
+    ("int48le", "crate::backend::utils::adt::int::int48le"),
+    ("int48lt", "crate::backend::utils::adt::int::int48lt"),
+    ("int48ne", "crate::backend::utils::adt::int::int48ne"),
+    ("int82", "crate::backend::utils::adt::int::int82"),
+    ("int84", "crate::backend::utils::adt::int::int84"),
+    ("int84eq", "crate::backend::utils::adt::int::int84eq"),
+    ("int84ge", "crate::backend::utils::adt::int::int84ge"),
+    ("int84gt", "crate::backend::utils::adt::int::int84gt"),
+    ("int84le", "crate::backend::utils::adt::int::int84le"),
+    ("int84lt", "crate::backend::utils::adt::int::int84lt"),
+    ("int84ne", "crate::backend::utils::adt::int::int84ne"),
+    ("int8eq", "crate::backend::utils::adt::int::int8eq"),
+    ("int8ge", "crate::backend::utils::adt::int::int8ge"),
+    ("int8gt", "crate::backend::utils::adt::int::int8gt"),
+    ("int8le", "crate::backend::utils::adt::int::int8le"),
+    ("int8lt", "crate::backend::utils::adt::int::int8lt"),
+    ("int8ne", "crate::backend::utils::adt::int::int8ne"),
     ("int4_sum", "crate::backend::utils::adt::int::int4_sum"),
     ("int8gcd", "crate::backend::utils::adt::int::int8gcd"),
     ("int8in", "crate::backend::utils::adt::int::int8in"),
@@ -1712,6 +1734,24 @@ const M3_PROC_NAMES: &[&str] = &[
     // int8 gcd/lcm (int.rs) -- unique names among int8 in pg_proc.dat? No: gcd/lcm
     // are overloaded (int4/int8), so those two overloads are seeded by OID via
     // M3_PROC_OIDS below.
+    // int2 same-type + int24/int42 cross-type operator support (unblocker pass D):
+    // the full int2/int4 comparison + arithmetic oprcode set from int.c.
+    "int2eq", "int2ne", "int2lt", "int2le", "int2gt", "int2ge",
+    "int2pl", "int2mi", "int2mul", "int2div", "int2mod", "int2um",
+    "int24eq", "int24ne", "int24lt", "int24le", "int24gt", "int24ge",
+    "int24pl", "int24mi", "int24mul", "int24div",
+    "int42eq", "int42ne", "int42lt", "int42le", "int42gt", "int42ge",
+    "int42pl", "int42mi", "int42mul", "int42div",
+    // bit-shift oprcode support (`<<`/`>>` over int2/int4).
+    "int2shl", "int2shr", "int4shl", "int4shr",
+    // prefix unary-minus oprcode support for float8/numeric literals
+    // (`-2.5::float8` parses as `-(2.5::float8)`).
+    "float8um", "numeric_uminus",
+    // int8 same-type + int84/int48 cross-type comparison oprcode support
+    // (pass E coordination: count(*) = 1, ORDER BY count(*)).
+    "int8eq", "int8ne", "int8lt", "int8gt", "int8le", "int8ge",
+    "int84eq", "int84ne", "int84lt", "int84gt", "int84le", "int84ge",
+    "int48eq", "int48ne", "int48lt", "int48gt", "int48le", "int48ge",
 ];
 
 /// pg_proc rows M3 seeds BY OID, for overloaded builtins whose name has several
@@ -1740,6 +1780,11 @@ const M3_PROC_OIDS: &[u32] = &[
     3062, // reverse(text) -> text
     2311, // md5(text) -> text
     2321, // md5(bytea) -> text
+    // unblocker pass D (int2/int4 surface): overloaded numeric builtins by OID.
+    1397, // abs(int4) -> int4 [int4abs]
+    1398, // abs(int2) -> int2 [int2abs]
+    5044, // gcd(int4, int4) -> int4 [int4gcd]
+    5046, // lcm(int4, int4) -> int4 [int4lcm]
 ];
 
 /// The pg_operator entries M3 seeds: the int4-on-int4 arithmetic and comparison
@@ -1791,6 +1836,71 @@ const M3_OPERATORS: &[(&str, &str, &str)] = &[
     (">=", "name", "name"),
     // text concatenation operator (oprcode textcat).
     ("||", "text", "text"),
+    // unblocker pass D: the full int2 same-type + int24/int42 cross-type operator
+    // surface (comparisons + arithmetic; pg_operator.dat oids 94-97, 520-559).
+    // No cross-type `%` exists in PG; (int2,int4) `%` resolves via the parser's
+    // integer-family coercion fallback to int4mod.
+    ("=", "int2", "int2"),
+    ("<>", "int2", "int2"),
+    ("<", "int2", "int2"),
+    (">", "int2", "int2"),
+    ("<=", "int2", "int2"),
+    (">=", "int2", "int2"),
+    ("+", "int2", "int2"),
+    ("-", "int2", "int2"),
+    ("*", "int2", "int2"),
+    ("/", "int2", "int2"),
+    ("%", "int2", "int2"),
+    ("-", "", "int2"), // prefix unary minus
+    ("=", "int2", "int4"),
+    ("<>", "int2", "int4"),
+    ("<", "int2", "int4"),
+    (">", "int2", "int4"),
+    ("<=", "int2", "int4"),
+    (">=", "int2", "int4"),
+    ("+", "int2", "int4"),
+    ("-", "int2", "int4"),
+    ("*", "int2", "int4"),
+    ("/", "int2", "int4"),
+    ("=", "int4", "int2"),
+    ("<>", "int4", "int2"),
+    ("<", "int4", "int2"),
+    (">", "int4", "int2"),
+    ("<=", "int4", "int2"),
+    (">=", "int4", "int2"),
+    ("+", "int4", "int2"),
+    ("-", "int4", "int2"),
+    ("*", "int4", "int2"),
+    ("/", "int4", "int2"),
+    // bit shifts (`-1::int2 << 15`); the shift count is always int4.
+    ("<<", "int2", "int4"),
+    (">>", "int2", "int4"),
+    ("<<", "int4", "int4"),
+    (">>", "int4", "int4"),
+    // prefix unary minus over float8/numeric (`-2.5::float8` = `-(2.5::float8)`).
+    ("-", "", "float8"),
+    ("-", "", "numeric"),
+    // int8 same-type + int84/int48 cross-type comparisons (pass E coordination):
+    // `count(*) = 1` / `count(*) > 2` are (int8,int4), and ORDER BY over count(*)
+    // needs the `<`(int8,int8) btree ordering operator (oid 412).
+    ("=", "int8", "int8"),
+    ("<>", "int8", "int8"),
+    ("<", "int8", "int8"),
+    (">", "int8", "int8"),
+    ("<=", "int8", "int8"),
+    (">=", "int8", "int8"),
+    ("=", "int8", "int4"),
+    ("<>", "int8", "int4"),
+    ("<", "int8", "int4"),
+    (">", "int8", "int4"),
+    ("<=", "int8", "int4"),
+    (">=", "int8", "int4"),
+    ("=", "int4", "int8"),
+    ("<>", "int4", "int8"),
+    ("<", "int4", "int8"),
+    (">", "int4", "int8"),
+    ("<=", "int4", "int8"),
+    (">=", "int4", "int8"),
 ];
 
 /// The M4 casts pg_cast seeds (step 23): the numeric tower (int<->float<->numeric)
@@ -1804,6 +1914,20 @@ const M3_OPERATORS: &[(&str, &str, &str)] = &[
 const M4_CASTS: &[(&str, &str, &str, char, char)] = &[
     ("int2", "int4", "i2toi4", 'i', 'f'),
     ("int4", "int2", "i4toi2", 'a', 'f'),
+    // unblocker pass D: the int8 leg of the integer tower (big literals parse to
+    // int8 consts) + the narrowing casts the int2/int4 rounding tests use.
+    // bpchar->text (pg_cast.dat: castfunc text(bpchar) oid 401 = rtrim1, blank
+    // stripping): the function-resolution string retry (lower(char_col) ->
+    // lower(text)) coerces through it.
+    ("bpchar", "text", "rtrim1", 'i', 'f'),
+    ("int2", "int8", "int28", 'i', 'f'),
+    ("int8", "int2", "int82", 'a', 'f'),
+    ("int4", "int8", "int48", 'i', 'f'),
+    ("int8", "int4", "int84", 'a', 'f'),
+    ("float8", "int2", "dtoi2", 'a', 'f'),
+    ("float4", "int2", "ftoi2", 'a', 'f'),
+    ("float4", "int4", "ftoi4", 'a', 'f'),
+    ("numeric", "int2", "numeric_int2", 'a', 'f'),
     ("int2", "float8", "i2tod", 'i', 'f'),
     ("int4", "float8", "i4tod", 'i', 'f'),
     ("float8", "int4", "dtoi4", 'a', 'f'),

@@ -542,7 +542,7 @@ fn transform_column_ref(pstate: &mut ParseState, cref: &ColumnRef) -> Node {
                 cur = ps.parent_parse_state.as_deref();
                 levels_up += 1;
             }
-            missing_from_entry(relname)
+            missing_from_entry(pstate, relname, cref.location)
         }
         [.., ColumnRefField::Star(_)] => {
             unimplemented!("transformColumnRef: whole-row (table.*) reference not yet translated for this milestone");
@@ -570,12 +570,44 @@ fn undefined_column(colname: &str) -> ! {
     unreachable!("ereport(ERROR) diverges");
 }
 
+/// PG `errorMissingRTE` (the two reachable forms): if a rangetable entry's REAL
+/// relation name matches but it is exposed under a different (visible) alias, the
+/// problem is use of the real name instead of the alias ("SELECT foo.* FROM foo
+/// f") -- hint about the alias; otherwise the bald missing-FROM-entry error.
 #[cold]
-fn missing_from_entry(relname: &str) -> ! {
+fn missing_from_entry(pstate: &ParseState, relname: &str, location: i32) -> ! {
+    // searchRangeTableForRel (alias-hidden subset): an RTE_RELATION whose relcache
+    // relation name equals `relname` but whose eref alias differs and is visible.
+    let bad_alias = pstate.p_rtable.iter().find_map(|rte| {
+        if rte.rtekind != crate::nodes::parsenodes::RTEKind::RELATION || rte.alias.is_none() {
+            return None;
+        }
+        let aliasname = rte.eref.as_ref().and_then(|a| a.aliasname.as_deref())?;
+        if aliasname == relname {
+            return None;
+        }
+        let rel = crate::backend::utils::cache::relcache::relation_id_get_relation(rte.relid)?;
+        (crate::utils::rel::relation_get_relation_name(&rel) == relname
+            && refname_namespace_item(pstate, aliasname).is_some())
+        .then(|| aliasname.to_owned())
+    });
     crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
-        e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_TABLE).errmsg(format!(
-            "missing FROM-clause entry for table \"{relname}\""
-        ));
+        if let Some(alias) = bad_alias.as_deref() {
+            e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_TABLE)
+                .errmsg(format!(
+                    "invalid reference to FROM-clause entry for table \"{relname}\""
+                ))
+                .errhint(format!(
+                    "Perhaps you meant to reference the table alias \"{alias}\"."
+                ));
+        } else {
+            e.errcode(crate::utils::errcodes::ERRCODE_UNDEFINED_TABLE).errmsg(format!(
+                "missing FROM-clause entry for table \"{relname}\""
+            ));
+        }
+        if location >= 0 {
+            e.errposition(location + 1);
+        }
     });
     unreachable!("ereport(ERROR) diverges");
 }

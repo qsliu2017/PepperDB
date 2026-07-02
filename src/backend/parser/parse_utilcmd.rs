@@ -62,23 +62,105 @@ pub fn transformCreateStmt(stmt: &mut CreateStmt, _query_string: &str) -> Vec<No
     }
 
     // Run through each primary element, separating column defs from constraints.
-    // M2 supports only ColumnDef; Constraint and TableLikeClause are staged.
+    // Column-level PRIMARY KEY / UNIQUE constraints split off into IndexStmts run
+    // after the CreateStmt (PG transformColumnDefinition -> transformIndexConstraints,
+    // reduced to the single-column inline form); [NOT] NULL folds into
+    // `is_not_null`. Table constraints and LIKE are staged.
     let mut columns: Vec<Node> = Vec::with_capacity(stmt.tableElts.len());
+    let mut index_stmts: Vec<Node> = Vec::new();
     for element in &stmt.tableElts {
         match element {
-            Node::ColumnDef(_) => columns.push(element.clone()),
+            Node::ColumnDef(cd) => {
+                let mut cd = (**cd).clone();
+                transform_column_definition(stmt, &mut cd, &mut index_stmts);
+                columns.push(Node::ColumnDef(Box::new(cd)));
+            }
             Node::Constraint(_) => not_yet_reachable("transformCreateStmt: table constraint"),
             Node::TableLikeClause(_) => not_yet_reachable("transformCreateStmt: LIKE clause"),
             other => not_yet_reachable(&format!("transformCreateStmt: table element {other:?}")),
         }
     }
 
-    // Output results: the column list replaces tableElts; check/not-null
-    // constraint outputs are empty for M2 (no constraints reached above).
+    // Output results: the column list replaces tableElts; the split-off
+    // PRIMARY KEY / UNIQUE index statements follow the CreateStmt (PG's alist).
     stmt.tableElts = columns;
     crate::assert!(stmt.constraints.is_empty());
 
-    vec![Node::CreateStmt(Box::new(stmt.clone()))]
+    let mut result = vec![Node::CreateStmt(Box::new(stmt.clone()))];
+    result.extend(index_stmts);
+    result
+}
+
+/// PG `transformColumnDefinition` (inline-constraint subset): fold the column's
+/// raw constraints into the ColumnDef / the deferred index list. PRIMARY KEY
+/// implies NOT NULL and a `<table>_pkey` unique index; UNIQUE builds a
+/// `<table>_<col>_key` unique index (the ChooseIndexName defaults). The
+/// column-level FOREIGN KEY passes through to DefineRelation's existing path.
+/// SERIAL / DEFAULT / CHECK / IDENTITY / GENERATED are staged.
+fn transform_column_definition(
+    stmt: &CreateStmt,
+    column: &mut crate::nodes::parsenodes::ColumnDef,
+    index_stmts: &mut Vec<Node>,
+) {
+    use crate::backend::parser::parser::{make_index_elem, make_index_stmt};
+    use crate::nodes::parsenodes::ConstrType;
+
+    if column.constraints.is_empty() {
+        return;
+    }
+    let colname = column.colname.clone().unwrap_or_default();
+    let relname = stmt
+        .relation
+        .as_ref()
+        .and_then(|r| r.relname.clone())
+        .unwrap_or_default();
+
+    let constraints = std::mem::take(&mut column.constraints);
+    for c_node in constraints {
+        let Node::Constraint(c) = &c_node else {
+            not_yet_reachable("transformColumnDefinition: non-Constraint column qualifier");
+        };
+        match c.contype {
+            ConstrType::PRIMARY | ConstrType::UNIQUE => {
+                let is_pkey = c.contype == ConstrType::PRIMARY;
+                if is_pkey {
+                    column.is_not_null = true;
+                }
+                let idxname = if is_pkey {
+                    format!("{relname}_pkey")
+                } else {
+                    format!("{relname}_{colname}_key")
+                };
+                let rel = stmt
+                    .relation
+                    .as_deref()
+                    .unwrap_or_else(|| {
+                        not_yet_reachable("transformColumnDefinition: CreateStmt without relation")
+                    })
+                    .clone();
+                let mut istmt = make_index_stmt(
+                    true,
+                    Some(idxname),
+                    rel,
+                    None,
+                    vec![make_index_elem(
+                        colname.clone(),
+                        crate::nodes::parsenodes::SortByDir::DEFAULT,
+                    )],
+                );
+                if let Node::IndexStmt(is) = &mut istmt {
+                    is.primary = is_pkey;
+                    is.isconstraint = true;
+                }
+                index_stmts.push(istmt);
+            }
+            ConstrType::NOTNULL => column.is_not_null = true,
+            ConstrType::NULL => column.is_not_null = false,
+            // The column-level FOREIGN KEY keeps its existing DefineRelation path.
+            ConstrType::FOREIGN => column.constraints.push(c_node.clone()),
+            other => not_yet_reachable(&format!("transformColumnDefinition: constraint {other:?}")),
+        }
+    }
 }
 
 /// `beforeStmts`/`afterStmts` out-params -> returned tuple.

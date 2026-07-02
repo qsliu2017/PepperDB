@@ -39,7 +39,7 @@ use crate::backend::executor::nodeGroup::grouping_equal;
 use crate::backend::executor::nodeUnique::snapshot_slot;
 use crate::executor::tuptable::{slot_getattr, ExecClearTuple, TupleTableSlot};
 use crate::fmgr::{OidFunctionCall1, OidFunctionCall2};
-use crate::nodes::execnodes::{AggState, EState, PlanState, ScanState};
+use crate::nodes::execnodes::{AggState, EState, ExprContext, ExprState, PlanState, ScanState};
 use crate::nodes::nodes::{AggStrategy, Node};
 use crate::nodes::plannodes::Agg;
 use crate::nodes::primnodes::Aggref;
@@ -94,6 +94,13 @@ pub struct AggRun<'rel> {
     input_done: bool,
     /// PLAIN: whether the single result row has been emitted.
     emitted: bool,
+    /// the HAVING qual (compiled `Agg.plan.qual`), evaluated per finalized group.
+    qual: Option<Box<ExprState>>,
+    /// ExprContext for the qual: `ecxt_outertuple` holds the group representative
+    /// row, `ecxt_aggvalues`/`ecxt_aggnulls` the finalized aggregates by aggno.
+    qual_econtext: Box<ExprContext>,
+    /// scratch slot (outer rowtype) the qual's OUTER_VAR reads go through.
+    qual_slot: Option<Box<TupleTableSlot>>,
 }
 
 /// HASHED: one hash-table entry -- the grouping-key representative tuple plus the
@@ -114,27 +121,38 @@ pub fn exec_init_agg<'rel>(
 ) -> Box<AggRun<'rel>> {
     let _ = estate;
     crate::assert!(node.grouping_sets.is_empty(), "ExecInitAgg: GROUPING SETS not yet reachable");
-    crate::assert!(node.plan.qual.is_empty(), "ExecInitAgg: HAVING qual not yet reachable");
 
     let outer_desc = result_type_of(&child)
         .unwrap_or_else(|| unimplemented!("ExecInitAgg: child has no result descriptor"));
 
-    // Resolve each Aggref in the targetlist (in resno order) into an AggInfo.
-    let mut aggs: Vec<AggInfo> = Vec::new();
+    // Resolve each distinct Aggref in the targetlist + HAVING qual into an AggInfo,
+    // indexed by the `aggno` setrefs stamped (duplicates share a number).
+    let mut aggrefs: Vec<Option<Aggref>> = Vec::new();
     for te in &node.plan.targetlist {
         let Node::TargetEntry(te) = te else { continue };
-        if let Some(Node::Aggref(aggref)) = te.expr.as_ref() {
-            aggs.push(resolve_aggref(aggref));
+        if let Some(e) = te.expr.as_ref() {
+            collect_aggrefs(e, &mut aggrefs);
         }
     }
+    for q in &node.plan.qual {
+        collect_aggrefs(q, &mut aggrefs);
+    }
+    let aggs: Vec<AggInfo> = aggrefs
+        .iter()
+        .map(|a| {
+            let a = a
+                .as_ref()
+                .unwrap_or_else(|| unimplemented!("ExecInitAgg: aggno gap in Aggref numbering"));
+            resolve_aggref(a)
+        })
+        .collect();
 
-    // The result rowtype: PG projects the Agg targetlist -- one attribute per
-    // non-junk TargetEntry, typed by the entry's expression (the Aggref's aggtype
-    // for an aggregate, the Var's vartype for a grouping column). Build it here
-    // (the planner's ExecAssignResultTypeFromTL analog); the descriptor is virtual
-    // and the value layout is what the wire path reads.
+    // The result rowtype: PG projects the FULL Agg targetlist -- one attribute per
+    // TargetEntry, junk included (a resjunk grouping/sort column is consumed by the
+    // Sort above / the top-level junk filter, which strips it from the final
+    // output). Build it here (the planner's ExecAssignResultTypeFromTL analog).
     let result_desc =
-        crate::backend::executor::execTuples::exec_clean_type_from_tl(&node.plan.targetlist);
+        crate::backend::executor::execTuples::exec_type_from_tl(&node.plan.targetlist);
     let result_slot = make_tuple_table_slot(Some(Arc::clone(&result_desc)), &TTS_OPS_VIRTUAL);
 
     let key_cols = node.grp_col_idx.clone();
@@ -155,6 +173,14 @@ pub fn exec_init_agg<'rel>(
 
     let numaggs = i32::try_from(aggs.len()).unwrap_or(0);
     let cur_group = init_pergroup(&aggs);
+
+    // The HAVING qual (implicit-AND list) compiled to an ExprState; its OUTER_VAR
+    // reads go through a scratch slot of the child rowtype.
+    let qual = crate::backend::executor::execExpr::exec_init_qual(&node.plan.qual, None);
+    let qual_slot = qual
+        .is_some()
+        .then(|| make_tuple_table_slot(Some(Arc::clone(&outer_desc)), &TTS_OPS_VIRTUAL));
+
     Box::new(AggRun {
         state: Box::new(AggState { ss, numaggs, ..AggState::default() }),
         child: Box::new(child),
@@ -168,7 +194,59 @@ pub fn exec_init_agg<'rel>(
         hash_cursor: 0,
         input_done: false,
         emitted: false,
+        qual,
+        qual_econtext: Box::new(ExprContext::default()),
+        qual_slot,
     })
+}
+
+/// Collect the distinct Aggrefs of an expression tree into an aggno-indexed table
+/// (setrefs stamped the numbers; duplicates share one).
+fn collect_aggrefs(expr: &Node, out: &mut Vec<Option<Aggref>>) {
+    match expr {
+        Node::Aggref(a) => {
+            let idx = usize::try_from(a.aggno).unwrap_or_else(|_| {
+                unimplemented!("ExecInitAgg: unnumbered Aggref (aggno < 0)")
+            });
+            if out.len() <= idx {
+                out.resize_with(idx + 1, || None);
+            }
+            if out[idx].is_none() {
+                out[idx] = Some((**a).clone());
+            }
+        }
+        Node::OpExpr(op) | Node::NullIfExpr(op) | Node::DistinctExpr(op) => {
+            for a in &op.args {
+                collect_aggrefs(a, out);
+            }
+        }
+        Node::FuncExpr(f) => {
+            for a in &f.args {
+                collect_aggrefs(a, out);
+            }
+        }
+        Node::BoolExpr(b) => {
+            for a in &b.args {
+                collect_aggrefs(a, out);
+            }
+        }
+        Node::BooleanTest(b) => {
+            if let Some(a) = b.arg.as_ref() {
+                collect_aggrefs(a, out);
+            }
+        }
+        Node::RelabelType(r) => {
+            if let Some(a) = r.arg.as_ref() {
+                collect_aggrefs(a, out);
+            }
+        }
+        Node::CoerceViaIO(c) => {
+            if let Some(a) = c.arg.as_ref() {
+                collect_aggrefs(a, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Resolve an `Aggref` against pg_aggregate (AGGFNOID syscache, warm) into the
@@ -394,7 +472,8 @@ pub async fn exec_agg<'r>(
     }
 }
 
-/// AGG_PLAIN: one group over the whole input. Drain, finalize, emit one row.
+/// AGG_PLAIN: one group over the whole input. Drain, finalize, emit one row
+/// (unless the HAVING qual rejects the single group).
 async fn exec_agg_plain<'r>(
     shared: Option<&Arc<SharedState>>,
     run: &'r mut AggRun<'_>,
@@ -412,7 +491,11 @@ async fn exec_agg_plain<'r>(
 
     // Plain agg with no input rows still emits one row (count(*) -> 0).
     let pergroup = run.cur_group.clone();
-    Some(project_group(run, None, &pergroup))
+    let finals = finalize_all(&run.aggs, &pergroup);
+    if !group_passes_qual(run, None, &finals) {
+        return None;
+    }
+    Some(project_group(run, None, &finals))
 }
 
 /// AGG_SORTED: emit one finalized row per group boundary over sorted input.
@@ -444,11 +527,15 @@ async fn exec_agg_sorted<'r>(
 
         match next {
             None => {
-                // End of input: emit the final group.
+                // End of input: emit the final group (unless HAVING rejects it).
                 run.input_done = true;
                 let first = run.first_tuple.take();
                 let pergroup = run.cur_group.clone();
-                return Some(project_group(run, first.as_ref(), &pergroup));
+                let finals = finalize_all(&run.aggs, &pergroup);
+                if !group_passes_qual(run, first.as_ref(), &finals) {
+                    return None;
+                }
+                return Some(project_group(run, first.as_ref(), &finals));
             }
             Some(snap) => {
                 let same = {
@@ -459,11 +546,16 @@ async fn exec_agg_sorted<'r>(
                     advance_from_snapshot(&run.aggs, &mut run.cur_group, &snap);
                     continue;
                 }
-                // Group boundary: finalize the current group, then re-seed.
+                // Group boundary: finalize the current group, then re-seed. A group
+                // the HAVING qual rejects is skipped (keep scanning).
                 let first = run.first_tuple.replace(snap.clone());
                 let pergroup = std::mem::replace(&mut run.cur_group, init_pergroup(&run.aggs));
                 advance_from_snapshot(&run.aggs, &mut run.cur_group, &snap);
-                return Some(project_group(run, first.as_ref(), &pergroup));
+                let finals = finalize_all(&run.aggs, &pergroup);
+                if !group_passes_qual(run, first.as_ref(), &finals) {
+                    continue;
+                }
+                return Some(project_group(run, first.as_ref(), &finals));
             }
         }
     }
@@ -497,15 +589,21 @@ async fn exec_agg_hashed<'r>(
         run.input_done = true;
     }
 
-    let groups = run.hash_groups.as_ref().unwrap_or_else(|| unreachable!("hash built"));
-    if run.hash_cursor >= groups.len() {
-        return None;
+    loop {
+        let groups = run.hash_groups.as_ref().unwrap_or_else(|| unreachable!("hash built"));
+        if run.hash_cursor >= groups.len() {
+            return None;
+        }
+        let idx = run.hash_cursor;
+        run.hash_cursor += 1;
+        let key_row = groups[idx].key_row.clone();
+        let pergroup = groups[idx].pergroup.clone();
+        let finals = finalize_all(&run.aggs, &pergroup);
+        if !group_passes_qual(run, Some(&key_row), &finals) {
+            continue; // HAVING rejected this group
+        }
+        return Some(project_group(run, Some(&key_row), &finals));
     }
-    let idx = run.hash_cursor;
-    run.hash_cursor += 1;
-    let key_row = groups[idx].key_row.clone();
-    let pergroup = groups[idx].pergroup.clone();
-    Some(project_group(run, Some(&key_row), &pergroup))
 }
 
 /// A hashable grouping key: the key columns' datums (as raw bits) + null flags.
@@ -559,20 +657,64 @@ fn advance_from_snapshot(aggs: &[AggInfo], pergroup: &mut [PerGroupState], snap:
     }
 }
 
-/// Build the result tuple for one finalized group: walk the Agg targetlist, filling
-/// each non-junk TargetEntry from either the finalized aggregate value (Aggref) or
-/// the group-key representative row (Var). `group_row` is the representative input
-/// tuple (the group's first row) for reading grouping Vars; `None` for PLAIN with
-/// no rows (only Aggref columns can appear then).
+/// Finalize every aggregate (aggno order).
+fn finalize_all(aggs: &[AggInfo], pergroup: &[PerGroupState]) -> Vec<(Datum, bool)> {
+    aggs.iter().zip(pergroup.iter()).map(|(i, s)| finalize_aggregate(i, s)).collect()
+}
+
+/// Evaluate the HAVING qual (if any) for one finalized group. The group
+/// representative row loads the scratch outer slot (its Vars are OUTER_VAR after
+/// setrefs); the finalized aggregates go into `ecxt_aggvalues` (EEOP_AGGREF reads
+/// them by aggno). No qual -> the group always passes.
+fn group_passes_qual(
+    run: &mut AggRun<'_>,
+    group_row: Option<&(Vec<Datum>, Vec<bool>)>,
+    finals: &[(Datum, bool)],
+) -> bool {
+    if run.qual.is_none() {
+        return true;
+    }
+    let mut slot = run
+        .qual_slot
+        .take()
+        .unwrap_or_else(|| unreachable!("qual_slot built with the qual"));
+    ExecClearTuple(&mut slot);
+    if let Some(row) = group_row {
+        let n = row.0.len().min(slot.values.len());
+        slot.values[..n].copy_from_slice(&row.0[..n]);
+        slot.isnull[..n].copy_from_slice(&row.1[..n]);
+    } else {
+        // PLAIN over empty input: no representative row; Vars cannot appear in a
+        // valid HAVING here (parseCheckAggregates), so an all-NULL row suffices.
+        for x in &mut slot.isnull {
+            *x = true;
+        }
+    }
+    exec_store_virtual_tuple(&mut slot);
+
+    let econtext = &mut run.qual_econtext;
+    econtext.ecxt_outertuple = Some(slot);
+    econtext.ecxt_aggvalues = finals.iter().map(|f| f.0).collect();
+    econtext.ecxt_aggnulls = finals.iter().map(|f| f.1).collect();
+
+    let passes = crate::backend::executor::execExpr::exec_qual(run.qual.as_deref_mut(), econtext);
+
+    run.qual_slot = run.qual_econtext.ecxt_outertuple.take();
+    passes
+}
+
+/// Build the result tuple for one finalized group: walk the FULL Agg targetlist
+/// (junk included -- the Sort above orders by junk grouping columns; the top-level
+/// junk filter strips them), filling each TargetEntry from either the finalized
+/// aggregate value (Aggref, by its stamped aggno) or the group-key representative
+/// row (Var). `group_row` is the representative input tuple (the group's first
+/// row) for reading grouping Vars; `None` for PLAIN with no rows (only Aggref
+/// columns can appear then).
 fn project_group<'r>(
     run: &'r mut AggRun<'_>,
     group_row: Option<&(Vec<Datum>, Vec<bool>)>,
-    pergroup: &[PerGroupState],
+    finals: &[(Datum, bool)],
 ) -> &'r mut TupleTableSlot {
-    // Finalize every aggregate up front (positional aggno order).
-    let finals: Vec<(Datum, bool)> =
-        run.aggs.iter().zip(pergroup.iter()).map(|(i, s)| finalize_aggregate(i, s)).collect();
-
     // Walk the targetlist, producing one output attribute per non-junk entry.
     let targetlist: Vec<Node> = match run.state.ss.ps.plan.as_ref() {
         Some(Node::Agg(a)) => a.plan.targetlist.clone(),
@@ -581,16 +723,11 @@ fn project_group<'r>(
 
     let mut out_values: Vec<Datum> = Vec::new();
     let mut out_nulls: Vec<bool> = Vec::new();
-    let mut aggno = 0usize;
     for te in &targetlist {
         let Node::TargetEntry(te) = te else { continue };
-        if te.resjunk {
-            continue;
-        }
         match te.expr.as_ref() {
-            Some(Node::Aggref(_)) => {
-                let (v, n) = finals.get(aggno).copied().unwrap_or((Datum(0), true));
-                aggno += 1;
+            Some(Node::Aggref(a)) => {
+                let (v, n) = finals.get(a.aggno as usize).copied().unwrap_or((Datum(0), true));
                 out_values.push(v);
                 out_nulls.push(n);
             }

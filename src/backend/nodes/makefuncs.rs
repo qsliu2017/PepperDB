@@ -158,12 +158,11 @@ pub fn make_const(
     constisnull: bool,
     constbyval: bool,
 ) -> Const {
-    // A varlena value must be forced to non-expanded (non-toasted) form so equal()
-    // sees a consistent representation. Varlena consts are not reachable for M1
-    // (byval int/bool only); the detoast path reaches a not-yet-translated subsystem.
-    if !constisnull && constlen == -1 {
-        unimplemented!("makeConst: varlena detoast deferred")
-    }
+    // PG forces a varlena value to non-expanded (non-toasted) form here
+    // (PG_DETOAST_DATUM_COPY) so equal() sees a consistent representation. This
+    // port has no TOAST/expanded datums yet: every varlena Datum reaching a Const
+    // (a numeric/text literal built by the type input functions) is already in
+    // flat detoasted form, so the detoast is an identity pass-through.
     Const {
         consttype,
         consttypmod,

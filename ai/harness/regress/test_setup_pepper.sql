@@ -31,9 +31,10 @@
 --   * VACUUM / VACUUM ANALYZE after each fixture -- upstream runs them for
 --     plan stability; re-add per-fixture when a test's plan output needs it.
 --
--- KEPT (loads cleanly): INT2_TBL, INT4_TBL, TEXT_TBL, CHAR_TBL, VARCHAR_TBL,
--- the COPY-loaded onek/tenk1 families (onek2/tenk2 via CTAS), and an EMPTY
--- INT8_TBL (rows blocked on int8 literal input, step 12).
+-- KEPT (loads cleanly): INT2_TBL, INT4_TBL, INT8_TBL (rows restored by
+-- unblocker pass D: big integer literals now parse to int8 consts and int8in
+-- is numutils-exact), TEXT_TBL, CHAR_TBL, VARCHAR_TBL, and the COPY-loaded
+-- onek/tenk1 families (onek2/tenk2 via CTAS).
 --
 
 -- directory paths are passed to us in environment variables (pg_regress sets
@@ -60,11 +61,14 @@ INSERT INTO INT4_TBL(f1) VALUES
   ('2147483647'),  -- largest and smallest values
   ('-2147483647');
 
--- INT8_TBL: created EMPTY -- the upstream INSERT is blocked on int8 input of
--- unquoted big integer literals ("numeric literal ... not supported yet",
--- owned by the numeric step 12). The relation exists so tests that only need
--- it to resolve do; rows come back with step 12.
 CREATE TABLE INT8_TBL(q1 int8, q2 int8);
+
+INSERT INTO INT8_TBL VALUES
+  ('  123   ','  456'),
+  ('123   ','4567890123456789'),
+  ('4567890123456789','123'),
+  (+4567890123456789,'4567890123456789'),
+  ('+4567890123456789','-4567890123456789');
 
 CREATE TABLE TEXT_TBL (f1 text);
 

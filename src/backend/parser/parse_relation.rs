@@ -61,11 +61,23 @@ pub fn add_range_table_entry_for_relation(
         .unwrap_or_else(|| relation_name(rel));
 
     // Build the effective column names from the tupdesc, then apply any user
-    // column-name overrides from the alias (`FROM t c(x, y)`). A too-long alias
-    // column list would be a user error; the covered tests only rename the table.
+    // column-name overrides from the alias (`FROM t c(x, y)`). More alias
+    // columns than the table has is PG buildRelationAliases' error.
     let mut eref = makeAlias(&refname, Vec::new());
     build_relation_aliases(tupdesc, &mut eref);
     if let Some(a) = alias {
+        if a.colnames.len() > eref.colnames.len() {
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_INVALID_COLUMN_REFERENCE).errmsg(
+                    format!(
+                        "table \"{}\" has {} columns available but {} columns specified",
+                        eref.aliasname.as_deref().unwrap_or(""),
+                        eref.colnames.len(),
+                        a.colnames.len()
+                    ),
+                );
+            });
+        }
         for (i, colname) in a.colnames.iter().enumerate() {
             if i < eref.colnames.len() {
                 eref.colnames[i] = colname.clone();
@@ -784,7 +796,7 @@ pub fn col_name_to_var(
             }
             if let Some(var) = scan_ns_item_for_column(nsitem, levels_up, colname, location) {
                 if result.is_some() {
-                    ambiguous_column(colname);
+                    ambiguous_column(colname, location);
                 }
                 result = Some(var);
             }
@@ -808,7 +820,7 @@ pub fn scan_ns_item_for_column(
     nsitem: &ParseNamespaceItem,
     sublevels_up: crate::c::Index,
     colname: &str,
-    _location: i32,
+    location: i32,
 ) -> Option<Node> {
     let attnum = scan_rte_for_column(&nsitem.names, colname)?;
     if attnum <= 0 {
@@ -828,6 +840,8 @@ pub fn scan_ns_item_for_column(
     );
     var.varnosyn = nscol.varnosyn;
     var.varattnosyn = nscol.varattnosyn;
+    // PG stamps the reference's parse location on the Var (error cursors).
+    var.location = location;
     Some(Node::Var(Box::new(var)))
 }
 
@@ -839,7 +853,7 @@ fn scan_rte_for_column(eref: &crate::nodes::primnodes::Alias, colname: &str) -> 
     for (i, name) in eref.colnames.iter().enumerate() {
         if name.sval == colname {
             if result.is_some() {
-                ambiguous_column(colname);
+                ambiguous_column(colname, -1);
             }
             result = Some((i + 1) as AttrNumber);
         }
@@ -908,10 +922,13 @@ fn zero_ns_column() -> ParseNamespaceColumn {
 }
 
 #[cold]
-fn ambiguous_column(colname: &str) -> ! {
+fn ambiguous_column(colname: &str, location: i32) -> ! {
     crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
         e.errcode(crate::utils::errcodes::ERRCODE_AMBIGUOUS_COLUMN)
             .errmsg(format!("column reference \"{colname}\" is ambiguous"));
+        if location >= 0 {
+            e.errposition(location + 1); // parser_errposition: 1-based
+        }
     });
     unreachable!("ereport(ERROR) diverges");
 }

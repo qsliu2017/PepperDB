@@ -150,10 +150,15 @@ pub fn make_op(
     };
 
     let Some(ltree) = ltree else {
-        // Prefix operator (e.g. unary minus). Resolution mirrors the binary case
-        // but with InvalidOid left type; the candidate machinery + coercion grow
-        // with the broader unary path.
-        unimplemented!("make_op: prefix operator resolution not yet reachable for this milestone");
+        // Prefix operator (e.g. unary minus): PG `left_oper` -- an exact
+        // (InvalidOid, rtype) OPERNAMENSP match. The unknown-operand candidate
+        // machinery grows with the broader unary path.
+        let rtype_id = exprType(&rtree);
+        let tup = oper(pstate, opname, InvalidOid, rtype_id, true, location)
+            .unwrap_or_else(|| {
+                op_error(pstate, oper_name_str(opname), InvalidOid, rtype_id, location)
+            });
+        return build_op_expr(tup, vec![rtree], location);
     };
 
     let unknown_oid = crate::catalog::genbki::UNKNOWNOID;
@@ -218,10 +223,35 @@ pub fn make_op(
                 relabel_to_text(rtree, rtype_id, location),
             )
         }
+        // Cross-width integer operands with no exact operator (PG has no
+        // `%`(int2,int4) row, e.g.): PG oper_select_candidate coerces the
+        // narrower operand to the wider type and picks that same-width operator.
+        // A narrow port of that selection over the int2/int4/int8 family.
+        None if int_family_rank(ltype_id).is_some() && int_family_rank(rtype_id).is_some() => {
+            let common =
+                if int_family_rank(ltype_id) >= int_family_rank(rtype_id) { ltype_id } else { rtype_id };
+            let t = oper(pstate, opname, common, common, true, location)
+                .unwrap_or_else(|| op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location));
+            (
+                t,
+                coerce_int_operand(ltree, ltype_id, common, location),
+                coerce_int_operand(rtree, rtype_id, common, location),
+            )
+        }
         None => op_error(pstate, oper_name_str(opname), ltype_id, rtype_id, location),
     };
 
-    // SAFETY: `tup` is a held OPEROID hit -> a pg_operator row.
+    // M3 argument types match the operator's declared types exactly (the fallback
+    // arms above already coerced any mismatched operand), so make_fn_arguments
+    // performs no further coercion here.
+    build_op_expr(tup, vec![ltree, rtree], location)
+}
+
+/// Shared tail of the binary and prefix `make_op` paths: read the resolved
+/// operator row (shell-operator check included), release it, and build the
+/// `OpExpr` over `args`.
+fn build_op_expr(tup: Operator, args: Vec<Node>, location: i32) -> Node {
+    // SAFETY: `tup` is a held OPEROID/OPERNAMENSP hit -> a pg_operator row.
     let opform = unsafe { oper_form(&*tup) };
 
     if opform.oprcode == InvalidOid {
@@ -239,12 +269,9 @@ pub fn make_op(
     let opresulttype = opform.oprresult;
     release_sys_cache(tup);
 
-    // M3 argument types match the operator's declared types exactly (int4/int4),
-    // so make_fn_arguments performs no coercion; the binary-coercible/UNKNOWN
-    // coercion is wired with the unknown-literal path.
     let opretset = get_func_retset(opfuncid);
 
-    let result = OpExpr {
+    Node::OpExpr(Box::new(OpExpr {
         opno,
         opfuncid,
         opresulttype,
@@ -252,10 +279,9 @@ pub fn make_op(
         // opcollid / inputcollid are set by parse_collate.c (assign_expr_collations).
         opcollid: InvalidOid,
         inputcollid: InvalidOid,
-        args: vec![ltree, rtree],
+        args,
         location,
-    };
-    Node::OpExpr(Box::new(result))
+    }))
 }
 
 /// Coerce an UNKNOWN-literal operand to `target_type` for operator resolution
@@ -271,6 +297,39 @@ fn coerce_operand_unknown(_pstate: &ParseState, operand: Node, target_type: Oid,
         operand,
         UNKNOWNOID,
         target_type,
+        -1,
+        CoercionContext::IMPLICIT,
+        CoercionForm::IMPLICIT_CAST,
+        location,
+    )
+}
+
+/// Integer-family width rank for the cross-width operator fallback
+/// (int2 < int4 < int8); `None` for any other type.
+fn int_family_rank(typid: Oid) -> Option<u8> {
+    use crate::catalog::genbki::{INT2OID, INT4OID, INT8OID};
+    match typid {
+        INT2OID => Some(0),
+        INT4OID => Some(1),
+        INT8OID => Some(2),
+        _ => None,
+    }
+}
+
+/// Coerce an integer-family operand to the chosen wider type via the implicit
+/// cast catalog (PG applies `coerce_type` to each argument once the candidate is
+/// chosen). Identity is a no-op.
+fn coerce_int_operand(operand: Node, fromtype: Oid, totype: Oid, location: i32) -> Node {
+    use crate::nodes::primnodes::{CoercionContext, CoercionForm};
+    if fromtype == totype {
+        return operand;
+    }
+    let mut ps = crate::parser::parse_node::make_parsestate(None);
+    crate::backend::parser::parse_coerce::coerce_type(
+        &mut ps,
+        operand,
+        fromtype,
+        totype,
         -1,
         CoercionContext::IMPLICIT,
         CoercionForm::IMPLICIT_CAST,

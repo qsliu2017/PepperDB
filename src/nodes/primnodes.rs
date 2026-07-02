@@ -116,7 +116,7 @@ pub enum VarReturningType {
 }
 
 /// Expression node representing a variable (ie, a table column).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Var {
     pub varno: i32,
     pub varattno: AttrNumber,
@@ -131,8 +131,25 @@ pub struct Var {
     pub location: ParseLoc,
 }
 
+// PG `equal()` ignores parse locations (COMPARE_LOCATION_FIELD) and the
+// varnosyn/varattnosyn "syntactic identity" fields (equalfuncs.c _equalVar);
+// tlist-matching (setrefs / findTargetlistEntry / GROUP BY reuse) relies on it.
+impl PartialEq for Var {
+    fn eq(&self, other: &Self) -> bool {
+        self.varno == other.varno
+            && self.varattno == other.varattno
+            && self.vartype == other.vartype
+            && self.vartypmod == other.vartypmod
+            && self.varcollid == other.varcollid
+            && self.varnullingrels == other.varnullingrels
+            && self.varlevelsup == other.varlevelsup
+            && self.varreturningtype == other.varreturningtype
+    }
+}
+impl Eq for Var {}
+
 /// A constant value. For varlena types the value is in non-extended form.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Const {
     pub consttype: Oid,
     pub consttypmod: i32,
@@ -143,6 +160,22 @@ pub struct Const {
     pub constbyval: bool,
     pub location: ParseLoc,
 }
+
+// PG `equal()` ignores parse locations (COMPARE_LOCATION_FIELD): `GROUP BY a/2`
+// must match the tlist's `a/2` even though the two `2` literals sit at different
+// text offsets.
+impl PartialEq for Const {
+    fn eq(&self, other: &Self) -> bool {
+        self.consttype == other.consttype
+            && self.consttypmod == other.consttypmod
+            && self.constcollid == other.constcollid
+            && self.constlen == other.constlen
+            && self.constvalue == other.constvalue
+            && self.constisnull == other.constisnull
+            && self.constbyval == other.constbyval
+    }
+}
+impl Eq for Const {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParamKind {

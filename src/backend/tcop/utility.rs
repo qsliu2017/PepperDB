@@ -469,6 +469,11 @@ async fn process_utility_slow(
                 // a CommandCounterIncrement + NewRelationCreateToastTable here.
                 crate::backend::access::transam::xact::CommandCounterIncrement();
             }
+            // A PRIMARY KEY / UNIQUE column constraint split off by
+            // transformCreateStmt: build the implicit unique index.
+            Node::IndexStmt(is) => {
+                crate::backend::commands::indexcmds::define_index(shared, &is).await;
+            }
             Node::TableLikeClause(_) => not_yet_reachable("ProcessUtilitySlow: LIKE expansion"),
             other => not_yet_reachable(&format!("ProcessUtilitySlow: sub-statement {other:?}")),
         }

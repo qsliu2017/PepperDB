@@ -599,9 +599,6 @@ async fn transform_set_operation_stmt_async(
     use crate::nodes::nodeFuncs::exprType;
     use crate::nodes::parsenodes::SetOperationStmt;
 
-    if !stmt.sortClause.is_empty() || stmt.limitOffset.is_some() || stmt.limitCount.is_some() {
-        not_yet_reachable("transformSetOperationStmt: ORDER BY / LIMIT over a set operation");
-    }
     if !stmt.lockingClause.is_empty() {
         not_yet_reachable("transformSetOperationStmt: FOR UPDATE/SHARE with a set operation");
     }
@@ -625,7 +622,163 @@ async fn transform_set_operation_stmt_async(
     let sostmt = Box::pin(transform_set_op_tree(shared, pstate, stmt, &mut leaves)).await;
 
     finish_set_operation_stmt(pstate, &mut qry, sostmt, leaves);
+
+    // Warm the per-column "=" / "<" / ">" operator caches: the UNION dedup
+    // (prepunion eq_op/lt_op) and the top ORDER BY resolution below run
+    // synchronously over the hit-only OPERNAMENSP cache.
+    let col_types: Vec<Oid> = match qry.setOperations.as_ref() {
+        Some(Node::SetOperationStmt(so)) => so.colTypes.clone(),
+        _ => Vec::new(),
+    };
+    warm_setop_operator_caches(shared, &col_types).await;
+
+    // ORDER BY / LIMIT over the set-op result resolve against the output columns
+    // only (names / ordinals -- PG's sort-namespace restriction).
+    transform_setop_sort_limit(pstate, stmt, &mut qry);
     qry
+}
+
+/// Async-warm the OPERNAMENSP / OPEROID / PROCOID entries the synchronous set-op
+/// finalize + planning reads: "=", "<", ">" over each reconciled output column
+/// type (UNION's dedup Sort/Unique operators and the top-level ORDER BY's
+/// ordering operators).
+#[allow(
+    clippy::cast_ptr_alignment,
+    reason = "GETSTRUCT returns the MAXALIGN'd tuple body, aligned for Form_pg_operator"
+)]
+async fn warm_setop_operator_caches(shared: &Arc<SharedState>, col_types: &[Oid]) {
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    use crate::catalog::pg_operator::FormData_pg_operator;
+    use crate::postgres::{NameGetDatum, ObjectIdGetDatum};
+    use crate::utils::syscache::SysCacheIdentifier;
+
+    for opname in ["=", "<", ">"] {
+        let nd = name_data(opname);
+        for &t in col_types {
+            let keys = [
+                NameGetDatum(&nd),
+                ObjectIdGetDatum(t),
+                ObjectIdGetDatum(t),
+                ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
+            ];
+            let Some(tup) =
+                search_sys_cache_populate(shared, SysCacheIdentifier::OPERNAMENSP, &keys).await
+            else {
+                continue;
+            };
+            let (oid, oprcode) = {
+                // SAFETY: a held OPERNAMENSP hit -> a pg_operator row.
+                let form = unsafe {
+                    &*crate::access::htup_details::GETSTRUCT(&*tup).cast::<FormData_pg_operator>()
+                };
+                (form.oid, form.oprcode)
+            };
+            release_sys_cache(tup);
+            if let Some(t) = search_sys_cache_populate(
+                shared,
+                SysCacheIdentifier::OPEROID,
+                &[ObjectIdGetDatum(oid)],
+            )
+            .await
+            {
+                release_sys_cache(t);
+            }
+            if let Some(t) = search_sys_cache_populate(
+                shared,
+                SysCacheIdentifier::PROCOID,
+                &[ObjectIdGetDatum(oprcode)],
+            )
+            .await
+            {
+                release_sys_cache(t);
+            }
+        }
+    }
+}
+
+/// Async-warm the operator/function caches referenced by GROUP BY / ORDER BY
+/// expressions that are not in the target list (`GROUP BY (b+1)/2`): the sync
+/// clause transforms resolve them over the hit-only syscache. Each clause
+/// expression is wrapped in a scratch ResTarget so `warm_expr_caches` walks it.
+async fn warm_clause_expr_caches(
+    shared: &Arc<SharedState>,
+    pstate: &ParseState,
+    stmt: &SelectStmt,
+) {
+    let wrap = |val: Node| {
+        Node::ResTarget(Box::new(crate::nodes::parsenodes::ResTarget {
+            name: None,
+            indirection: Vec::new(),
+            val: Some(val),
+            location: -1,
+        }))
+    };
+    let mut clause_exprs: Vec<Node> = Vec::new();
+    for g in &stmt.groupClause {
+        clause_exprs.push(wrap(g.clone()));
+    }
+    for sb in &stmt.sortClause {
+        if let Node::SortBy(sb) = sb
+            && let Some(n) = sb.node.as_ref()
+        {
+            clause_exprs.push(wrap(n.clone()));
+        }
+    }
+    if !clause_exprs.is_empty() {
+        warm_expr_caches(shared, pstate, &clause_exprs, None).await;
+    }
+}
+
+/// The top-level ORDER BY / LIMIT of a set operation. The sort items may only
+/// reference output columns (by name or ordinal); an item that would extend the
+/// target list is PG's "invalid UNION/INTERSECT/EXCEPT ORDER BY clause" error.
+fn transform_setop_sort_limit(pstate: &mut ParseState, stmt: &SelectStmt, qry: &mut Query) {
+    if !stmt.sortClause.is_empty() {
+        let save_next_resno = pstate.p_next_resno;
+        pstate.p_next_resno = i32::try_from(qry.targetList.len()).unwrap_or(0) + 1;
+        let tlen = qry.targetList.len();
+        qry.sortClause = crate::backend::parser::parse_clause::transform_sort_clause(
+            pstate,
+            stmt.sortClause.clone(),
+            &mut qry.targetList,
+            crate::parser::parse_node::ParseExprKind::OrderBy,
+            false,
+        );
+        if qry.targetList.len() != tlen {
+            // The new entry's expression location, for the error cursor.
+            let loc = qry.targetList.get(tlen).map_or(-1, |n| match n {
+                Node::TargetEntry(te) => te.expr.as_ref().map_or(-1, crate::nodes::nodeFuncs::exprLocation),
+                _ => -1,
+            });
+            crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(crate::utils::errcodes::ERRCODE_INVALID_COLUMN_REFERENCE)
+                    .errmsg("invalid UNION/INTERSECT/EXCEPT ORDER BY clause".to_owned())
+                    .errdetail("Only result column names can be used, not expressions or functions.".to_owned())
+                    .errhint("Add the expression/function to every SELECT, or move the UNION into a FROM clause.".to_owned());
+                if loc >= 0 {
+                    e.errposition(loc + 1);
+                }
+            });
+        }
+        pstate.p_next_resno = save_next_resno;
+    }
+    qry.limitOffset = crate::backend::parser::parse_clause::transform_limit_clause(
+        pstate,
+        stmt.limitOffset.clone(),
+        crate::parser::parse_node::ParseExprKind::Offset,
+        "OFFSET",
+        crate::nodes::nodes::LimitOption::COUNT,
+    );
+    qry.limitCount = crate::backend::parser::parse_clause::transform_limit_clause(
+        pstate,
+        stmt.limitCount.clone(),
+        crate::parser::parse_node::ParseExprKind::Limit,
+        "LIMIT",
+        stmt.limitOption,
+    );
+    qry.limitOption = stmt.limitOption;
 }
 
 /// Shared finalizer for both the sync + async set-op transforms: reconcile the
@@ -714,19 +867,15 @@ fn finish_set_operation_stmt(
 /// leaves are const SELECTs handled by the sync `transformSelectStmt`). Mirrors the
 /// async transform; the FROM-bearing branches go through the async path.
 fn transform_set_operation_stmt_sync(pstate: &mut ParseState, stmt: &SelectStmt) -> Box<Query> {
-    if stmt.withClause.is_some()
-        || !stmt.sortClause.is_empty()
-        || stmt.limitOffset.is_some()
-        || stmt.limitCount.is_some()
-        || !stmt.lockingClause.is_empty()
-    {
-        not_yet_reachable("transformSetOperationStmt: WITH/ORDER BY/LIMIT/locking over a set operation");
+    if stmt.withClause.is_some() || !stmt.lockingClause.is_empty() {
+        not_yet_reachable("transformSetOperationStmt: WITH/locking over a set operation");
     }
     let mut qry = make_query();
     qry.commandType = CmdType::SELECT;
     let mut leaves: Vec<Query> = Vec::new();
     let sostmt = transform_set_op_tree_sync(pstate, stmt, &mut leaves);
     finish_set_operation_stmt(pstate, &mut qry, sostmt, leaves);
+    transform_setop_sort_limit(pstate, stmt, &mut qry);
     qry
 }
 
@@ -1043,6 +1192,14 @@ async fn transform_select_stmt_async(
     // backend has a cold per-task catcache, so async-warm the operator/function
     // caches the statement references before the sync transform runs.
     warm_expr_caches(shared, pstate, &stmt.targetList, where_clause.as_ref()).await;
+    // The HAVING clause transforms synchronously too (its operators/functions are
+    // resolved like WHERE's); warm its caches the same way.
+    if stmt.havingClause.is_some() {
+        warm_expr_caches(shared, pstate, &[], stmt.havingClause.as_ref()).await;
+    }
+    // GROUP BY / ORDER BY expressions not in the target list (`GROUP BY (b+1)/2`)
+    // also resolve operators/functions in the sync clause transforms; warm theirs.
+    warm_clause_expr_caches(shared, pstate, stmt).await;
 
     // M5 (step 26): warm the aggregate-resolution caches (PROCNAMEARGSNSP for the
     // aggregate names, AGGFNOID for the resolved aggregate) and the grouping/sort
@@ -1080,6 +1237,16 @@ async fn transform_select_stmt_async(
         where_clause,
         ParseExprKind::Where,
         "WHERE",
+    );
+
+    // PG: initial processing of the HAVING clause is much like the WHERE clause.
+    // Aggregates inside it resolve to Aggrefs (setting p_has_aggs); the grouping
+    // legality check runs in parseCheckAggregates below.
+    qry.havingQual = crate::backend::parser::parse_clause::transform_where_clause(
+        pstate,
+        stmt.havingClause.clone(),
+        ParseExprKind::Having,
+        "HAVING",
     );
 
     // GROUP BY -> Query.groupClause; ORDER BY -> Query.sortClause; DISTINCT ->
@@ -1267,14 +1434,15 @@ fn transform_select_clauses(
 async fn warm_grouping_caches(shared: &Arc<SharedState>, pstate: &ParseState, stmt: &SelectStmt) {
     use crate::backend::catalog::heap::name_data;
     use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
-    use crate::catalog::genbki::INT4OID;
+    use crate::catalog::genbki::{INT4OID, INT8OID};
     use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
     use crate::catalog::pg_proc::FormData_pg_proc;
     use crate::postgres::{NameGetDatum, ObjectIdGetDatum, PointerGetDatum};
     use crate::utils::syscache::SysCacheIdentifier as Sc;
 
-    // Candidate operand/argument types: the namespace column types + int4.
-    let mut types: Vec<Oid> = vec![INT4OID];
+    // Candidate operand/argument types: the namespace column types + int4 + int8
+    // (count(*)'s result type: HAVING/ORDER BY compare and sort over int8).
+    let mut types: Vec<Oid> = vec![INT4OID, INT8OID];
     for nsitem in &pstate.p_namespace {
         for col in &nsitem.nscolumns {
             if col.vartype != Oid::new(0) && !types.contains(&col.vartype) {
@@ -1292,6 +1460,25 @@ async fn warm_grouping_caches(shared: &Arc<SharedState>, pstate: &ParseState, st
             collect_func_names(rt.val.as_ref(), &mut agg_names);
         }
     }
+    // Aggregates can also appear in HAVING (min(a) in `HAVING min(a) < max(a)`
+    // need not be in the target list); warm those the same way. GROUP BY /
+    // ORDER BY expressions can also call functions absent from the target list
+    // (`GROUP BY lower(c)`); collect those names too.
+    collect_func_names(stmt.havingClause.as_ref(), &mut agg_names);
+    for n in &stmt.groupClause {
+        collect_func_names(Some(n), &mut agg_names);
+    }
+    for n in &stmt.sortClause {
+        if let Node::SortBy(sb) = n {
+            collect_func_names(sb.node.as_ref(), &mut agg_names);
+        }
+    }
+    // TEXT rides along as a single-arg candidate: a bpchar/varchar argument
+    // resolves to the `text` form (parse_func's string-coercion retry).
+    let textoid = crate::catalog::genbki::TEXTOID;
+    if !types.contains(&textoid) {
+        types.push(textoid);
+    }
     // The polymorphic window-function arg vectors (the M12 lag/lead/first_value/...
     // rows are declared over `anyelement`); buildoidvector keys the catcache by the
     // exact arg OID vector, so these must be warmed alongside the concrete forms.
@@ -1305,10 +1492,12 @@ async fn warm_grouping_caches(shared: &Arc<SharedState>, pstate: &ParseState, st
             arglists.push(vec![t]);
         }
         // Window-function polymorphic signatures: f(anyelement),
-        // f(anyelement,int4), f(anyelement,int4,anyelement).
+        // f(anyelement,int4), f(anyelement,int4,anyelement); and f("any") --
+        // count(x) resolves to count("any"), proargtypes [2276].
         arglists.push(vec![anyelement]);
         arglists.push(vec![anyelement, int4]);
         arglists.push(vec![anyelement, int4, anyelement]);
+        arglists.push(vec![Oid::new(2276)]);
         for argtypes in &arglists {
             let argvec = crate::utils::builtins::buildoidvector(argtypes);
             let keys = [
@@ -1350,17 +1539,77 @@ async fn warm_grouping_caches(shared: &Arc<SharedState>, pstate: &ParseState, st
     {
         return;
     }
-    for opname in ["=", "<", ">"] {
+    // Any operator spelled inside a GROUP BY / ORDER BY expression is resolved by
+    // the sync clause transform too (`GROUP BY (b + 1) / 2`); warm those names
+    // over the candidate type cross-product alongside the =/</> comparisons.
+    let mut op_names: Vec<String> = vec!["=".to_owned(), "<".to_owned(), ">".to_owned()];
+    let mut grouping_fn_names: Vec<String> = Vec::new();
+    for n in &stmt.groupClause {
+        collect_expr_names(Some(n), &mut op_names, &mut grouping_fn_names);
+    }
+    for n in &stmt.sortClause {
+        if let Node::SortBy(sb) = n {
+            collect_expr_names(sb.node.as_ref(), &mut op_names, &mut grouping_fn_names);
+        }
+    }
+    warm_operator_name_caches(shared, &op_names, &types, &types).await;
+}
+
+/// Warm OPERNAMENSP -> OPEROID -> PROCOID for each operator name over the
+/// (left x right) candidate type product (make_op reads all three when the sync
+/// transform resolves an operator). Shared by the expression and grouping warm
+/// passes; over-warming unused pairs is harmless (a negative cache entry).
+#[allow(
+    clippy::cast_ptr_alignment,
+    reason = "GETSTRUCT returns the MAXALIGN'd tuple body, aligned for Form_pg_operator"
+)]
+async fn warm_operator_name_caches(
+    shared: &Arc<SharedState>,
+    op_names: &[String],
+    left_types: &[Oid],
+    right_types: &[Oid],
+) {
+    use crate::backend::catalog::heap::name_data;
+    use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
+    use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
+    use crate::postgres::{NameGetDatum, ObjectIdGetDatum};
+    use crate::utils::syscache::SysCacheIdentifier as Sc;
+
+    for opname in op_names {
         let nd = name_data(opname);
-        for &t in &types {
-            let keys = [
-                NameGetDatum(&nd),
-                ObjectIdGetDatum(t),
-                ObjectIdGetDatum(t),
-                ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
-            ];
-            if let Some(tup) = search_sys_cache_populate(shared, Sc::OPERNAMENSP, &keys).await {
+        for &lt in left_types {
+            for &rt in right_types {
+                let keys = [
+                    NameGetDatum(&nd),
+                    ObjectIdGetDatum(lt),
+                    ObjectIdGetDatum(rt),
+                    ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
+                ];
+                let Some(tup) =
+                    search_sys_cache_populate(shared, Sc::OPERNAMENSP, &keys).await
+                else {
+                    continue;
+                };
+                let (oid, oprcode) = {
+                    // SAFETY: a held OPERNAMENSP hit -> a pg_operator row.
+                    let form = unsafe {
+                        &*crate::access::htup_details::GETSTRUCT(&*tup)
+                            .cast::<crate::catalog::pg_operator::FormData_pg_operator>()
+                    };
+                    (form.oid, form.oprcode)
+                };
                 release_sys_cache(tup);
+                if let Some(t) =
+                    search_sys_cache_populate(shared, Sc::OPEROID, &[ObjectIdGetDatum(oid)]).await
+                {
+                    release_sys_cache(t);
+                }
+                if let Some(t) =
+                    search_sys_cache_populate(shared, Sc::PROCOID, &[ObjectIdGetDatum(oprcode)])
+                        .await
+                {
+                    release_sys_cache(t);
+                }
             }
         }
     }
@@ -1476,6 +1725,11 @@ fn collect_func_names(node: Option<&Node>, names: &mut Vec<String>) {
             collect_func_names(a.lexpr.as_ref(), names);
             collect_func_names(a.rexpr.as_ref(), names);
         }
+        Node::BoolExpr(b) => {
+            for arg in &b.args {
+                collect_func_names(Some(arg), names);
+            }
+        }
         Node::TypeCast(tc) => collect_func_names(tc.arg.as_ref(), names),
         _ => {}
     }
@@ -1494,17 +1748,25 @@ async fn warm_expr_caches(
 ) {
     use crate::backend::catalog::heap::name_data;
     use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
-    use crate::catalog::genbki::{BOOLOID, BPCHAROID, INT4OID, NAMEOID, TEXTOID, VARCHAROID};
+    use crate::catalog::genbki::{
+        BOOLOID, BPCHAROID, FLOAT8OID, INT2OID, INT4OID, INT8OID, NAMEOID, NUMERICOID, TEXTOID,
+        VARCHAROID,
+    };
     use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
     use crate::catalog::pg_operator::FormData_pg_operator;
     use crate::postgres::{NameGetDatum, ObjectIdGetDatum};
     use crate::utils::syscache::SysCacheIdentifier;
 
-    // Candidate operand types: the namespace column types + int4 + bool + the
-    // string types incl name (so `text`/`bpchar`/`varchar`/`name` operators warm
-    // for FROM-less string queries whose operands are casts/function results,
-    // not columns).
-    let mut types: Vec<Oid> = vec![INT4OID, BOOLOID, TEXTOID, BPCHAROID, VARCHAROID, NAMEOID];
+    // Candidate operand types: the namespace column types + the integer family
+    // (int2/int4/int8 -- typed literals like `int2 '2'` appear FROM-less, and int8
+    // is the count(*)/sum result type HAVING compares against) + float8/numeric
+    // (typed numeric literals) + bool + the string types incl name (so `text`/
+    // `bpchar`/`varchar`/`name` operators warm for FROM-less string queries whose
+    // operands are casts/function results, not columns).
+    let mut types: Vec<Oid> = vec![
+        INT2OID, INT4OID, INT8OID, FLOAT8OID, NUMERICOID, BOOLOID, TEXTOID, BPCHAROID, VARCHAROID,
+        NAMEOID,
+    ];
     for nsitem in &pstate.p_namespace {
         for col in &nsitem.nscolumns {
             if col.vartype != Oid::new(0) && !types.contains(&col.vartype) {
@@ -1523,53 +1785,12 @@ async fn warm_expr_caches(
     }
     collect_expr_names(where_clause, &mut op_names, &mut fn_names);
 
-    // Warm each operator over the candidate type cross-product.
-    for opname in &op_names {
-        let nd = name_data(opname);
-        for &lt in &types {
-            for &rt in &types {
-                let keys = [
-                    NameGetDatum(&nd),
-                    ObjectIdGetDatum(lt),
-                    ObjectIdGetDatum(rt),
-                    ObjectIdGetDatum(PG_CATALOG_NAMESPACE),
-                ];
-                let Some(tup) =
-                    search_sys_cache_populate(shared, SysCacheIdentifier::OPERNAMENSP, &keys).await
-                else {
-                    continue;
-                };
-                // Also warm OPEROID + the operator function's PROCOID.
-                let (oid, oprcode) = {
-                    // SAFETY: a held OPERNAMENSP hit -> a pg_operator row.
-                    let form = unsafe {
-                        &*crate::access::htup_details::GETSTRUCT(&*tup)
-                            .cast::<FormData_pg_operator>()
-                    };
-                    (form.oid, form.oprcode)
-                };
-                release_sys_cache(tup);
-                if let Some(t) = search_sys_cache_populate(
-                    shared,
-                    SysCacheIdentifier::OPEROID,
-                    &[ObjectIdGetDatum(oid)],
-                )
-                .await
-                {
-                    release_sys_cache(t);
-                }
-                if let Some(t) = search_sys_cache_populate(
-                    shared,
-                    SysCacheIdentifier::PROCOID,
-                    &[ObjectIdGetDatum(oprcode)],
-                )
-                .await
-                {
-                    release_sys_cache(t);
-                }
-            }
-        }
-    }
+    // Warm each operator over the candidate type cross-product. The left
+    // candidates include InvalidOid (oprleft 0): prefix operators (`-x` over a
+    // column/cast) key OPERNAMENSP with a zero left type.
+    let mut left_types: Vec<Oid> = vec![crate::postgres_ext::InvalidOid];
+    left_types.extend_from_slice(&types);
+    warm_operator_name_caches(shared, &op_names, &left_types, &types).await;
 
     // Function-call warming (PROCNAMEARGSNSP): for each function name in the target
     // list / WHERE, warm its call-resolution caches over the candidate arg-type set.
@@ -1763,10 +1984,13 @@ async fn warm_cast_caches(
     use crate::utils::syscache::SysCacheIdentifier as Sc;
 
     // The M4 base types (oid + the canonical pg_catalog name to resolve by name).
+    // int2vector rides along so `pg_input_is_valid(..., 'int2vector')` -- whose
+    // type name is a runtime string argument -- resolves on a cold backend.
     let base_types: &[(Oid, &str)] = &[
         (INT2OID, "int2"), (INT4OID, "int4"), (INT8OID, "int8"),
         (FLOAT4OID, "float4"), (FLOAT8OID, "float8"), (NUMERICOID, "numeric"),
         (DATEOID, "date"), (TIMESTAMPOID, "timestamp"), (TEXTOID, "text"), (BOOLOID, "bool"),
+        (crate::catalog::genbki::INT2VECTOROID, "int2vector"),
     ];
 
     // TYPEOID + TYPENAMENSP for each base type (name and oid resolution).
@@ -2881,12 +3105,11 @@ fn finish_query(pstate: &mut ParseState, qry: &mut Query, qual: Option<Node>) {
 /// (transform_where_clause), GROUP BY / ORDER BY / DISTINCT / LIMIT / OFFSET
 /// (transform_select_clauses) are handled as of M5; HAVING / WINDOW / locking grow.
 fn reject_unsupported_select_clauses(stmt: &SelectStmt) {
-    if stmt.havingClause.is_some() {
-        not_yet_reachable("transformSelectStmt: HAVING clause");
-    }
+    // HAVING is handled inline in transform_select_stmt_async (plan 004 pass E).
     // WINDOW (and inline OVER) are handled by transformWindowDefinitions before
     // finish_query (M12, step 42). The locking clause (FOR UPDATE/SHARE) is handled
     // by transform_locking_clause after finish_query (M8, step 34).
+    let _ = stmt;
 }
 
 /// PG `transformLockingClause`: turn each `FOR UPDATE/SHARE [OF ...]` clause into

@@ -44,6 +44,11 @@ pub fn coerce_type(
         // no conversion needed
         return node;
     }
+    // PG: a target of ANY accepts the node as-is (count("any") etc.); the other
+    // polymorphic targets grow with the full polymorphic coercion.
+    if target_type_id == crate::catalog::genbki::ANYOID {
+        return node;
+    }
 
     // UNKNOWN string constant: apply the target type's input function to produce a
     // constant of the target type (the typed-literal / unknown-literal path). PG

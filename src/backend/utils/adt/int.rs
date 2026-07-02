@@ -32,7 +32,9 @@
               family is an allowed port-inherent lint per rules.md s11)"
 )]
 
-use crate::c::{bytea, PG_INT16_MAX, PG_INT16_MIN, PG_INT32_MAX, PG_INT32_MIN, PG_INT64_MIN};
+use crate::c::{
+    int2vector, PG_INT16_MAX, PG_INT16_MIN, PG_INT32_MAX, PG_INT32_MIN, PG_INT64_MAX, PG_INT64_MIN,
+};
 use crate::common::int::{
     pg_add_s16_overflow, pg_add_s32_overflow, pg_add_s64_overflow, pg_mul_s16_overflow,
     pg_mul_s32_overflow, pg_neg_u16_overflow, pg_neg_u32_overflow, pg_sub_s16_overflow,
@@ -154,9 +156,11 @@ enum ParseErr {
 }
 
 /// Parse `s` per numutils.c into an unsigned magnitude + sign, base-aware.
-/// Returns the magnitude (as u64, wide enough for any of int16/int32) and
+/// Returns the magnitude (as u64, wide enough for any of int16/int32/int64) and
 /// whether it was negated; the caller range-checks against its own type.
-fn parse_int_str(s: &str) -> Result<(u64, bool), ParseErr> {
+/// `int_min` is the target family's minimum, setting PG's per-digit overflow
+/// guard `tmp > -(PG_INTnn_MIN / base)`.
+fn parse_int_str(s: &str, int_min: i64) -> Result<(u64, bool), ParseErr> {
     let bytes = s.as_bytes();
     let mut i = 0;
     let len = bytes.len();
@@ -192,9 +196,8 @@ fn parse_int_str(s: &str) -> Result<(u64, bool), ParseErr> {
     let firstdigit = j;
     let mut tmp: u64 = 0;
     // PG's overflow guard threshold: tmp > -(MIN/base). We use a u64 accumulator
-    // and a u32-magnitude ceiling so any int16/int32 overflow is caught; the
-    // caller does the final, type-exact range check.
-    let ceiling = (-(i64::from(PG_INT32_MIN) / base as i64)) as u64;
+    // so the caller's final, type-exact range check sees the full magnitude.
+    let ceiling = (-(int_min / base as i64)) as u64;
 
     while j < len {
         let c = bytes[j];
@@ -203,8 +206,9 @@ fn parse_int_str(s: &str) -> Result<(u64, bool), ParseErr> {
             (16, b'A'..=b'F') => u64::from(c - b'A') + 10,
             (16 | 10, b'0'..=b'9') | (8, b'0'..=b'7') | (2, b'0'..=b'1') => u64::from(c - b'0'),
             (_, b'_') => {
-                // underscore may not be first, and must be followed by a digit
-                if j == firstdigit {
+                // decimal: underscore may not be first (non-decimal bases allow it
+                // right after the 0x/0o/0b prefix); it must be followed by a digit.
+                if base == 10 && j == firstdigit {
                     return Err(ParseErr::InvalidSyntax);
                 }
                 j += 1;
@@ -254,7 +258,7 @@ fn is_base_digit(c: u8, base: u64) -> bool {
 /// supplied an `ErrorSaveContext`, else hard (ereport ERROR, diverges). C's
 /// out-param + bool folds to `Option`.
 fn strtoint16_safe(s: &str, escontext: Option<&mut ErrorSaveContext>) -> Option<i16> {
-    match parse_int_str(s) {
+    match parse_int_str(s, i64::from(PG_INT32_MIN)) {
         Ok((tmp, neg)) => {
             if neg {
                 match pg_neg_u16_overflow(tmp as u16) {
@@ -274,7 +278,7 @@ fn strtoint16_safe(s: &str, escontext: Option<&mut ErrorSaveContext>) -> Option<
 
 /// PG numutils `pg_strtoint32_safe`: like [`strtoint16_safe`] but for int32.
 fn strtoint32_safe(s: &str, escontext: Option<&mut ErrorSaveContext>) -> Option<i32> {
-    match parse_int_str(s) {
+    match parse_int_str(s, i64::from(PG_INT32_MIN)) {
         Ok((tmp, neg)) => {
             if neg {
                 match pg_neg_u32_overflow(tmp as u32) {
@@ -289,6 +293,30 @@ fn strtoint32_safe(s: &str, escontext: Option<&mut ErrorSaveContext>) -> Option<
         }
         Err(ParseErr::OutOfRange) => out_of_range(s, "integer", escontext),
         Err(ParseErr::InvalidSyntax) => invalid_syntax(s, "integer", escontext),
+    }
+}
+
+/// PG numutils `pg_strtoint64_safe`: like [`strtoint16_safe`] but for int64.
+/// `pub` because the parser's `make_const` uses it for oversize integer literals
+/// (PG parse_node.c calls pg_strtoint64_safe on every T_Float literal first).
+pub fn strtoint64_safe(s: &str, escontext: Option<&mut ErrorSaveContext>) -> Option<i64> {
+    match parse_int_str(s, PG_INT64_MIN) {
+        Ok((tmp, neg)) => {
+            if neg {
+                // pg_neg_u64_overflow: -tmp fits iff tmp <= 2^63 (|INT64_MIN|).
+                if tmp <= (1u64 << 63) {
+                    Some(tmp.wrapping_neg() as i64)
+                } else {
+                    out_of_range(s, "bigint", escontext)
+                }
+            } else if tmp <= PG_INT64_MAX as u64 {
+                Some(tmp as i64)
+            } else {
+                out_of_range(s, "bigint", escontext)
+            }
+        }
+        Err(ParseErr::OutOfRange) => out_of_range(s, "bigint", escontext),
+        Err(ParseErr::InvalidSyntax) => invalid_syntax(s, "bigint", escontext),
     }
 }
 
@@ -365,13 +393,88 @@ pub fn int2send(_fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
 }
 
 /// PG `int2vectorin`: converts "num num ..." to internal int2vector form.
-pub fn int2vectorin(_fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
-    unimplemented!("int2vectorin needs the int2vector/array layout (palloc)")
+/// Routes bad-element errors through the call's soft-error context. Each element
+/// is parsed with C `strtol(s, &endp, 10)` semantics (optional sign + decimal
+/// digits); the error messages carry the REMAINING input from the bad element on,
+/// exactly as C's `%s` of the unadvanced pointer does.
+pub fn int2vectorin(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    use crate::pg_config_manual::FUNC_MAX_ARGS;
+
+    let s = pg_getarg_cstring(fcinfo, 0);
+    let esc = fcinfo_escontext(fcinfo);
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    let mut values: Vec<i16> = Vec::new();
+
+    for _ in 0..FUNC_MAX_ARGS {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        let start = i;
+        let mut j = i;
+        if bytes[j] == b'-' || bytes[j] == b'+' {
+            j += 1;
+        }
+        let digits_start = j;
+        // Saturating accumulate: any i64-saturated value is out of int16 range,
+        // matching strtol's ERANGE.
+        let mut l: i64 = 0;
+        while j < bytes.len() && bytes[j].is_ascii_digit() {
+            l = l.saturating_mul(10).saturating_add(i64::from(bytes[j] - b'0'));
+            j += 1;
+        }
+        if j == digits_start {
+            // strtol consumed nothing (endp == input).
+            let rest = s[start..].to_owned();
+            ereturn!(esc, Datum(0), |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(ERRCODE_INVALID_TEXT_REPRESENTATION)
+                    .errmsg(format!("invalid input syntax for type smallint: \"{rest}\""));
+            });
+        }
+        if bytes[start] == b'-' {
+            l = -l;
+        }
+        if l < i64::from(PG_INT16_MIN) || l > i64::from(PG_INT16_MAX) {
+            let rest = s[start..].to_owned();
+            ereturn!(esc, Datum(0), |e: &mut crate::utils::elog::ErrorData| {
+                e.errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE)
+                    .errmsg(format!("value \"{rest}\" is out of range for type smallint"));
+            });
+        }
+        values.push(l as i16);
+        i = j;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i < bytes.len() {
+        ereturn!(esc, Datum(0), |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(ERRCODE_INVALID_TEXT_REPRESENTATION)
+                .errmsg("int2vector has too many elements".to_owned());
+        });
+    }
+
+    crate::postgres::PointerGetDatum(crate::utils::builtins::buildint2vector(&values).cast::<u8>())
 }
 
 /// PG `int2vectorout`: converts int2vector internal form to "num num ...".
-pub fn int2vectorout(_fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
-    unimplemented!("int2vectorout needs the int2vector/array layout")
+pub fn int2vectorout(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let p = fcinfo.args[0].value.0 as *const int2vector;
+    // SAFETY: `p` is a live int2vector for the duration of the call and `dim1`
+    // elements follow the header at `values`.
+    let s = unsafe {
+        let n = (*p).dim1 as usize;
+        let vptr = std::ptr::addr_of!((*p).values).cast::<i16>();
+        let mut parts: Vec<String> = Vec::with_capacity(n);
+        for k in 0..n {
+            parts.push((*vptr.add(k)).to_string());
+        }
+        parts.join(" ")
+    };
+    pg_return_cstring(&s)
 }
 
 /// PG `int2vectorrecv`: converts external binary format to int2vector.
@@ -479,6 +582,29 @@ cmp_op!(int42lt, pg_getarg_int32, pg_getarg_int16, <);
 cmp_op!(int42le, pg_getarg_int32, pg_getarg_int16, <=);
 cmp_op!(int42gt, pg_getarg_int32, pg_getarg_int16, >);
 cmp_op!(int42ge, pg_getarg_int32, pg_getarg_int16, >=);
+
+// int8.c comparisons: same-width and the int84/int48 cross-width forms
+// (count(*) = 1 is int8 = int4; ORDER BY count(*) sorts by int8lt).
+cmp_op!(int8eq, pg_getarg_int64, pg_getarg_int64, ==);
+cmp_op!(int8ne, pg_getarg_int64, pg_getarg_int64, !=);
+cmp_op!(int8lt, pg_getarg_int64, pg_getarg_int64, <);
+cmp_op!(int8le, pg_getarg_int64, pg_getarg_int64, <=);
+cmp_op!(int8gt, pg_getarg_int64, pg_getarg_int64, >);
+cmp_op!(int8ge, pg_getarg_int64, pg_getarg_int64, >=);
+
+cmp_op!(int84eq, pg_getarg_int64, pg_getarg_int32, ==);
+cmp_op!(int84ne, pg_getarg_int64, pg_getarg_int32, !=);
+cmp_op!(int84lt, pg_getarg_int64, pg_getarg_int32, <);
+cmp_op!(int84le, pg_getarg_int64, pg_getarg_int32, <=);
+cmp_op!(int84gt, pg_getarg_int64, pg_getarg_int32, >);
+cmp_op!(int84ge, pg_getarg_int64, pg_getarg_int32, >=);
+
+cmp_op!(int48eq, pg_getarg_int32, pg_getarg_int64, ==);
+cmp_op!(int48ne, pg_getarg_int32, pg_getarg_int64, !=);
+cmp_op!(int48lt, pg_getarg_int32, pg_getarg_int64, <);
+cmp_op!(int48le, pg_getarg_int32, pg_getarg_int64, <=);
+cmp_op!(int48gt, pg_getarg_int32, pg_getarg_int64, >);
+cmp_op!(int48ge, pg_getarg_int32, pg_getarg_int64, >=);
 
 // ---------------------------------------------------------------------------
 //   in_range functions for int4 and int2, including cross-type comparisons.
@@ -974,24 +1100,46 @@ pub fn int4smaller(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
 //   one, and the transition value flows by value through fmgr.
 // ===========================================================================
 
-/// PG `int8in`: parse a bigint text representation.
+/// PG `int8in`: parse a bigint text representation. Routes errors through the
+/// call's soft-error context (`fcinfo->context`) via `pg_strtoint64_safe`.
 pub fn int8in(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
-    let s = pg_getarg_cstring(fcinfo, 0);
-    let trimmed = s.trim();
-    let v: i64 = trimmed.parse().unwrap_or_else(|_| {
-        ereport!(ERROR, |e: &mut crate::utils::elog::ErrorData| {
-            e.errcode(ERRCODE_INVALID_TEXT_REPRESENTATION)
-                .errmsg(format!("invalid input syntax for type bigint: \"{trimmed}\""));
-        });
-        unreachable!("ereport!(ERROR) raises")
-    });
-    Int64GetDatum(v)
+    let num = pg_getarg_cstring(fcinfo, 0);
+    let esc = fcinfo_escontext(fcinfo);
+    Int64GetDatum(strtoint64_safe(&num, esc).unwrap_or(0))
 }
 
 /// PG `int8out`: bigint -> its decimal text.
 pub fn int8out(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
     let val = pg_getarg_int64(fcinfo, 0);
     pg_return_cstring(&val.to_string())
+}
+
+/// PG `int48`: widen int32 to int64.
+pub fn int48(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    Int64GetDatum(i64::from(pg_getarg_int32(fcinfo, 0)))
+}
+
+/// PG `int84`: narrow int64 to int32, raising on overflow.
+pub fn int84(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let arg = pg_getarg_int64(fcinfo, 0);
+    if arg < i64::from(PG_INT32_MIN) || arg > i64::from(PG_INT32_MAX) {
+        integer_out_of_range();
+    }
+    Int32GetDatum(arg as i32)
+}
+
+/// PG `int28`: widen int16 to int64.
+pub fn int28(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    Int64GetDatum(i64::from(pg_getarg_int16(fcinfo, 0)))
+}
+
+/// PG `int82`: narrow int64 to int16, raising on overflow.
+pub fn int82(fcinfo: &mut FunctionCallInfoBaseData) -> Datum {
+    let arg = pg_getarg_int64(fcinfo, 0);
+    if arg < i64::from(PG_INT16_MIN) || arg > i64::from(PG_INT16_MAX) {
+        smallint_out_of_range();
+    }
+    Int16GetDatum(arg as i16)
 }
 
 /// PG `int8inc`: increment the running count (COUNT(*) transition fn). With int8
@@ -1311,14 +1459,6 @@ pub fn generate_series_int4_support(_fcinfo: &mut FunctionCallInfoBaseData) -> D
     unimplemented!("generate_series_int4_support needs support-node introspection (nodeFuncs)")
 }
 
-// `buildint2vector` / `check_valid_int2vector` are int.c's int2vector
-// constructors; they need the array/varlena layout (palloc, SET_VARSIZE) that is
-// not translated yet. The builtins.h `buildint2vector` declaration stays an
-// `unimplemented!()` stub in utils/builtins.rs until then. `bytea` is imported
-// only for the recv/send signatures' documented return type.
-const _: fn() = || {
-    let _ = core::mem::size_of::<bytea>();
-};
 
 #[cfg(test)]
 mod tests {
@@ -1402,6 +1542,82 @@ mod tests {
             });
             assert!(r.is_err(), "{bad} should be invalid syntax");
         }
+    }
+
+    #[test]
+    fn underscore_after_nondecimal_prefix() {
+        // Non-decimal bases allow an underscore right after the 0x/0o/0b prefix
+        // (numutils.c only forbids a leading underscore in decimal).
+        for (s, want) in [("0b_10_0101", 37i32), ("0xE_FF", 0xEFF), ("0o2_73", 0o273)] {
+            let mut f = fc(&[cstr_datum(s)]);
+            assert_eq!(DatumGetInt32(int4in(&mut f)), want, "parse {s}");
+        }
+        for bad in ["_100", "100_", "10__000", "0b_", "0x_"] {
+            let s = bad.to_owned();
+            let r = catch_unwind(move || {
+                let mut f = fc(&[cstr_datum(&s)]);
+                int4in(&mut f)
+            });
+            assert!(r.is_err(), "{bad} should be invalid syntax");
+        }
+    }
+
+    #[test]
+    fn strtoint64_and_int8in() {
+        assert_eq!(strtoint64_safe("9223372036854775807", None), Some(i64::MAX));
+        assert_eq!(strtoint64_safe("-9223372036854775808", None), Some(i64::MIN));
+        assert_eq!(strtoint64_safe("0x7FFF_FFFF_FFFF_FFFF", None), Some(i64::MAX));
+        assert!(catch_unwind(|| strtoint64_safe("9223372036854775808", None)).is_err());
+        assert!(catch_unwind(|| strtoint64_safe("12abc", None)).is_err());
+        let mut f = fc(&[cstr_datum("4567890123456789")]);
+        assert_eq!(DatumGetInt64(int8in(&mut f)), 4_567_890_123_456_789);
+    }
+
+    #[test]
+    fn int8_int4_int2_conversions() {
+        let mut f = fc(&[Int32GetDatum(-7)]);
+        assert_eq!(DatumGetInt64(int48(&mut f)), -7);
+        let mut f = fc(&[Int64GetDatum(123)]);
+        assert_eq!(DatumGetInt32(int84(&mut f)), 123);
+        assert!(catch_unwind(|| {
+            let mut f = fc(&[Int64GetDatum(i64::from(PG_INT32_MAX) + 1)]);
+            int84(&mut f)
+        })
+        .is_err());
+        let mut f = fc(&[Int16GetDatum(-3)]);
+        assert_eq!(DatumGetInt64(int28(&mut f)), -3);
+        assert!(catch_unwind(|| {
+            let mut f = fc(&[Int64GetDatum(40000)]);
+            int82(&mut f)
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn int2vector_in_out() {
+        let mut f = fc(&[cstr_datum(" 1 3  5 ")]);
+        let d = int2vectorin(&mut f);
+        let mut out_fc = fc(&[d]);
+        assert_eq!(out_to_string(int2vectorout(&mut out_fc)), "1 3 5");
+        // Bad element -> invalid syntax carrying the remaining text.
+        let payload = catch_unwind(|| {
+            let mut f = fc(&[cstr_datum("1 asdf")]);
+            int2vectorin(&mut f)
+        })
+        .expect_err("must raise");
+        let edata = payload
+            .downcast_ref::<crate::utils::elog::ErrorData>()
+            .expect("payload is ErrorData");
+        assert_eq!(
+            edata.message.as_deref(),
+            Some(r#"invalid input syntax for type smallint: "asdf""#)
+        );
+        // Out of int16 range.
+        assert!(catch_unwind(|| {
+            let mut f = fc(&[cstr_datum("50000")]);
+            int2vectorin(&mut f)
+        })
+        .is_err());
     }
 
     #[test]

@@ -416,13 +416,15 @@ macro_rules! basetype {
 /// preferred members of category N, so coercion picks them as common types).
 fn m2_base_types() -> Vec<BootBaseType> {
     use crate::catalog::genbki::{
-        BOOLOID, BPCHAROID, BYTEAOID, CHAROID, DATEOID, FLOAT4OID, FLOAT8OID, INT2OID, INT4OID,
-        INT8OID, NAMEOID, NUMERICOID, OIDOID, TEXTOID, TIMESTAMPOID, VARCHAROID,
+        BOOLOID, BPCHAROID, BYTEAOID, CHAROID, DATEOID, FLOAT4OID, FLOAT8OID, INT2OID,
+        INT2VECTOROID, INT4OID, INT8OID, NAMEOID, NUMERICOID, OIDOID, TEXTOID, TIMESTAMPOID,
+        VARCHAROID,
     };
     use crate::catalog::pg_type::{
-        TYPALIGN_CHAR, TYPALIGN_DOUBLE, TYPALIGN_INT, TYPALIGN_SHORT, TYPCATEGORY_BOOLEAN,
-        TYPCATEGORY_DATETIME, TYPCATEGORY_INTERNAL, TYPCATEGORY_NUMERIC, TYPCATEGORY_STRING,
-        TYPCATEGORY_USER, TYPSTORAGE_EXTENDED, TYPSTORAGE_MAIN, TYPSTORAGE_PLAIN,
+        TYPALIGN_CHAR, TYPALIGN_DOUBLE, TYPALIGN_INT, TYPALIGN_SHORT, TYPCATEGORY_ARRAY,
+        TYPCATEGORY_BOOLEAN, TYPCATEGORY_DATETIME, TYPCATEGORY_INTERNAL, TYPCATEGORY_NUMERIC,
+        TYPCATEGORY_STRING, TYPCATEGORY_USER, TYPSTORAGE_EXTENDED, TYPSTORAGE_MAIN,
+        TYPSTORAGE_PLAIN,
     };
     use crate::utils::fmgroids as f;
     // FLOAT8PASSBYVAL is true on 64-bit (Datum is 8 bytes); we target 64-bit only.
@@ -446,6 +448,9 @@ fn m2_base_types() -> Vec<BootBaseType> {
         basetype!(BPCHAROID, "bpchar", len => -1, byval => false, TYPALIGN_INT, TYPSTORAGE_EXTENDED, TYPCATEGORY_STRING, preferred => false, f::F_BPCHARIN, f::F_BPCHAROUT),
         basetype!(VARCHAROID, "varchar", len => -1, byval => false, TYPALIGN_INT, TYPSTORAGE_EXTENDED, TYPCATEGORY_STRING, preferred => false, f::F_VARCHARIN, f::F_VARCHAROUT),
         basetype!(BYTEAOID, "bytea", len => -1, byval => false, TYPALIGN_INT, TYPSTORAGE_EXTENDED, TYPCATEGORY_USER, preferred => false, f::F_BYTEAIN, f::F_BYTEAOUT),
+        // unblocker pass D: int2vector (physically an array; category A, plain
+        // storage per pg_type.dat) so `pg_input_is_valid(..., 'int2vector')` works.
+        basetype!(INT2VECTOROID, "int2vector", len => -1, byval => false, TYPALIGN_INT, TYPSTORAGE_PLAIN, TYPCATEGORY_ARRAY, preferred => false, f::F_INT2VECTORIN, f::F_INT2VECTOROUT),
     ]
 }
 

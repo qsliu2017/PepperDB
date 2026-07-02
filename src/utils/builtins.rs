@@ -52,8 +52,42 @@ pub fn hex_decode_safe(_src: &[u8], _dst: &mut [u8]) -> u64 {
 }
 
 // int.c
-pub fn buildint2vector(_int2s: &[i16]) -> *mut int2vector {
-    unimplemented!()
+/// PG `buildint2vector`: build a 1-D `int2vector` from `int2s`. The int2 sibling
+/// of [`buildoidvector`] (same array-header layout, elemtype INT2OID). The buffer
+/// is leaked (no MemoryContext yet); callers carry it in a byref Datum.
+/// TODO(memory-context): reclaim via the per-call context when palloc lands.
+#[must_use]
+#[allow(
+    clippy::cast_ptr_alignment,
+    reason = "the buffer is a fresh u64-backed Box (8-byte aligned), which satisfies \
+              int2vector's 4-byte field alignment; the cast is sound"
+)]
+pub fn buildint2vector(int2s: &[i16]) -> *mut int2vector {
+    use crate::varatt::SET_VARSIZE;
+    let n = int2s.len();
+    // Int2VectorSize(n): the fixed header up to `values`, plus n int16 elements.
+    let header = core::mem::offset_of!(int2vector, values);
+    let total = header + core::mem::size_of_val(int2s);
+    let words = total.div_ceil(core::mem::size_of::<u64>());
+    let mut buf = vec![0u64; words].into_boxed_slice();
+    let base = buf.as_mut_ptr().cast::<u8>();
+    let ptr = base.cast::<int2vector>();
+    // SAFETY: `base`/`ptr` head a freshly-allocated, 8-byte-aligned buffer of at
+    // least `total` bytes laid out exactly as `int2vector` (repr(C)); the field
+    // writes and the element copy stay in bounds.
+    unsafe {
+        SET_VARSIZE(base, total as u32);
+        (*ptr).ndim = 1;
+        (*ptr).dataoffset = 0; // never any nulls
+        (*ptr).elemtype = crate::catalog::genbki::INT2OID;
+        (*ptr).dim1 = i32::try_from(n).unwrap_or(0);
+        (*ptr).lbound1 = 0;
+        if n > 0 {
+            let vptr = std::ptr::addr_of_mut!((*ptr).values).cast::<i16>();
+            core::ptr::copy_nonoverlapping(int2s.as_ptr(), vptr, n);
+        }
+    }
+    Box::leak(buf).as_mut_ptr().cast::<int2vector>()
 }
 
 // name.c -- bodies in backend/utils/adt/name.rs (type-centric: &mut NameData).

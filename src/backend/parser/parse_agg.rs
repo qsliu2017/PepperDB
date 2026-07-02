@@ -153,9 +153,6 @@ pub fn parseCheckAggregates(pstate: &mut ParseState, qry: &mut Query) {
     if !qry.groupingSets.is_empty() {
         not_yet_reachable("parseCheckAggregates: grouping sets");
     }
-    if qry.havingQual.is_some() {
-        not_yet_reachable("parseCheckAggregates: HAVING qual");
-    }
 
     // The set of group-by target expressions (by sortgroupref -> TargetEntry expr).
     let grouped: Vec<Node> = qry
@@ -167,58 +164,136 @@ pub fn parseCheckAggregates(pstate: &mut ParseState, qry: &mut Query) {
         })
         .collect();
 
-    // Every non-aggregate targetlist expression must be derivable from the grouped
-    // expressions (M5: it must BE one of them, or be a constant/aggregate). The full
-    // check_ungrouped_columns recursion (rejecting ungrouped Vars deep in an expr)
-    // grows with richer grouped expressions; the milestone tlist is flat.
+    // Every non-aggregate targetlist / HAVING expression must be built only from
+    // grouped expressions, aggregates, and constants (PG check_ungrouped_columns:
+    // a subexpression equal to a grouping expression is legal as a whole; a Var
+    // not under an aggregate and not grouped is the classic error).
     for te in &qry.targetList {
         let Node::TargetEntry(te) = te else { continue };
         let Some(expr) = te.expr.as_ref() else { continue };
-        check_grouped_expr(expr, &grouped);
+        check_ungrouped_columns(expr, &grouped, qry);
+    }
+    if let Some(having) = qry.havingQual.clone() {
+        check_ungrouped_columns(&having, &grouped, qry);
     }
 }
 
-/// Verify a targetlist expression is grouping-legal: an aggregate, a constant, or a
-/// member of the grouped expression set. A bare `Var` not in a group clause is the
-/// classic "column must appear in GROUP BY or be used in an aggregate" error.
-fn check_grouped_expr(expr: &Node, grouped: &[Node]) {
+/// PG `check_ungrouped_columns_walker` (regular-Var subset): an expression equal to
+/// a grouped expression is legal (don't descend); an Aggref aggregates its inputs
+/// (legal); a bare current-level `Var` is the ungrouped-column error; otherwise
+/// recurse into the reachable containers.
+#[allow(
+    clippy::match_same_arms,
+    reason = "1:1 with PG check_ungrouped_columns_walker: the aggregate arm is a \
+              deliberate stop-descent, distinct in intent from the leaf default"
+)]
+fn check_ungrouped_columns(expr: &Node, grouped: &[Node], qry: &Query) {
+    if grouped.iter().any(|g| g == expr) {
+        return;
+    }
     match expr {
-        // Aggregates consume their (ungrouped) inputs legally; constants are always
-        // legal.
-        Node::Aggref(_) | Node::GroupingFunc(_) | Node::Const(_) => {}
-        // Otherwise the expression itself must be a grouped expression.
-        other => {
-            if grouped.iter().any(|g| g == other) {
-                return;
-            }
-            // A non-grouped Var (or expression over one) without an enclosing
-            // aggregate is the ungrouped-column error.
-            if contains_var(other) {
-                crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
-                    e.errcode(crate::utils::errcodes::ERRCODE_GROUPING_ERROR).errmsg(
-                        "column must appear in the GROUP BY clause or be used in an aggregate function"
-                            .to_owned(),
-                    );
-                });
-                unreachable!("ereport(ERROR) diverges");
+        // Aggregates consume their (ungrouped) inputs legally at this level.
+        Node::Aggref(_) | Node::GroupingFunc(_) => {}
+        Node::Var(v) if v.varlevelsup == 0 => ungrouped_var_error(v, qry),
+        Node::OpExpr(op) | Node::NullIfExpr(op) | Node::DistinctExpr(op) => {
+            for a in &op.args {
+                check_ungrouped_columns(a, grouped, qry);
             }
         }
+        Node::FuncExpr(f) => {
+            for a in &f.args {
+                check_ungrouped_columns(a, grouped, qry);
+            }
+        }
+        Node::BoolExpr(b) => {
+            for a in &b.args {
+                check_ungrouped_columns(a, grouped, qry);
+            }
+        }
+        Node::RelabelType(r) => {
+            if let Some(a) = r.arg.as_ref() {
+                check_ungrouped_columns(a, grouped, qry);
+            }
+        }
+        Node::CoerceViaIO(c) => {
+            if let Some(a) = c.arg.as_ref() {
+                check_ungrouped_columns(a, grouped, qry);
+            }
+        }
+        Node::BooleanTest(b) => {
+            if let Some(a) = b.arg.as_ref() {
+                check_ungrouped_columns(a, grouped, qry);
+            }
+        }
+        Node::CoalesceExpr(c) => {
+            for a in &c.args {
+                check_ungrouped_columns(a, grouped, qry);
+            }
+        }
+        Node::MinMaxExpr(m) => {
+            for a in &m.args {
+                check_ungrouped_columns(a, grouped, qry);
+            }
+        }
+        Node::CaseExpr(c) => {
+            if let Some(a) = c.arg.as_ref() {
+                check_ungrouped_columns(a, grouped, qry);
+            }
+            for w in &c.args {
+                check_ungrouped_columns(w, grouped, qry);
+            }
+            if let Some(d) = c.defresult.as_ref() {
+                check_ungrouped_columns(d, grouped, qry);
+            }
+        }
+        Node::CaseWhen(w) => {
+            if let Some(e) = w.expr.as_ref() {
+                check_ungrouped_columns(e, grouped, qry);
+            }
+            if let Some(r) = w.result.as_ref() {
+                check_ungrouped_columns(r, grouped, qry);
+            }
+        }
+        // Consts / Params / already-planned SubPlans carry no ungrouped Var.
+        _ => {}
     }
 }
 
-/// Whether an expression tree contains a `Var` (an ungrouped column reference). A
-/// shallow walk over the M5-reachable expression kinds.
-fn contains_var(expr: &Node) -> bool {
-    match expr {
-        Node::Var(_) => true,
-        Node::OpExpr(op) | Node::NullIfExpr(op) => op.args.iter().any(contains_var),
-        Node::FuncExpr(f) => f.args.iter().any(contains_var),
-        Node::BoolExpr(b) => b.args.iter().any(contains_var),
-        Node::RelabelType(r) => r.arg.as_ref().is_some_and(contains_var),
-        Node::CoerceViaIO(c) => c.arg.as_ref().is_some_and(contains_var),
-        // Aggref inputs are legal; everything else carries no ungrouped Var.
-        _ => false,
-    }
+/// The `column "rel.col" must appear in the GROUP BY clause or be used in an
+/// aggregate function` error, with the Var's parse position (PG
+/// check_ungrouped_columns_walker's regular-Var ereport).
+#[cold]
+fn ungrouped_var_error(v: &crate::nodes::primnodes::Var, qry: &Query) -> ! {
+    // rte->eref->aliasname + get_rte_attribute_name(rte, varattno).
+    let (relname, attname) = rte_col_names(qry, v.varno, v.varattno);
+    crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+        e.errcode(crate::utils::errcodes::ERRCODE_GROUPING_ERROR).errmsg(format!(
+            "column \"{relname}.{attname}\" must appear in the GROUP BY clause or be used in an aggregate function"
+        ));
+        if v.location >= 0 {
+            e.errposition(v.location + 1); // parser_errposition: 1-based
+        }
+    });
+    unreachable!("ereport(ERROR) diverges");
+}
+
+/// The RTE alias name + column name for a (varno, varattno) pair.
+fn rte_col_names(qry: &Query, varno: i32, varattno: i16) -> (String, String) {
+    let rte = qry.rtable.get((varno - 1) as usize);
+    let Some(Node::RangeTblEntry(rte)) = rte else {
+        return ("?".to_owned(), "?".to_owned());
+    };
+    let relname = rte
+        .eref
+        .as_ref()
+        .and_then(|a| a.aliasname.clone())
+        .unwrap_or_else(|| "?".to_owned());
+    let attname = rte
+        .eref
+        .as_ref()
+        .and_then(|a| a.colnames.get((varattno - 1) as usize).cloned())
+        .map_or_else(|| "?".to_owned(), |s| s.sval);
+    (relname, attname)
 }
 
 /// PG `get_sortgroupclause_tle`'s expr accessor: the targetlist entry expression

@@ -451,6 +451,24 @@ pub fn create_plan(root: &mut PlannerInfo, best_path: &Path) -> crate::nodes::no
     // CP_EXACT_TLIST: demand the exact result tlist.
     let mut plan = create_plan_recurse(root, best_path);
 
+    // PG `apply_scanjoin_target_to_paths`: when the query groups/aggregates, the
+    // topmost scan/join must project the group/agg-input tlist. A single base rel
+    // already had its reltarget built from `scan_input_tlist`; a JOIN's target is
+    // assembled from the joined Vars only, so a grouping EXPRESSION (`GROUP BY
+    // x.b/2`) must be projected here by replacing the top join tlist (the join
+    // projects via the expression engine; setrefs rewrites the Vars inside).
+    if query_computes_scan_input_tlist(root)
+        && !root.scan_input_tlist.is_empty()
+        && matches!(
+            plan,
+            crate::nodes::nodes::Node::NestLoop(_)
+                | crate::nodes::nodes::Node::MergeJoin(_)
+                | crate::nodes::nodes::Node::HashJoin(_)
+        )
+    {
+        top_plan_tlist_mut(&mut plan).clone_from(&root.scan_input_tlist);
+    }
+
     // Stamp the original column names / decoration onto the top-level tlist.
     apply_top_tlist_labeling(root, &mut plan);
 

@@ -42,6 +42,7 @@ use crate::backend::parser::parser::{
     make_ot_column_def, make_view_stmt, make_rule_stmt, make_string_value_node,
     make_create_trig_stmt, make_fk_constraint, make_column_fk_constraint, set_constraint_name,
     make_copy_stmt, make_vacuum_stmt, make_vacuum_relation, make_cluster_stmt, verbose_opts,
+    make_column_constraint,
     make_null_const, TrigTiming, TrigEvent,
     make_set_op, set_select_with_clause, make_with_clause, make_common_table_expr,
     DropBehaviorTok, ObjType,
@@ -52,6 +53,7 @@ use crate::backend::parser::parser::{
     make_expr_sublink, make_exists_sublink, make_in_sublink, make_any_all_sublink,
     make_in_list,
     make_create_or_ctas, make_into_clause, set_rangevar_persistence, make_simple_select,
+    make_alias_cols, make_range_subselect, make_table_select,
 };
 use crate::nodes::parsenodes::{CursorOptions, FetchDirection, FETCH_ALL};
 use crate::nodes::parsenodes::TransactionStmtKind as TxKind;
@@ -621,6 +623,8 @@ extern {
         ">="      => Token::GreaterEquals,
         "<>"      => Token::NotEquals,
         "||"      => Token::Concat,
+        "<<"      => Token::Shl,
+        ">>"      => Token::Shr,
     }
 }
 
@@ -723,11 +727,19 @@ SetClause: Node = {
 
 // gram.y `DeleteStmt`: opt_with_clause DELETE_P FROM relation_expr_opt_alias
 // using_clause where_or_current_clause returning_clause. M8 reaches
-// `DELETE FROM t [USING ...] [WHERE ...] [RETURNING ...]`.
+// `DELETE FROM t [[AS] alias] [USING ...] [WHERE ...] [RETURNING ...]`.
 DeleteStmt: Node = {
-    "DELETE" "FROM" <rel:QualifiedName> <using:UsingClause> <whr:WhereClause>
+    "DELETE" "FROM" <rel:RelationExprOptAlias> <using:UsingClause> <whr:WhereClause>
         <ret:ReturningClause> =>
         make_delete_stmt(rel, using, whr, ret),
+};
+
+// gram.y `relation_expr_opt_alias: relation_expr [[AS] ColId]` (the target-table
+// alias of UPDATE/DELETE/MERGE; the `*`/ONLY inheritance markers grow later).
+RelationExprOptAlias: crate::nodes::primnodes::RangeVar = {
+    <r:QualifiedName> => r,
+    <r:QualifiedName> <a:ColId> => apply_rangevar_alias(r, Some(make_alias(a))),
+    <r:QualifiedName> "AS" <a:ColId> => apply_rangevar_alias(r, Some(make_alias(a))),
 };
 
 // gram.y `using_clause: USING from_list | /*EMPTY*/`.
@@ -922,17 +934,34 @@ TableElement: Node = {
     ColumnDef,
 };
 
-// gram.y `columnDef`: ColId Typename ColQualList. M2 builds the plain
-// `name type` ColumnDef; M11 (step 41) adds the column-level REFERENCES
-// constraint. Other column constraints (NOT NULL / DEFAULT / ...) grow with
-// the full ColQualList machinery.
+// gram.y `columnDef`: ColId Typename ColQualList. The reachable column
+// constraints are REFERENCES (M11), PRIMARY KEY / UNIQUE / [NOT] NULL
+// (plan 004 pass E); DEFAULT / CHECK / GENERATED grow later.
 ColumnDef: Node = {
-    <name:ColId> <typ:Typename> => make_column_def_elt(name, typ),
-    <name:ColId> <typ:Typename> <c:ColRefConstraint> => {
+    <name:ColId> <typ:Typename> <quals:ColQualList> => {
         let mut col = make_column_def_elt(name, typ);
-        if let Node::ColumnDef(cd) = &mut col { cd.constraints.push(c); }
+        if let Node::ColumnDef(cd) = &mut col { cd.constraints = quals; }
         col
     },
+};
+
+// gram.y `ColQualList: ColQualList ColConstraint | /*EMPTY*/`.
+ColQualList: Vec<Node> = {
+    => Vec::new(),
+    <mut list:ColQualList> <c:ColConstraintElem> => { list.push(c); list },
+};
+
+// gram.y `ColConstraintElem` (the reachable subset).
+ColConstraintElem: Node = {
+    ColRefConstraint,
+    "PRIMARY" "KEY" <loc:@L> =>
+        make_column_constraint(crate::nodes::parsenodes::ConstrType::PRIMARY, loc),
+    "UNIQUE" <loc:@L> =>
+        make_column_constraint(crate::nodes::parsenodes::ConstrType::UNIQUE, loc),
+    "NOT" "NULL" <loc:@L> =>
+        make_column_constraint(crate::nodes::parsenodes::ConstrType::NOTNULL, loc),
+    "NULL" <loc:@L> =>
+        make_column_constraint(crate::nodes::parsenodes::ConstrType::NULL, loc),
 };
 
 // gram.y `ColConstraintElem: REFERENCES qualified_name opt_column_list
@@ -3317,20 +3346,23 @@ SimpleSelect: Node = {
     // No INTO: the plain SELECT (the common case).
     "SELECT" <distinct:OptDistinctClause> <targets:OptTargetList>
         <frm:FromClause>
-        <whr:WhereClause> <grp:GroupClause> <win:WindowClause> =>
-        make_simple_select(distinct, None, targets, frm, whr, grp, win),
+        <whr:WhereClause> <grp:GroupClause> <hav:HavingClause> <win:WindowClause> =>
+        make_simple_select(distinct, None, targets, frm, whr, grp, hav, win),
     // SELECT ... INTO target: `intoClause` set (transformOptionalSelectInto rewrites
     // it into a CREATE TABLE AS). Separate arm (not a nullable mid-rule `into_clause`)
     // to keep the LALR(1) table small.
     "SELECT" <distinct:OptDistinctClause> <targets:OptTargetList>
         "INTO" <rel:OptTempTableName>
         <frm:FromClause>
-        <whr:WhereClause> <grp:GroupClause> <win:WindowClause> =>
-        make_simple_select(distinct, Some(make_into_clause(rel, Vec::new())), targets, frm, whr, grp, win),
+        <whr:WhereClause> <grp:GroupClause> <hav:HavingClause> <win:WindowClause> =>
+        make_simple_select(distinct, Some(make_into_clause(rel, Vec::new())), targets, frm, whr, grp, hav, win),
     // gram.y `simple_select: values_clause`. A bare `VALUES (...), ...` used as a
     // standalone SELECT (transformValuesClause). `make_values_select` builds the
     // SelectStmt with `valuesLists` set and every other clause defaulted.
     "VALUES" <rows:ValuesLists> => make_values_select(rows),
+    // gram.y `simple_select: TABLE relation_expr` -- `TABLE t` is shorthand for
+    // `SELECT * FROM t` (reached via `(TABLE t)` in FROM).
+    "TABLE" <rel:QualifiedName> => make_table_select(rel),
 };
 
 // gram.y `OptTempTableName`: the SELECT INTO target's optional persistence prefix +
@@ -3418,6 +3450,12 @@ GroupClause: Vec<Node> = {
 GroupByList: Vec<Node> = {
     <e:AExpr> => vec![e],
     <mut list:GroupByList> "," <e:AExpr> => { list.push(e); list },
+};
+
+// gram.y `having_clause: HAVING a_expr | /*EMPTY*/`.
+HavingClause: Option<Node> = {
+    "HAVING" <e:AExpr> => Some(e),
+    => None,
 };
 
 // ===========================================================================
@@ -3637,6 +3675,9 @@ TableRef: Node = {
 // or a function call in FROM (gram.y `func_table`).
 TableAtom: Node = {
     <r:QualifiedName> <a:OptAliasClause> => make_range_var_table_ref(apply_rangevar_alias(r, a)),
+    // gram.y `table_ref: select_with_parens opt_alias_clause` -- a sub-SELECT
+    // (incl. `(VALUES ...)` and `(TABLE t)`) in FROM becomes a RangeSubselect.
+    <s:SelectWithParens> <a:OptAliasClause> => make_range_subselect(s, a),
     "(" <j:JoinedTable> ")" <a:OptAliasClause> => apply_join_alias(j, a),
     // gram.y `table_ref: func_table func_alias_clause`. M8 (step 08) reaches the
     // simple `func_expr_windowless` form (a single function call, optional alias).
@@ -3691,10 +3732,12 @@ OptAliasClause: Option<crate::nodes::primnodes::Alias> = {
     => None,
 };
 
-// gram.y `alias_clause: AS ColId | ColId` (the column-alias-list form grows later).
+// gram.y `alias_clause: [AS] ColId ['(' name_list ')']`.
 AliasClause: crate::nodes::primnodes::Alias = {
     "AS" <n:ColId> => make_alias(n),
     <n:ColId> => make_alias(n),
+    "AS" <n:ColId> "(" <cols:NameList> ")" => make_alias_cols(n, cols),
+    <n:ColId> "(" <cols:NameList> ")" => make_alias_cols(n, cols),
 };
 
 // gram.y `name_list: name | name_list ',' name` (USING column list).
@@ -3810,6 +3853,8 @@ CompareExpr: Node = {
 // currently lexed subset is `||` (string concatenation).
 QualOpExpr: Node = {
     <l:QualOpExpr> "||" <r:AddExpr> => make_a_expr("||", l, r),
+    <l:QualOpExpr> "<<" <r:AddExpr> => make_a_expr("<<", l, r),
+    <l:QualOpExpr> ">>" <r:AddExpr> => make_a_expr(">>", l, r),
     AddExpr,
 };
 
@@ -3978,11 +4023,11 @@ FuncApplication: Node = {
 // `table.col`; the general indirection (subscripts, `.*` mid-chain) grows with
 // the A_Indirection machinery.
 ColumnRef: Node = {
-    <n:ColId> => make_column_ref(vec![n]),
-    <t:ColId> "." <n:ColId> => make_column_ref(vec![t, n]),
+    <l:@L> <n:ColId> => make_column_ref(vec![n], l),
+    <l:@L> <t:ColId> "." <n:ColId> => make_column_ref(vec![t, n], l),
     // gram.y `columnref: ColId indirection` where indirection ends in `.*` -- the
     // whole-row reference `table.*` (a ColumnRef whose last field is an A_Star).
-    <t:ColId> "." "*" => make_column_ref_star(vec![t]),
+    <l:@L> <t:ColId> "." "*" => make_column_ref_star(vec![t], l),
 };
 
 // gram.y `AexprConst`. Iconst/FCONST/Sconst are the plain forms; M4 (step 23) adds

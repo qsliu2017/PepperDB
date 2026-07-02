@@ -96,7 +96,8 @@ pub fn func_get_detail(funcname: &[Node], argtypes: &[Oid]) -> (FuncDetailCode, 
     }
 
     // M12 (step 42): polymorphic fallback for the window functions whose arguments
-    // are `anyelement` / `anycompatible` (lag/lead/first_value/last_value/nth_value).
+    // are `anyelement` / `anycompatible` (lag/lead/first_value/last_value/nth_value),
+    // plus `any` (count(x) is count("any"), pg_proc proargtypes [2276]).
     // Substitute the polymorphic arg type for each concrete arg and retry; if the row
     // resolves, the declared `anyelement` return type is the actual first-arg type.
     if !argtypes.is_empty() {
@@ -104,7 +105,7 @@ pub fn func_get_detail(funcname: &[Node], argtypes: &[Oid]) -> (FuncDetailCode, 
         // for the 3-arg lag/lead-with-default form, at position 2); the offset at
         // position 1 stays concrete. Try those substitution masks.
         let masks: &[&[usize]] = &[&[0], &[0, 2]];
-        for poly in [ANYELEMENTOID, ANYCOMPATIBLEOID] {
+        for poly in [ANYELEMENTOID, ANYCOMPATIBLEOID, ANYOID] {
             for mask in masks {
                 let poly_args: Vec<Oid> = argtypes
                     .iter()
@@ -139,6 +140,23 @@ pub fn func_get_detail(funcname: &[Node], argtypes: &[Oid]) -> (FuncDetailCode, 
         }
     }
 
+    // String-coercion fallback: a bpchar/varchar argument with no function of its
+    // own resolves to the `text` form (PG func_select_candidate coerces string-
+    // category args through the implicit bpchar/varchar->text casts, so
+    // lower(char_col) is lower(text)). Mirrors parse_oper's binary-text retry;
+    // the returned `argtypes` (TEXT in the substituted slots) drive the caller's
+    // per-argument coercion.
+    if argtypes.iter().any(|&t| t == BPCHAROID || t == VARCHAROID) {
+        let coerced: Vec<Oid> = argtypes
+            .iter()
+            .map(|&t| if t == BPCHAROID || t == VARCHAROID { TEXTOID } else { t })
+            .collect();
+        if let Some(detail) = lookup_proc_by_argvec(name, &coerced) {
+            let code = code_for_prokind(detail.prokind);
+            return (code, Some(detail));
+        }
+    }
+
     (FuncDetailCode::NotFound, None)
 }
 
@@ -146,6 +164,8 @@ pub fn func_get_detail(funcname: &[Node], argtypes: &[Oid]) -> (FuncDetailCode, 
 /// type it coerces to in the func_get_detail fallback.
 const UNKNOWNOID: Oid = Oid::new(705);
 const TEXTOID: Oid = Oid::new(25);
+const BPCHAROID: Oid = crate::catalog::genbki::BPCHAROID;
+const VARCHAROID: Oid = crate::catalog::genbki::VARCHAROID;
 
 /// Look up a pg_proc row by (name, exact argtype vector) via PROCNAMEARGSNSP.
 fn lookup_proc_by_argvec(name: &str, argtypes: &[Oid]) -> Option<FuncDetail> {
@@ -183,9 +203,11 @@ fn code_for_prokind(prokind: i8) -> FuncDetailCode {
 }
 
 /// The polymorphic pseudo-type OIDs the window-function fallback substitutes.
+/// `ANYOID` ("any", 2276) is count(x)'s declared argument type.
 const ANYELEMENTOID: Oid = Oid::new(2283);
 const ANYCOMPATIBLEOID: Oid = Oid::new(5077);
 const ANYARRAYOID: Oid = Oid::new(2277);
+const ANYOID: Oid = Oid::new(2276);
 
 /// Whether a declared type is polymorphic (resolved to a concrete type from the
 /// actual arguments).

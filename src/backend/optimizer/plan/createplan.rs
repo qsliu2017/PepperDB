@@ -823,7 +823,8 @@ fn make_result(
 /// Returns the topmost plan node (or `subplan` unchanged when no upper stage).
 pub fn build_upper_plan(root: &PlannerInfo, subplan: Node) -> Node {
     let parse = &root.parse;
-    let has_grouping = parse.hasAggs || !parse.groupClause.is_empty();
+    let has_grouping =
+        parse.hasAggs || !parse.groupClause.is_empty() || parse.havingQual.is_some();
     let has_windows = parse.hasWindowFuncs || !parse.windowClause.is_empty();
     let has_distinct = !parse.distinctClause.is_empty();
     let has_sort = !parse.sortClause.is_empty();
@@ -841,7 +842,19 @@ pub fn build_upper_plan(root: &PlannerInfo, subplan: Node) -> Node {
 
     // 1) Grouping / aggregation.
     if has_grouping {
-        plan = create_agg_plan(root, plan);
+        if parse.havingQual.is_some() && !parse.hasAggs && parse.groupClause.is_empty() {
+            // PG create_degenerate_grouping_paths: HAVING with no aggregates and
+            // no GROUP BY emits 0 or 1 row; neither HAVING nor the tlist can
+            // reference a Var, so throw away the plan-so-far and gate a childless
+            // Result on the HAVING qual (the table is never scanned).
+            plan = Node::Result(Box::new(make_result(
+                root.processed_tlist.clone(),
+                parse.havingQual.clone(),
+                None,
+            )));
+        } else {
+            plan = create_agg_plan(root, plan);
+        }
     }
 
     // 1b) Window functions (one WindowAgg per distinct window, each with a Sort
@@ -1005,10 +1018,14 @@ fn create_project_set_plan(root: &PlannerInfo, subplan: Node) -> Node {
 /// strategy is AGG_PLAIN for whole-table aggregation (no GROUP BY) and AGG_SORTED
 /// otherwise, with a `Sort` on the grouping columns inserted below. The Agg's tlist
 /// is the final `processed_tlist` (Vars + Aggrefs); `grpColIdx`/`grpOperators` come
-/// from the group clause resolved against the child's output columns.
+/// from the group clause resolved against the child's output columns. The HAVING
+/// qual becomes the Agg's qual (implicit-AND form), evaluated per finalized group.
 fn create_agg_plan(root: &PlannerInfo, subplan: Node) -> Node {
     let group_clause = root.parse.groupClause.clone();
     let final_tlist = root.processed_tlist.clone();
+    let having_qual = crate::backend::nodes::makefuncs::make_ands_implicit(
+        root.parse.havingQual.clone(),
+    );
 
     let (strategy, child) = if group_clause.is_empty() {
         (AggStrategy::PLAIN, subplan)
@@ -1038,7 +1055,7 @@ fn create_agg_plan(root: &PlannerInfo, subplan: Node) -> Node {
     let agg = Agg {
         plan: Plan {
             lefttree: Some(child),
-            ..empty_plan(final_tlist, Vec::new())
+            ..empty_plan(final_tlist, having_qual)
         },
         aggstrategy: strategy,
         aggsplit: AggSplit::SIMPLE,
@@ -1266,10 +1283,33 @@ fn make_limit(
     }
 }
 
+/// The ORDER BY / LIMIT stage above a combined set-operation plan (PG
+/// grouping_planner's create_ordered_paths + limit over the setop rel). The sort
+/// keys resolve by sortgroupref against the top Query targetlist, whose resnos are
+/// the combined plan's output column positions.
+pub fn build_setop_sort_limit(parse: &crate::nodes::parsenodes::Query, subplan: Node) -> Node {
+    let mut plan = subplan;
+    if !parse.sortClause.is_empty() {
+        let keys = sort_keys_from_clause(&parse.sortClause, &parse.targetList);
+        plan = Node::Sort(Box::new(make_sort(plan, keys)));
+    }
+    if parse.limitCount.is_some() || parse.limitOffset.is_some() {
+        plan = Node::Limit(Box::new(make_limit(
+            plan,
+            parse.limitOffset.clone(),
+            parse.limitCount.clone(),
+            parse.limitOption,
+        )));
+    }
+    plan
+}
+
 /// The output targetlist of the given plan node (`Plan.targetlist`).
 fn current_tlist(plan: &Node) -> &[Node] {
     match plan {
         Node::Result(r) => &r.plan.targetlist,
+        Node::Append(a) => &a.plan.targetlist,
+        Node::SetOp(s) => &s.plan.targetlist,
         Node::SeqScan(s) => &s.scan.plan.targetlist,
         Node::IndexScan(s) => &s.scan.plan.targetlist,
         Node::IndexOnlyScan(s) => &s.scan.plan.targetlist,
