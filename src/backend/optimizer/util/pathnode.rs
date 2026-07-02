@@ -113,18 +113,12 @@ pub fn add_path(parent_rel: &mut RelOptInfo, new_path: Box<Path>) {
 /// qual. (PG calls it a "group result" because a FROM-less SELECT is a
 /// degenerate grouping case; the bare quals are jammed in unprocessed.)
 pub fn create_group_result_path(
-    _root: &mut PlannerInfo,
+    root: &mut PlannerInfo,
     rel: &RelOptInfo,
     target: &PathTarget,
     havingqual: Vec<Node>,
 ) -> Box<GroupResultPath> {
-    if !havingqual.is_empty() {
-        // HAVING on a FROM-less SELECT (empty grouping set) is not reachable in
-        // M1; cost_qual_eval over the qual grows with HAVING support.
-        not_yet_reachable("create_group_result_path: havingqual cost");
-    }
-
-    let path = Path {
+    let mut path = Path {
         pathtype: PathType::Result,
         parent: Some(Box::new(rel.parent_snapshot())),
         pathtarget: Some(Box::new(target.clone())),
@@ -144,6 +138,15 @@ pub fn create_group_result_path(
         index_detail: None,
         join_detail: None,
     };
+
+    // Add cost of qual, if any -- ignore its selectivity (rowcount is 1 no matter
+    // what). The havingqual is evaluated once at startup.
+    if !havingqual.is_empty() {
+        let qual_cost =
+            crate::backend::optimizer::path::costsize::cost_qual_eval(&havingqual, root);
+        path.startup_cost += qual_cost.startup + qual_cost.per_tuple;
+        path.total_cost += qual_cost.startup + qual_cost.per_tuple;
+    }
 
     Box::new(GroupResultPath { path, quals: havingqual })
 }

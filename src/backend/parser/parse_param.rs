@@ -357,12 +357,14 @@ mod tests {
             &mut param_types,
             None,
         );
+        // PG resolves a still-unknown output column to text
+        // (resolveTargetListUnknowns -> variable_coerce_param_hook).
         assert_eq!(param_types.len(), 1);
-        assert_eq!(param_types[0], UNKNOWNOID);
+        assert_eq!(param_types[0], crate::catalog::genbki::TEXTOID);
         let Node::Param(param) = first_target_expr(&q) else { panic!("not a Param") };
         assert_eq!(param.paramkind, ParamKind::EXTERN);
         assert_eq!(param.paramid, 1);
-        assert_eq!(param.paramtype, UNKNOWNOID);
+        assert_eq!(param.paramtype, crate::catalog::genbki::TEXTOID);
         assert!(query_contains_extern_params(&q));
     }
 }

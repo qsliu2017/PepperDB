@@ -178,6 +178,121 @@ pub fn add_range_table_entry_for_values(
     build_ns_item_from_coltypes(rte_ref, rtindex)
 }
 
+/// PG `addRangeTableEntryForSubquery`: build an `RTE_SUBQUERY` from an
+/// already-transformed sub-`Query`, filling the column type/typmod/collation lists
+/// (and any unspecified eref column names) from the subquery's non-resjunk
+/// targetlist. Subqueries are never permission-checked (no `addRTEPermissionInfo`).
+/// The RTE is added to the rangetable but NOT to the joinlist/namespace -- the
+/// caller does that if appropriate.
+pub fn add_range_table_entry_for_subquery(
+    pstate: &mut ParseState,
+    subquery: Box<crate::nodes::parsenodes::Query>,
+    alias: Option<&crate::nodes::primnodes::Alias>,
+    lateral: bool,
+    in_from_cl: bool,
+) -> ParseNamespaceItem {
+    use crate::backend::nodes::nodeFuncs::{exprCollation, exprType, exprTypmod};
+
+    let mut eref = alias.cloned().unwrap_or_else(|| makeAlias("unnamed_subquery", Vec::new()));
+    let numaliases = eref.colnames.len();
+
+    // Fill in any unspecified alias columns, and extract column type info.
+    let mut coltypes: Vec<Oid> = Vec::new();
+    let mut coltypmods: Vec<i32> = Vec::new();
+    let mut colcollations: Vec<Oid> = Vec::new();
+    let mut varattno = 0;
+    for tlistitem in &subquery.targetList {
+        let Node::TargetEntry(te) = tlistitem else {
+            not_yet_reachable("addRangeTableEntryForSubquery: tlist entry is not a TargetEntry");
+        };
+        if te.resjunk {
+            continue;
+        }
+        varattno += 1;
+        crate::assert!(varattno == i32::from(te.resno));
+        if varattno > numaliases as i32 {
+            let attrname = te.resname.clone().unwrap_or_default();
+            eref.colnames.push(makeString(attrname));
+        }
+        let expr = te
+            .expr
+            .as_ref()
+            .unwrap_or_else(|| not_yet_reachable("addRangeTableEntryForSubquery: tlist has no expr"));
+        coltypes.push(exprType(expr));
+        coltypmods.push(exprTypmod(expr));
+        colcollations.push(exprCollation(expr));
+    }
+    if varattno < numaliases as i32 {
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_INVALID_COLUMN_REFERENCE).errmsg(format!(
+                "table \"{}\" has {} columns available but {} columns specified",
+                eref.aliasname.as_deref().unwrap_or(""), varattno, numaliases
+            ));
+        });
+        unreachable!("ereport(ERROR) diverges");
+    }
+
+    let rte = make_subquery_rte(subquery, alias.cloned(), eref, coltypes, coltypmods, colcollations, lateral, in_from_cl);
+
+    pstate.p_rtable.push(rte);
+    let rtindex = pstate.p_rtable.len() as i32;
+    let rte_ref = &pstate.p_rtable[(rtindex - 1) as usize];
+    let mut nsitem = build_ns_item_from_coltypes(rte_ref, rtindex);
+    // Visible as a relation name only if it had a user-written alias.
+    nsitem.rel_visible = alias.is_some();
+    nsitem
+}
+
+/// Build an `RTE_SUBQUERY` `RangeTblEntry` (PG makeNode + field fill in
+/// addRangeTableEntryForSubquery).
+#[allow(clippy::too_many_arguments, reason = "1:1 port of the RTE_SUBQUERY field set")]
+fn make_subquery_rte(
+    subquery: Box<crate::nodes::parsenodes::Query>,
+    alias: Option<crate::nodes::primnodes::Alias>,
+    eref: crate::nodes::primnodes::Alias,
+    coltypes: Vec<Oid>,
+    coltypmods: Vec<i32>,
+    colcollations: Vec<Oid>,
+    lateral: bool,
+    in_from_cl: bool,
+) -> RangeTblEntry {
+    RangeTblEntry {
+        alias: alias.map(Box::new),
+        eref: Some(Box::new(eref)),
+        rtekind: RTEKind::SUBQUERY,
+        relid: InvalidOid,
+        inh: false,
+        relkind: 0,
+        rellockmode: 0,
+        perminfoindex: 0,
+        tablesample: None,
+        subquery: Some(subquery),
+        security_barrier: false,
+        jointype: JoinType::INNER,
+        joinmergedcols: 0,
+        joinaliasvars: Vec::new(),
+        joinleftcols: Vec::new(),
+        joinrightcols: Vec::new(),
+        join_using_alias: None,
+        functions: Vec::new(),
+        funcordinality: false,
+        tablefunc: None,
+        values_lists: Vec::new(),
+        ctename: None,
+        ctelevelsup: 0,
+        self_reference: false,
+        coltypes,
+        coltypmods,
+        colcollations,
+        enrname: None,
+        enrtuples: 0.0,
+        groupexprs: Vec::new(),
+        lateral,
+        inFromCl: in_from_cl,
+        securityQuals: Vec::new(),
+    }
+}
+
 /// PG `addRangeTableEntryForFunction`: build an `RTE_FUNCTION` from the
 /// transformed function expression(s), determine each function's result columns
 /// (scalar -> a single column named after the function; composite/record -> the

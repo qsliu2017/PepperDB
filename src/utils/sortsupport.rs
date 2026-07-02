@@ -278,6 +278,8 @@ fn shim_comparator_for(cmp_func: Oid) -> SortComparator {
         c if c == f::F_BTINT4CMP => ssup_datum_int32_cmp,
         c if c == f::F_BTINT8CMP => ssup_datum_signed_cmp,
         c if c == f::F_BTTEXTCMP => call_bttextcmp,
+        c if c == f::F_BPCHARCMP => call_bpcharcmp,
+        c if c == f::F_BTNAMECMP => call_btnamecmp,
         c if c == f::F_DATE_CMP => call_date_cmp,
         c if c == f::F_NUMERIC_CMP => call_numeric_cmp,
         c if c == f::F_BTINT2CMP => call_btint2cmp,
@@ -310,6 +312,12 @@ fn call_cmp(cmp_func: Oid, x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
 
 fn call_bttextcmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
     call_cmp(crate::utils::fmgroids::F_BTTEXTCMP, x, y, ssup)
+}
+fn call_btnamecmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
+    call_cmp(crate::utils::fmgroids::F_BTNAMECMP, x, y, ssup)
+}
+fn call_bpcharcmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
+    call_cmp(crate::utils::fmgroids::F_BPCHARCMP, x, y, ssup)
 }
 fn call_date_cmp(x: Datum, y: Datum, ssup: &SortSupportData) -> i32 {
     call_cmp(crate::utils::fmgroids::F_DATE_CMP, x, y, ssup)
@@ -375,7 +383,7 @@ const BTORDER_PROC: i16 = 1;
 
 /// PG `get_ordering_op_properties` (M5 static subset): map a btree "<"/">"
 /// ordering operator OID to `(opfamily, opcintype, cmptype)`. Covers the seeded
-/// single-type int2/int4/int8/oid/text/date/numeric btree ordering operators.
+/// single-type int2/int4/int8/oid/name/text/date/numeric btree ordering operators.
 fn get_ordering_op_properties(opno: Oid) -> Option<(Oid, Oid, crate::access::cmptype::CompareType)> {
     use crate::access::cmptype::CompareType::{Gt, Lt};
     // (opfamily, opcintype) for each btree default opclass family; OIDs from the
@@ -386,14 +394,17 @@ fn get_ordering_op_properties(opno: Oid) -> Option<(Oid, Oid, crate::access::cmp
     const DATETIME_OPS: Oid = Oid::new(434); // btree/datetime_ops
     const NUMERIC_OPS: Oid = Oid::new(1988); // btree/numeric_ops
     const BOOL_OPS: Oid = Oid::new(424); // btree/bool_ops
+    const BPCHAR_OPS: Oid = Oid::new(426); // btree/bpchar_ops
     const INT2: Oid = Oid::new(21);
     const INT4: Oid = Oid::new(23);
     const INT8: Oid = Oid::new(20);
     const OID_T: Oid = Oid::new(26);
     const TEXT: Oid = Oid::new(25);
+    const NAME: Oid = Oid::new(19);
     const DATE: Oid = Oid::new(1082);
     const NUMERIC: Oid = Oid::new(1700);
     const BOOL: Oid = Oid::new(16);
+    const BPCHAR: Oid = Oid::new(1042);
     let (family, intype, cmp) = match opno.get() {
         58 => (BOOL_OPS, BOOL, Lt),      // boollt
         59 => (BOOL_OPS, BOOL, Gt),      // boolgt
@@ -407,6 +418,11 @@ fn get_ordering_op_properties(opno: Oid) -> Option<(Oid, Oid, crate::access::cmp
         610 => (OID_OPS, OID_T, Gt),     // oidgt
         664 => (TEXT_OPS, TEXT, Lt),     // text_lt
         666 => (TEXT_OPS, TEXT, Gt),     // text_gt
+        1058 => (BPCHAR_OPS, BPCHAR, Lt), // bpcharlt
+        1060 => (BPCHAR_OPS, BPCHAR, Gt), // bpchargt
+        // name_ops btree opclass lives in the text_ops family (PG 12+).
+        660 => (TEXT_OPS, NAME, Lt),     // namelt
+        662 => (TEXT_OPS, NAME, Gt),     // namegt
         1095 => (DATETIME_OPS, DATE, Lt), // date_lt
         1097 => (DATETIME_OPS, DATE, Gt), // date_gt
         1754 => (NUMERIC_OPS, NUMERIC, Lt), // numeric_lt
@@ -466,6 +482,8 @@ fn builtin_opfamily_order_proc(opfamily: Oid, lefttype: Oid, procnum: i16) -> Oi
         20 => f::F_BTINT8CMP,
         26 => f::F_BTOIDCMP,
         25 => f::F_BTTEXTCMP,
+        1042 => f::F_BPCHARCMP,
+        19 => f::F_BTNAMECMP,
         1082 => f::F_DATE_CMP,
         1700 => f::F_NUMERIC_CMP,
         _ => {

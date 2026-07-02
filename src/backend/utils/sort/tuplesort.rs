@@ -203,6 +203,7 @@ pub struct Tuplesortstate {
     tupdesc: Option<TupleDesc>,
     /// Datum variant: the sorted column's type length / by-value flag.
     datum_typbyval: bool,
+    datum_typlen: i32,
 }
 
 // --- comparison ---------------------------------------------------------------
@@ -341,6 +342,7 @@ pub fn tuplesort_begin_heap(
         markpos_eof: false,
         tupdesc: Some(tup_desc),
         datum_typbyval: true,
+        datum_typlen: -1,
     })
 }
 
@@ -358,7 +360,7 @@ pub fn tuplesort_begin_datum(
     sortopt: i32,
 ) -> Box<Tuplesortstate> {
     let init = tuplesort_begin_common(work_mem, sortopt);
-    let (_typlen, typbyval) = crate::backend::utils::cache::lsyscache::get_typlenbyval(datum_type);
+    let (typlen, typbyval) = crate::backend::utils::cache::lsyscache::get_typlenbyval(datum_type);
 
     let key = resolve_sort_key(sort_operator, sort_collation, nulls_first_flag, 1);
 
@@ -381,6 +383,7 @@ pub fn tuplesort_begin_datum(
         markpos_eof: false,
         tupdesc: None,
         datum_typbyval: typbyval,
+        datum_typlen: i32::from(typlen),
     })
 }
 
@@ -483,9 +486,8 @@ pub fn tuplesort_putdatum(state: &mut Tuplesortstate, val: Datum, is_null: bool)
     } else if state.datum_typbyval {
         (val, None)
     } else {
-        // A datum sort of a by-ref type carries a single varlena/by-ref column;
-        // deep-copy it (typlen -1 covers varlena, which is the reachable case).
-        crate::utils::datum::datum_copy_owned(val, false, -1)
+        // Deep-copy the by-ref value (varlena or fixed-length, e.g. name).
+        crate::utils::datum::datum_copy_owned(val, false, state.datum_typlen)
     };
     let stup = SortTuple {
         body: SortTupleBody::Datum { backing },
@@ -903,6 +905,7 @@ mod tests {
             markpos_eof: false,
             tupdesc: Some(desc),
             datum_typbyval: true,
+            datum_typlen: -1,
         });
         set_int4_key(&mut state, 0, 1, reverse, nulls_first);
         state
@@ -1015,6 +1018,7 @@ mod tests {
             markpos_eof: false,
             tupdesc: Some(desc.clone()),
             datum_typbyval: true,
+            datum_typlen: -1,
         });
         set_int4_key(&mut st, 0, 1, false, false);
         set_int4_key(&mut st, 1, 2, false, false);
@@ -1060,6 +1064,7 @@ mod tests {
             markpos_eof: false,
             tupdesc: None,
             datum_typbyval: true,
+            datum_typlen: -1,
         });
         st.sort_keys[0].comparator = Some(ssup_datum_int32_cmp);
 
@@ -1169,6 +1174,7 @@ mod tests {
             markpos_eof: false,
             tupdesc: Some(Arc::clone(&desc)),
             datum_typbyval: true,
+            datum_typlen: -1,
         });
 
         // Feed rows out of key order; each text datum points into a per-row buffer

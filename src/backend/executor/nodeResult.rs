@@ -12,7 +12,8 @@ use crate::nodes::plannodes::Result as ResultPlan;
 use crate::nodes::nodes::Node;
 use crate::executor::tuptable::{ExecClearTuple, TupleTableSlot};
 
-use crate::backend::executor::execExpr::exec_init_qual;
+use crate::backend::executor::execExpr::{exec_init_qual, exec_qual};
+use crate::backend::nodes::makefuncs::make_ands_implicit;
 use crate::backend::executor::execTuples::{exec_store_virtual_tuple, exec_type_from_tl, TTS_OPS_VIRTUAL};
 use crate::backend::executor::execUtils::{
     create_expr_context, exec_assign_projection_info, reset_expr_context,
@@ -55,12 +56,13 @@ pub fn exec_init_result(node: &ResultPlan, estate: &mut EState<'_>, eflags: i32)
     // ExecAssignProjectionInfo: build the projection (inputDesc = None).
     exec_assign_projection_info(&mut ps, None);
 
-    // ExecInitQual on plan.qual (empty) and resconstantqual.
+    // ExecInitQual on plan.qual (empty) and resconstantqual. resconstantqual is
+    // stored as a single boolean expr; split to implicit-AND form for ExecInitQual.
     ps.qual = exec_init_qual(&node.plan.qual, None);
-    let resconstantqual = match &node.resconstantqual {
-        None => None,
-        Some(_) => unimplemented!("ExecInitResult: resconstantqual not yet reachable"),
-    };
+    let resconstantqual = node
+        .resconstantqual
+        .as_ref()
+        .and_then(|q| exec_init_qual(&make_ands_implicit(Some(q.clone())), None));
 
     Box::new(ResultState {
         ps,
@@ -80,10 +82,22 @@ pub fn exec_init_result(node: &ResultPlan, estate: &mut EState<'_>, eflags: i32)
 pub fn exec_result(node: &mut ResultState) -> Option<&mut TupleTableSlot> {
     crate::miscadmin::check_for_interrupts();
 
-    // rs_checkqual is false on the M1 path (no resconstantqual); the one-time
-    // qual test grows with that field.
+    // Check constant qualifications like (2 > 1), if not already done. On failure
+    // the Result emits no rows.
     if node.rs_checkqual {
-        unimplemented!("ExecResult: resconstantqual evaluation not yet reachable");
+        let qual_result = {
+            let econtext = node
+                .ps
+                .ps_expr_context
+                .as_mut()
+                .unwrap_or_else(|| unimplemented!("ExecResult: no exprcontext"));
+            exec_qual(node.resconstantqual.as_deref_mut(), econtext)
+        };
+        node.rs_checkqual = false;
+        if !qual_result {
+            node.rs_done = true;
+            return None;
+        }
     }
 
     if let Some(ec) = node.ps.ps_expr_context.as_mut() {

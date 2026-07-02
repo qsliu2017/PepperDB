@@ -919,11 +919,16 @@ fn set_result_refs(root: &mut PlannerInfo, mut plan: Result, rtoffset: usize) ->
     }
 
     // Childless Result: fix_scan_list over the tlist. For a const tlist there are
-    // no Vars (and no ROWID_VARs) to rewrite, so this is identity. resconstantqual
-    // is NULL on the const path.
+    // no Vars (and no ROWID_VARs) to rewrite, so this is identity.
     fix_scan_tlist_identity(&plan.plan.targetlist, rtoffset);
     crate::assert!(plan.plan.qual.is_empty());
-    crate::assert!(plan.resconstantqual.is_none());
+
+    // resconstantqual = fix_scan_expr(root, resconstantqual, rtoffset). A FROM-less
+    // SELECT's WHERE quals reference no Vars, so the fixup is identity.
+    if rtoffset != 0 {
+        not_yet_reachable("set_plan_refs: non-zero rtoffset resconstantqual fixup");
+    }
+    fix_scan_expr_identity(plan.resconstantqual.as_ref());
 
     plan
 }

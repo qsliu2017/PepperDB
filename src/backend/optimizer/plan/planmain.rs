@@ -186,16 +186,30 @@ fn jointree_fromlist(root: &PlannerInfo) -> Vec<crate::nodes::nodes::Node> {
 /// Build the dummy RTE_RESULT rel and its single Result path (the FROM-less SELECT
 /// degenerate-grouping case). The reltarget carries the const tlist.
 fn build_result_rel_with_path(root: &mut PlannerInfo, reltarget: PathTarget) -> RelOptInfo {
+    use crate::backend::nodes::makefuncs::make_ands_implicit;
+
     let mut final_rel = make_result_rel(reltarget);
     let reltarget_clone = final_rel
         .reltarget
         .clone()
         .unwrap_or_else(|| not_yet_reachable("query_planner: missing reltarget"));
-    let grp = create_group_result_path(root, &final_rel, &reltarget_clone, Vec::new());
-    crate::assert!(grp.quals.is_empty());
+    // PG query_planner: create_group_result_path(root, final_rel, reltarget,
+    // (List *) parse->jointree->quals). A FROM-less SELECT's WHERE clause becomes
+    // the Result node's one-time resconstantqual (implicit-AND form).
+    let havingqual = make_ands_implicit(jointree_quals(root));
+    let grp = create_group_result_path(root, &final_rel, &reltarget_clone, havingqual);
     add_path(&mut final_rel, Box::new(grp.path));
     set_cheapest(&mut final_rel);
     final_rel
+}
+
+/// The FROM-less jointree's WHERE quals (a single boolean expr, or None).
+fn jointree_quals(root: &PlannerInfo) -> Option<crate::nodes::nodes::Node> {
+    use crate::nodes::nodes::Node;
+    match root.parse.jointree.as_ref() {
+        Some(Node::FromExpr(f)) => f.quals.clone(),
+        _ => None,
+    }
 }
 
 /// Build the base RelOptInfo for the relation at RT index `rti`, fill it from the

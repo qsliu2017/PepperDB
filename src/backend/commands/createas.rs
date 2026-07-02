@@ -71,7 +71,12 @@ pub struct DrIntoRel {
 
 impl DrIntoRel {
     fn new(into: Box<IntoClause>, stash: IntoRelStash) -> Self {
-        let store = crate::backend::utils::sort::tuplestore::tuplestore_begin_heap(true, false, 1024);
+        // PG's intorel_receive inserts rows into the (already-created) relation
+        // directly, so CTAS is never bounded by work_mem. This port stashes the
+        // rows in a tuplestore and drains it after creating the relation, so the
+        // store must not spill (BufFile is untranslated): uncap it.
+        let store =
+            crate::backend::utils::sort::tuplestore::tuplestore_begin_heap(true, false, i32::MAX);
         Self { into, store: Some(store), tupdesc: None, stash }
     }
 }

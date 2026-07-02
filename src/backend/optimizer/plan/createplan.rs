@@ -734,12 +734,17 @@ fn empty_plan(tlist: Vec<Node>, qual: Vec<Node>) -> Plan {
 fn create_group_result_plan(root: &mut PlannerInfo, best_path: &Path) -> Result {
     let tlist = build_path_tlist(root, best_path);
 
-    // best_path->quals are the GroupResultPath's bare clauses; M1 has none. The
-    // skeleton stores the embedded Path in the rel pathlist (planmain), so the
-    // quals (always empty on the const path) are not carried here.
-    let quals: Option<Node> = None;
+    // PG: quals = order_qual_clauses(root, best_path->quals), stored as the Result
+    // node's one-time resconstantqual. The port's only Result path is the FROM-less
+    // SELECT, whose quals are parse->jointree->quals; carry them straight from the
+    // parse tree (a single boolean expr, split into implicit-AND form by
+    // ExecInitResult). None when the SELECT has no WHERE clause.
+    let resconstantqual = match root.parse.jointree.as_ref() {
+        Some(Node::FromExpr(f)) => f.quals.clone(),
+        _ => None,
+    };
 
-    let mut plan = make_result(tlist, quals, None);
+    let mut plan = make_result(tlist, resconstantqual, None);
     copy_generic_path_info(&mut plan.plan, best_path);
     plan
 }

@@ -213,6 +213,8 @@ fn type_cmp(typeid: Oid, a: Datum, b: Datum) -> i32 {
         Oid::INT8OID => Oid::F_BTINT8CMP,
         Oid::OIDOID => Oid::F_BTOIDCMP,
         Oid::TEXTOID => Oid::F_BTTEXTCMP,
+        Oid::BPCHAROID => Oid::F_BPCHARCMP,
+        Oid::NAMEOID => Oid::F_BTNAMECMP,
         Oid::FLOAT4OID => Oid::F_BTFLOAT4CMP,
         Oid::FLOAT8OID => Oid::F_BTFLOAT8CMP,
         Oid::NUMERICOID => Oid::F_NUMERIC_CMP,

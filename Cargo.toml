@@ -74,3 +74,9 @@ futures-util = "0.3"
 # unused (we feed our own tokens) but harmless; keep it minimal.
 lalrpop-util = "0.22"
 logos = "0.15"
+
+# Optimize build scripts + their deps (lalrpop): unoptimized LR(1) table
+# construction on the keyword-category grammar takes 10+ minutes; -O3 makes
+# grammar regeneration tolerable. One-time cost: lalrpop itself recompiles.
+[profile.dev.build-override]
+opt-level = 3

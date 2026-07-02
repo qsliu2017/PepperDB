@@ -613,6 +613,16 @@ pub fn subquery_planner(
             // A subquery RTE flattened by pull_up_subqueries: dead (subquery = None),
             // no RangeTblRef left in the jointree, nothing references its varno.
             crate::nodes::parsenodes::RTEKind::SUBQUERY if rte.subquery.is_none() => {}
+            // A LIVE subquery RTE (not simple enough to pull up: LIMIT, GROUP BY,
+            // DISTINCT, ...) needs the SubqueryScan path -- untranslated. Raise a
+            // catchable feature error (0A000) so the session survives, instead of
+            // a grow-guard panic that drops the connection.
+            crate::nodes::parsenodes::RTEKind::SUBQUERY => {
+                crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+                    e.errcode(crate::utils::errcodes::ERRCODE_FEATURE_NOT_SUPPORTED)
+                        .errmsg("subqueries in FROM are not supported yet (SubqueryScan)".to_owned());
+                });
+            }
             other => not_yet_reachable(&format!("subquery_planner: RTE kind {other:?}")),
         }
     }

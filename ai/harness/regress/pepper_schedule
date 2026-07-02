@@ -14,9 +14,11 @@
 # ACTIVE (PASS today)
 # --------------------------------------------------------------------------
 # test_setup: the trimmed shared fixtures (INT2_TBL, INT4_TBL, CHAR_TBL,
-# VARCHAR_TBL). run.sh swaps in ai/harness/regress/test_setup_pepper.sql for this
-# slot and classifies it by "loaded without error" (its output intentionally
-# differs from upstream). Must be FIRST so downstream tests see its tables.
+# VARCHAR_TBL, TEXT_TBL, an EMPTY INT8_TBL, and -- unblocker pass B -- the
+# COPY-loaded onek/tenk1 plus onek2/tenk2 via CTAS). run.sh swaps in
+# ai/harness/regress/test_setup_pepper.sql for this slot and classifies it by
+# "loaded without error" (its output intentionally differs from upstream).
+# Must be FIRST so downstream tests see its tables.
 test: test_setup
 # boolean: the bool type surface (input/output, the six comparison operators +
 # casts, IS [NOT] TRUE/FALSE/UNKNOWN, TRUE/FALSE literals, `AS <keyword>` column
@@ -42,6 +44,14 @@ test: md5
 # now; these two tests don't use it.)
 test: char
 test: varchar
+# comments: FULL PASS as of unblocker pass B -- needed (1) nested /* */ block
+# comments in the lexer (scan.rs skip-callback), (2) unknown-literal output
+# columns resolved to text (PG resolveTargetListUnknowns in analyze), and
+# (3) `AS second` (SECOND_P keyword) -- the full-kwlist terminal coverage.
+test: comments
+# portals_p2: FULL PASS as of unblocker pass B -- it only needed the onek
+# fixture (COPY FROM file + `name` columns) restored in test_setup.
+test: portals_p2
 #
 # Step 08 also landed: generate_series (int4/int8) as a materialized SRF-in-FROM,
 # gcd/lcm(int8), and the funcapi SRF ValuePerCall machinery. The step's remaining
@@ -64,10 +74,12 @@ test: varchar
 #                     `(a) AS` (DEFERRED here to keep the LALR(1) table from blowing up
 #                     -- CreateStmt/CTAS are unified; the `( cols )` list collides with
 #                     the `( elts )` element list). Left OUT until those land.]
-#   select_distinct  [needs the `onek` fixture (COPY-from-file, still unloadable) AND
-#                     SRF-in-target-list execution (its CTAS lines are
-#                     `CREATE TABLE distinct_group_N AS SELECT DISTINCT g%1000 FROM
-#                     generate_series(...)`). onek-gated -- left OUT.]
+#   select_distinct  [onek fixture NOW LOADS (pass B). Verified 2026-07-02, still
+#                     blocked by: `SELECT DISTINCT ... FROM (subquery)` -- the live
+#                     SUBQUERY-RTE / SubqueryScan planner path (now a catchable
+#                     0A000 instead of a dropped connection) -- plus the CTAS
+#                     `AS SELECT DISTINCT g%1000 FROM generate_series(...)` lines.
+#                     Left OUT.]
 #
 # --------------------------------------------------------------------------
 # BLOCKED -- verified NEW-DIFF against the current server (2026-07-01), each
@@ -75,26 +87,33 @@ test: varchar
 # schedule stays a true green baseline; add each back in the step that unblocks
 # it. Empirical blocker in brackets.
 # --------------------------------------------------------------------------
-# Tier-0 "READY" from static analysis -- NONE actually pass yet:
-#   comments        [needs `AS <keyword>` alias + multi-line/leading block
-#                    comments + unknown-literal typing (type 705)]
-#   sanity_check    [needs catalog regexp/joins over pg_class/pg_index et al.]
-#   misc_sanity     [relation "pg_depend"/"pg_shdepend" do not exist yet]
-#   combocid        [CREATE TEMP TABLE syntax; then aborted-txn cascade]
-#   bitmapops       [large indexed fixture + planner paths]
-#   portals_p2      [depends on the onek fixture (COPY-from-file, not loadable)]
-#   select_having   [char(n) typmod + HAVING clause syntax -> string/agg steps]
+# Tier-0 "READY" from static analysis -- comments + portals_p2 went ACTIVE in
+# unblocker pass B (2026-07-02); the rest re-verified NEW-DIFF:
+#   sanity_check    [catalog relations are not SQL-queryable at all yet
+#                    ("relation pg_class does not exist" over the wire); then the
+#                    LEFT JOIN + `~` regex over catalogs + indkey[0] subscripts]
+#   misc_sanity     [pg_depend / pg_shdepend do not exist; aclitem[]/anyarray
+#                    catalog column output]
+#   combocid        [`SELECT ctid,cmin,*` system columns don't resolve; the
+#                    `INSERT ... SELECT 1 LIMIT 0` source needs SubqueryScan (a
+#                    live un-pullable SUBQUERY RTE -- now a catchable 0A000, was
+#                    a dropped connection); then the aborted-txn cascade]
+#   bitmapops       [CREATE TABLE ... WITH (autovacuum_enabled = false) --
+#                    reloptions, step 13; then index/bitmap planner paths]
+#   select_having   [HAVING has NO grammar production or planner support at all
+#                    (subquery_planner has_having_qual guard) -> the aggregate
+#                    step; also `SELECT 1 AS one HAVING 1 < 2` FROM-less agg]
 #
 # Tier-1 simple types -- all NEW-DIFF:
-#   int2, int4      [boolean now ACTIVE above (KNOWN-DIFF on the one SRF-in-FROM
-#                    line). int2/int4 build on the SAME shared infra now landed
-#                    for boolean -- keyword ColLabel aliases, typed literals,
-#                    LINE/caret error position, unknown->text coercion, the sort
-#                    varlena fix, function-by-name warming. They STILL need
-#                    int2/int4-specific bits: int2vector input, `int2 '0'` typed
-#                    literals across more forms, and the `pg_input_error_info(...)`
-#                    SRF (step 08). Re-add each when its remaining blocker lands.]
-#   int8            [int8 INSERT path bugs ("syscache not warm", literal typing)]
+#   int2, int4      [re-verified 2026-07-02 after pass B: still need the int2/int4
+#                    arithmetic + cross-type comparison operators (`*`/`/`/`-`
+#                    over (21,21) and (23,21) are not seeded -- "operator does not
+#                    exist"), the int2vector type, out-of-int4-range literals
+#                    ("numeric literal -2147483648 not supported" -- int8/numeric
+#                    literal input, step 12), and multi-row typed VALUES forms.]
+#   int8            [INT8_TBL now exists EMPTY in test_setup; its rows are still
+#                    blocked on int8 input of unquoted big literals ("numeric
+#                    literal 4567890123456789 not supported" -- step 12)]
 #   float4, float8  [float/numeric input -- numeric step (12); T_Float literal now
 #                    a catchable ERROR (no longer crashes) but not yet computed]
 #   text            [`||` NOW LEXES and text||text resolves (textcat). Verified
@@ -108,24 +127,30 @@ test: varchar
 #                    "function length(integer) does not exist" arg-typed error
 #                    format with LINE/HINT, the TEXT_TBL fixture, to_date
 #                    (datetime step 11), and string_agg/array_agg (aggregate
-#                    steps). Left OUT until those land.]
-#   name            [Step 10 landed name I/O + comparison + a POSIX regex engine +
-#                    the `~`/`!~` operators; `||` now lexes. Verified 2026-07-02,
-#                    name.sql still needs: `name` as a column type in CREATE TABLE
-#                    + `name 'literal'` typed literals (grammar), parse_ident (its
-#                    text[] array result stages on the array builder + `a[1]`
-#                    subscripting + `::name[]` casts), E'...' escape strings,
-#                    repeat()/format() over name, and a DO/PL block (step 23).
-#                    Left OUT.]
+#                    steps). TEXT_TBL now LOADS in test_setup (pass B); block
+#                    comments now lex. Left OUT until the rest lands.]
+#   name            [pass B landed: `name` as a column type + `::name` casts
+#                    (NAME_P in ColId/TypeFunctionName), the name comparison
+#                    operator seeding + warm-set coverage, and btree sortsupport.
+#                    Re-verified 2026-07-02, name.sql still needs: parse_ident
+#                    (text[] result -> array builder + `a[1]` subscripting +
+#                    `::name[]` casts), E'...' escape strings (type "e" errors),
+#                    `~` over name (operator not seeded for (19,unknown)), and
+#                    repeat()/format(). Left OUT.]
 #   strings         [Step 10 landed regexp_* scalars (regexp_replace/match/like/
 #                    count/instr/substr), LIKE/ILIKE, encode/decode helpers, and the
 #                    Spencer-style regex engine; `||` now lexes. strings.sql is XL
 #                    and still blocked by: bytea bit-ops (get/set_bit/byte),
 #                    SIMILAR TO, the SRF regexp_matches/split_to_table (SRF
 #                    machinery), unistr, and bytea<->int casts. Left OUT.]
-#   select_implicit [NOT a string test -- GROUP BY/ORDER BY resjunk + column-
-#                    ambiguity resolution + CTAS-with-count. lower()/upper() (landed
-#                    here) are the only string funcs. Blocked by the resjunk/
-#                    ambiguity planner work. Left OUT.]
-#   union           [UNION/UNION ALL set-op execution -- large diff]
-#   delete          [inline PRIMARY KEY constraint + DELETE table alias/USING]
+#   select_implicit [pass B fixed bpchar ordering (sortsupport 1058/1060) and
+#                    bpchar/name grouping equality (nodeGroup type_cmp), so its
+#                    first GROUP BY sections now match. Still blocked by
+#                    "build_upper_plan: group/sort key not in child output" (the
+#                    resjunk GROUP BY/ORDER BY planner work) + HAVING. Left OUT.]
+#   union           [set-op execution partially exists but
+#                    "transformSetOperationStmt: ORDER BY / LIMIT over a set
+#                    operation" grow-guards, plus numeric/float literals -- large]
+#   delete          [re-verified 2026-07-02: inline column-constraint `PRIMARY
+#                    KEY` in CREATE TABLE and the DELETE alias forms
+#                    (`DELETE FROM t [AS] dt`) are still grammar gaps]

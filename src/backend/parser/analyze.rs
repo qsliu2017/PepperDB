@@ -306,9 +306,13 @@ fn transformSelectStmt(pstate: &mut ParseState, stmt: &SelectStmt) -> Box<Query>
         not_yet_reachable("transformSelectStmt: locking clause");
     }
 
-    // Resolve any still-unresolved output columns as type text. For M1 every
-    // target is already a resolved type (int4 const), so this is a no-op;
-    // resolveTargetListUnknowns grows with UNKNOWN-typed string literals.
+    // PG: resolve any still-unresolved output columns as being type text.
+    if pstate.p_resolve_unknowns {
+        crate::backend::parser::parse_target::resolve_target_list_unknowns(
+            pstate,
+            &mut qry.targetList,
+        );
+    }
 
     qry.rtable = std::mem::take(&mut pstate.p_rtable)
         .into_iter()
@@ -1096,6 +1100,14 @@ async fn transform_select_stmt_async(
         );
     }
 
+    // PG: resolve any still-unresolved output columns as being type text.
+    if pstate.p_resolve_unknowns {
+        crate::backend::parser::parse_target::resolve_target_list_unknowns(
+            pstate,
+            &mut qry.targetList,
+        );
+    }
+
     reject_unsupported_select_clauses(stmt);
 
     finish_query(pstate, &mut qry, qual);
@@ -1482,16 +1494,17 @@ async fn warm_expr_caches(
 ) {
     use crate::backend::catalog::heap::name_data;
     use crate::backend::utils::cache::syscache::{release_sys_cache, search_sys_cache_populate};
-    use crate::catalog::genbki::{BOOLOID, BPCHAROID, INT4OID, TEXTOID, VARCHAROID};
+    use crate::catalog::genbki::{BOOLOID, BPCHAROID, INT4OID, NAMEOID, TEXTOID, VARCHAROID};
     use crate::catalog::pg_namespace::PG_CATALOG_NAMESPACE;
     use crate::catalog::pg_operator::FormData_pg_operator;
     use crate::postgres::{NameGetDatum, ObjectIdGetDatum};
     use crate::utils::syscache::SysCacheIdentifier;
 
     // Candidate operand types: the namespace column types + int4 + bool + the
-    // string types (so `text`/`bpchar`/`varchar` operators warm for FROM-less
-    // string queries whose operands are function results, not columns).
-    let mut types: Vec<Oid> = vec![INT4OID, BOOLOID, TEXTOID, BPCHAROID, VARCHAROID];
+    // string types incl name (so `text`/`bpchar`/`varchar`/`name` operators warm
+    // for FROM-less string queries whose operands are casts/function results,
+    // not columns).
+    let mut types: Vec<Oid> = vec![INT4OID, BOOLOID, TEXTOID, BPCHAROID, VARCHAROID, NAMEOID];
     for nsitem in &pstate.p_namespace {
         for col in &nsitem.nscolumns {
             if col.vartype != Oid::new(0) && !types.contains(&col.vartype) {
@@ -2196,7 +2209,67 @@ async fn transform_insert_stmt(
     let expr_list: Vec<Node> = if select_stmt.is_none() {
         not_yet_reachable("transformInsertStmt: INSERT ... DEFAULT VALUES");
     } else if is_general_select {
-        not_yet_reachable("transformInsertStmt: INSERT ... SELECT (general select source)");
+        // INSERT ... SELECT: transform the source SELECT exactly like a standalone
+        // SELECT, wrap it as a "*SELECT*" RTE_SUBQUERY in the INSERT's rangetable +
+        // joinlist (not the namespace), and select all non-resjunk columns from the
+        // subquery as the source row. Unknown-type consts/params are copied up
+        // as-is so they coerce to the target column type below (PG HACK).
+        let select_node = select_stmt
+            .unwrap_or_else(|| not_yet_reachable("transformInsertStmt: missing SELECT source"));
+
+        // Child ParseState: sees uplevel Params, has its own clean rangetable /
+        // namespace. p_resolve_unknowns=false keeps unknown outputs unresolved.
+        let mut sub_pstate = crate::backend::parser::parse_node::make_child_parsestate(pstate);
+        sub_pstate.p_resolve_unknowns = false;
+        let select_query =
+            Box::pin(transform_stmt_async(shared, &mut sub_pstate, select_node)).await;
+
+        if select_query.commandType != CmdType::SELECT {
+            crate::elog!(
+                crate::utils::elog::ERROR,
+                "unexpected non-SELECT command in INSERT ... SELECT"
+            );
+        }
+
+        // Keep the subquery tlist to build source Vars after the RTE gets an index.
+        let sub_tlist = select_query.targetList.clone();
+
+        let alias = crate::nodes::makefuncs::makeAlias("*SELECT*", Vec::new());
+        let nsitem = crate::backend::parser::parse_relation::add_range_table_entry_for_subquery(
+            pstate,
+            select_query,
+            Some(&alias),
+            false,
+            false,
+        );
+        let rtindex = nsitem.rtindex;
+        crate::backend::parser::parse_relation::add_ns_item_to_query(
+            pstate, nsitem, true, false, false,
+        );
+
+        sub_tlist
+            .iter()
+            .filter_map(|n| match n {
+                Node::TargetEntry(te) if !te.resjunk => Some(te),
+                _ => None,
+            })
+            .map(|te| {
+                let expr = te.expr.as_ref();
+                let copy_as_is = matches!(expr, Some(Node::Const(_) | Node::Param(_)))
+                    && expr.is_some_and(|e| {
+                        crate::backend::nodes::nodeFuncs::exprType(e)
+                            == crate::catalog::genbki::UNKNOWNOID
+                    });
+                if copy_as_is {
+                    expr.cloned()
+                        .unwrap_or_else(|| not_yet_reachable("INSERT ... SELECT: tlist has no expr"))
+                } else {
+                    Node::Var(Box::new(crate::nodes::makefuncs::makeVarFromTargetEntry(
+                        rtindex, te,
+                    )))
+                }
+            })
+            .collect()
     } else {
         // VALUES source.
         let Some(Node::SelectStmt(sel)) = select_stmt else {
@@ -2216,11 +2289,27 @@ async fn transform_insert_stmt(
         }
     };
 
+    // PG transformInsertRow length check: never more expressions than target
+    // columns; fewer is allowed only when no explicit column list was given.
+    if expr_list.len() > icolumns.len() {
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_SYNTAX_ERROR)
+                .errmsg("INSERT has more expressions than target columns".to_string());
+        });
+        unreachable!("ereport(ERROR) diverges");
+    }
+    if !stmt.cols.is_empty() && expr_list.len() < icolumns.len() {
+        crate::ereport!(crate::utils::elog::ERROR, |e: &mut crate::utils::elog::ErrorData| {
+            e.errcode(crate::utils::errcodes::ERRCODE_SYNTAX_ERROR)
+                .errmsg("INSERT has more target columns than expressions".to_string());
+        });
+        unreachable!("ereport(ERROR) diverges");
+    }
+
     // Generate the query targetlist: each expr keyed to its target attno, coerced to
     // the target column's type (PG transformInsertRow -> transformAssignedExpr). The
     // coercion retypes an UNKNOWN literal/NULL to the column type (e.g. `NULL` -> the
     // int4 FK column's null).
-    crate::assert!(expr_list.len() <= icolumns.len());
     let perminfo_index = pstate
         .p_target_nsitem
         .as_ref()

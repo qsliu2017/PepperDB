@@ -53,6 +53,32 @@ pub fn coerce_type(
         return Node::Const(Box::new(retype_unknown_const(con, target_type_id, target_type_mod)));
     }
 
+    // PG: an UNKNOWN Param gets its type assigned via the coerce-param hook
+    // (variable_coerce_param_hook records the inferred type for `$n`).
+    if input_type_id == UNKNOWNOID
+        && matches!(node, Node::Param(_))
+        && let Some(hook) = pstate.p_coerce_param_hook
+    {
+        let Node::Param(param) = node else { unreachable!() };
+        let mut param = *param;
+        if let Some(coerced) =
+            hook(pstate, &mut param, target_type_id, target_type_mod, location)
+        {
+            return coerced;
+        }
+        // Hook declined: proceed with normal coercion over the original Param.
+        return coerce_type(
+            pstate,
+            Node::Param(Box::new(param)),
+            input_type_id,
+            target_type_id,
+            target_type_mod,
+            ccontext,
+            cformat,
+            location,
+        );
+    }
+
     let mut funcid = InvalidOid;
     let pathtype = find_coercion_pathway(target_type_id, input_type_id, ccontext, &mut funcid);
     if pathtype != CoercionPathType::None {

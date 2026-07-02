@@ -23,10 +23,51 @@ pub const EXEC_FLAG_BACKWARD: i32 = 0x0008;
 pub const EXEC_FLAG_MARK: i32 = 0x0010;
 
 /// One stored tuple: the deformed row (PG keeps a flat MinimalTuple chunk).
-#[derive(Clone)]
+/// By-reference values are deep-copied into `owned` at store time: PG's
+/// MinimalTuple is self-contained, so the owned-row model must own the by-ref
+/// datum bytes too (the source slot's memory is recycled after the put).
 pub struct StoredTuple {
     pub values: Vec<Datum>,
     pub isnull: Vec<bool>,
+    /// (attr index, payload) backing each by-ref value in `values`.
+    owned: Vec<(usize, Box<[u8]>)>,
+}
+
+impl StoredTuple {
+    /// Deep-copy a deformed row: by-ref non-null datums (per `tdesc`) are copied
+    /// into owned buffers and `values` re-pointed at them.
+    fn from_row(values: &[Datum], isnull: &[bool], tdesc: &TupleDesc) -> Self {
+        let mut t = Self {
+            values: values.to_vec(),
+            isnull: isnull.to_vec(),
+            owned: Vec::new(),
+        };
+        let natts = (tdesc.natts as usize).min(t.values.len());
+        for i in 0..natts {
+            let attr = tdesc.compact_attr(i);
+            if t.isnull[i] || attr.attbyval {
+                continue;
+            }
+            // cstring (-2): datum_copy_owned only takes -1/positive; pass strlen+1.
+            let typ_len = if attr.attlen == -2 {
+                let p = crate::postgres::DatumGetPointer(t.values[i]).cast::<u8>();
+                let mut len = 0usize;
+                // SAFETY: a non-null cstring datum is NUL-terminated.
+                while unsafe { *p.add(len) } != 0 {
+                    len += 1;
+                }
+                i32::try_from(len + 1).unwrap_or(i32::MAX)
+            } else {
+                i32::from(attr.attlen)
+            };
+            let (d, buf) = crate::utils::datum::datum_copy_owned(t.values[i], false, typ_len);
+            if let Some(b) = buf {
+                t.values[i] = d;
+                t.owned.push((i, b));
+            }
+        }
+        t
+    }
 }
 
 /// Persisted state of a Tuplestore (C `TupStoreStatus`).
@@ -78,7 +119,8 @@ pub struct Tuplestorestate {
 fn stored_tuple_space(t: &StoredTuple) -> i64 {
     let datum_bytes = t.values.len() * core::mem::size_of::<Datum>();
     let null_bytes = t.isnull.len();
-    (datum_bytes + null_bytes + core::mem::size_of::<StoredTuple>()) as i64
+    let owned_bytes: usize = t.owned.iter().map(|(_, b)| b.len()).sum();
+    (datum_bytes + null_bytes + owned_bytes + core::mem::size_of::<StoredTuple>()) as i64
 }
 
 /// C `tuplestore_begin_common`.
@@ -205,28 +247,27 @@ pub fn tuplestore_ateof(state: &Tuplestorestate) -> bool {
     state.readptrs[state.activeptr].eof_reached
 }
 
-/// C `tuplestore_puttupleslot`: deform `slot` and store the row.
+/// C `tuplestore_puttupleslot`: deform `slot` and store the row (deep-copied,
+/// as PG's ExecCopySlotMinimalTuple does).
 pub fn tuplestore_puttupleslot(state: &mut Tuplestorestate, slot: &mut TupleTableSlot) {
     slot_getallattrs(slot);
     let n = slot.nvalid.max(0) as usize;
-    let tuple = StoredTuple {
-        values: slot.values[..n].to_vec(),
-        isnull: slot.isnull[..n].to_vec(),
-    };
+    let tdesc = slot
+        .tupleDescriptor
+        .clone()
+        .unwrap_or_else(|| unreachable!("tuplestore_puttupleslot: slot has a descriptor"));
+    let tuple = StoredTuple::from_row(&slot.values[..n], &slot.isnull[..n], &tdesc);
     tuplestore_puttuple_common(state, tuple);
 }
 
 /// C `tuplestore_putvalues`: store a row from raw value/isnull arrays.
 pub fn tuplestore_putvalues(
     state: &mut Tuplestorestate,
-    _tdesc: &TupleDesc,
+    tdesc: &TupleDesc,
     values: &[Datum],
     isnull: &[bool],
 ) {
-    let tuple = StoredTuple {
-        values: values.to_vec(),
-        isnull: isnull.to_vec(),
-    };
+    let tuple = StoredTuple::from_row(values, isnull, tdesc);
     tuplestore_puttuple_common(state, tuple);
 }
 
@@ -280,7 +321,13 @@ fn writetup(_state: &mut Tuplestorestate, _tuple: &StoredTuple) {
 /// value -- the owned-row model copies on read, where PG returned a pointer into
 /// its internal copy). `None` at end of data. In-memory path is complete; the
 /// disk states stub-call BufFile.
-fn tuplestore_gettuple(state: &mut Tuplestorestate, forward: bool) -> Option<StoredTuple> {
+/// Advance the active read pointer and return the INDEX of the fetched tuple in
+/// `memtuples`. PG's `tuplestore_gettuple` returns a pointer into the store's
+/// own memory (`should_free=false`); returning the index keeps that semantic --
+/// the caller borrows `state.memtuples[idx]`, so by-ref datums copied out of it
+/// stay valid as long as the store does (a returned CLONE would free its owned
+/// payloads at drop and leave the slot's datums dangling).
+fn tuplestore_gettuple(state: &mut Tuplestorestate, forward: bool) -> Option<usize> {
     let activeptr = state.activeptr;
     crate::assert!(forward || (state.readptrs[activeptr].eflags & EXEC_FLAG_BACKWARD) != 0);
 
@@ -296,7 +343,7 @@ fn tuplestore_gettuple(state: &mut Tuplestorestate, forward: bool) -> Option<Sto
                 if readptr.current < memtupcount {
                     let idx = readptr.current;
                     readptr.current += 1;
-                    return Some(state.memtuples[idx].clone());
+                    return Some(idx);
                 }
                 readptr.eof_reached = true;
                 None
@@ -315,7 +362,7 @@ fn tuplestore_gettuple(state: &mut Tuplestorestate, forward: bool) -> Option<Sto
                     crate::assert!(!state.truncated);
                     return None;
                 }
-                Some(state.memtuples[readptr.current - 1].clone())
+                Some(readptr.current - 1)
             }
         }
         TupStoreStatus::WriteFile | TupStoreStatus::ReadFile => {
@@ -325,8 +372,9 @@ fn tuplestore_gettuple(state: &mut Tuplestorestate, forward: bool) -> Option<Sto
 }
 
 /// C `tuplestore_gettupleslot`: fetch the next tuple into `slot`. Returns false
-/// at end of data. (`copy` is irrelevant in the owned-row model -- a fetched row
-/// is always an independent copy.)
+/// at end of data. The slot's by-ref datums point into the store's owned row
+/// (PG `copy=false` semantics: valid until the store is modified or dropped;
+/// `copy` is not needed by any current caller).
 pub fn tuplestore_gettupleslot(
     state: &mut Tuplestorestate,
     forward: bool,
@@ -334,7 +382,8 @@ pub fn tuplestore_gettupleslot(
     slot: &mut TupleTableSlot,
 ) -> bool {
     ExecClearTuple(slot);
-    if let Some(tuple) = tuplestore_gettuple(state, forward) {
+    if let Some(idx) = tuplestore_gettuple(state, forward) {
+        let tuple = &state.memtuples[idx];
         let n = tuple.values.len();
         slot.values[..n].copy_from_slice(&tuple.values);
         slot.isnull[..n].copy_from_slice(&tuple.isnull);

@@ -256,6 +256,31 @@ fn expand_ns_item_vars(
 
 /// PG `FigureColname`: pick a column name for a target without an explicit AS.
 /// Returns "?column?" when nothing can be guessed (e.g. a bare constant).
+/// PG `resolveTargetListUnknowns`: convert any unknown-type targetlist entries to
+/// type TEXT (after all other ways of identifying output column types are done).
+pub fn resolve_target_list_unknowns(pstate: &mut ParseState, targetlist: &mut [Node]) {
+    use crate::catalog::genbki::{TEXTOID, UNKNOWNOID};
+    use crate::nodes::primnodes::{CoercionContext, CoercionForm};
+    for n in targetlist.iter_mut() {
+        let Node::TargetEntry(te) = n else { continue };
+        let Some(expr) = te.expr.take() else { continue };
+        if crate::nodes::nodeFuncs::exprType(&expr) == UNKNOWNOID {
+            te.expr = Some(crate::backend::parser::parse_coerce::coerce_type(
+                pstate,
+                expr,
+                UNKNOWNOID,
+                TEXTOID,
+                -1,
+                CoercionContext::IMPLICIT,
+                CoercionForm::IMPLICIT_CAST,
+                -1,
+            ));
+        } else {
+            te.expr = Some(expr);
+        }
+    }
+}
+
 pub fn FigureColname(node: &Node) -> String {
     let mut name: Option<&str> = None;
     figure_colname_internal(node, &mut name);

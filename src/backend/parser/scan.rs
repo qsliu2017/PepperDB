@@ -77,6 +77,14 @@ pub enum Token {
 #[logos(skip r"[ \t\n\r\x0c]+")]            // scanner_isspace whitespace
 #[logos(skip r"--[^\n]*")]                   // SQL line comment
 enum Raw {
+    // PG {xcstart}..{xcstop}: C-style block comment, NESTED per SQL spec (PG
+    // scan.l's <xc> state tracks depth). logos regexes cannot express nesting,
+    // so the callback consumes up to the matching close and skips. An
+    // unterminated comment consumes to EOF (the parser then reports a syntax
+    // error at end of input; PG raises "unterminated /* comment" in the scanner).
+    #[token("/*", skip_block_comment)]
+    BlockComment,
+
     // identifier: PG `{ident_start}{ident_cont}*` for the ASCII case, plus UTF-8
     // letters (PG accepts high-bit bytes in identifiers under multibyte encodings).
     #[regex(r"[A-Za-z_\x80-\u{10FFFF}][A-Za-z_0-9$\x80-\u{10FFFF}]*", |lex| lex.slice().to_string())]
@@ -136,6 +144,29 @@ enum Raw {
     #[token("=")] Eq,
 }
 
+/// Consume a (nested) block comment body after the opening `/*` (PG scan.l xc).
+fn skip_block_comment(lex: &mut logos::Lexer<Raw>) -> logos::Skip {
+    let bytes = lex.remainder().as_bytes();
+    let mut depth = 1usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            depth += 1;
+            i += 2;
+        } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+            depth -= 1;
+            i += 2;
+            if depth == 0 {
+                break;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    lex.bump(i);
+    logos::Skip
+}
+
 /// Strip the surrounding double quotes and collapse doubled `""` to a single `"`.
 fn unquote_dconst(slice: &str) -> String {
     slice[1..slice.len() - 1].replace("\"\"", "\"")
@@ -162,6 +193,8 @@ pub fn lex(src: &str) -> impl Iterator<Item = Result<(Loc, Token, Loc), LexError
         let end = span.end as i32;
         let Ok(raw) = res else { return Err(LexError { location: start }) };
         let tok = match raw {
+            // Skip-callback variant; logos never yields it.
+            Raw::BlockComment => unreachable!("BlockComment is skipped by its callback"),
             Raw::Word(w) => word_token(&w),
             // A delimited identifier is a plain Ident (case-preserved, unfolded).
             Raw::QuotedIdent(s) => Token::Ident(s),

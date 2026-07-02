@@ -1702,6 +1702,8 @@ const M3_PROC_NAMES: &[&str] = &[
     "initcap",
     // text comparison + concat oprcode support (unique names).
     "texteq", "textne", "text_lt", "text_le", "text_gt", "text_ge", "bttextcmp", "textcat",
+    // name comparison oprcode support (unique names; catalog name columns).
+    "nameeq", "namene", "namelt", "namele", "namegt", "namege", "btnamecmp",
     // step 10 string scalar functions (unique names) the tests call. reverse(3062)
     // is seeded by OID below. concat/concat_ws/format are variadic-`any` and stage
     // on get_call_expr_argtype, so they are not seeded here.
@@ -1780,6 +1782,13 @@ const M3_OPERATORS: &[(&str, &str, &str)] = &[
     (">", "bpchar", "bpchar"),
     ("<=", "bpchar", "bpchar"),
     (">=", "bpchar", "bpchar"),
+    // name comparison operators (oprcode nameeq/...); catalog name columns.
+    ("=", "name", "name"),
+    ("<>", "name", "name"),
+    ("<", "name", "name"),
+    (">", "name", "name"),
+    ("<=", "name", "name"),
+    (">=", "name", "name"),
     // text concatenation operator (oprcode textcat).
     ("||", "text", "text"),
 ];
